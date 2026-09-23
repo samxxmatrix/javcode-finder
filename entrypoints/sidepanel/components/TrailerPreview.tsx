@@ -5,9 +5,11 @@ import {
 } from "../../../src/lib/javtrailers";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { getSettings } from "../../../src/lib/settings";
+import type { SupportedLocale } from "../../../src/lib/types";
 
 interface TrailerPreviewProps {
 	code: string;
+	locale: SupportedLocale;
 	t: LocaleMessages;
 	onClose: () => void;
 }
@@ -15,6 +17,8 @@ interface TrailerPreviewProps {
 interface Resolution {
 	contentId: string | null;
 	detailUrl: string | null;
+	// 影片完整标题（来自 javtrailers 卡片）
+	title: string | null;
 	// 解析进行中：期间不加载封面、不判定失败，避免"先报错后显示封面"的闪烁
 	resolving: boolean;
 }
@@ -23,15 +27,21 @@ type PlayerStatus = "idle" | "loading" | "playing" | "not_found" | "failed";
 
 export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	code,
+	locale,
 	t,
 	onClose,
 }) => {
 	const [coverError, setCoverError] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
+	// 标题译文（中文/繁中界面下通过谷歌翻译获取；失败或英文界面保持 null）
+	const [translatedTitle, setTranslatedTitle] = useState<string | null>(null);
+	// 标题显示就绪：翻译流程结束（成功/失败）或英文界面直接跳过。期间不渲染标题区，避免原文→译文的闪烁
+	const [titleReady, setTitleReady] = useState(false);
 	// 通过 background 解析到的 Content ID（javtrailers 完整格式，含前缀与补零）
 	const [resolution, setResolution] = useState<Resolution>({
 		contentId: null,
 		detailUrl: null,
+		title: null,
 		resolving: true,
 	});
 	const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -52,11 +62,18 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				const res = (await browser.runtime.sendMessage({
 					type: "jt:resolve-detail",
 					code,
-				})) as { detailUrl?: string | null; contentId?: string | null } | undefined;
+				})) as
+					| {
+							detailUrl?: string | null;
+							contentId?: string | null;
+							title?: string | null;
+					  }
+					| undefined;
 				if (!disposed) {
 					setResolution({
 						contentId: res?.contentId || null,
 						detailUrl: res?.detailUrl || null,
+						title: res?.title || null,
 						resolving: false,
 					});
 				}
@@ -85,6 +102,40 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	useEffect(() => {
 		setCoverError(false);
 	}, [coverUrl]);
+
+	// 中文/繁中界面下翻译标题；英文界面不翻译。失败保持 null（回退原文）
+	useEffect(() => {
+		if (!resolution.title) return;
+		if (locale === "en") {
+			setTitleReady(true);
+			return;
+		}
+		setTitleReady(false);
+		let disposed = false;
+		void (async () => {
+			try {
+				const res = (await browser.runtime.sendMessage({
+					type: "jt:translate",
+					text: resolution.title,
+					target: locale === "zh-hant" ? "zh-TW" : "zh-CN",
+				})) as { translated?: string } | undefined;
+				if (!disposed) {
+					if (res?.translated) {
+						setTranslatedTitle(res.translated);
+					}
+					setTitleReady(true);
+				}
+			} catch {
+				// 翻译失败：保持 null，标题区显示原文
+				if (!disposed) {
+					setTitleReady(true);
+				}
+			}
+		})();
+		return () => {
+			disposed = true;
+		};
+	}, [resolution.title, locale]);
 
 	// 卸载或切换番号时销毁 hls 实例，停止后台拉流
 	useEffect(() => {
@@ -221,6 +272,14 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						</div>
 					))}
 			</div>
+
+			{resolution.title && titleReady && (
+				<div className="trailer-preview__title-area">
+					<p className="trailer-preview__title-text">
+						{translatedTitle || resolution.title}
+					</p>
+				</div>
+			)}
 
 			{(status === "not_found" || status === "failed") && (
 				<div className="trailer-preview__error" role="status">

@@ -87,10 +87,9 @@ export const CodeList: React.FC<CodeListProps> = ({
 				<h3 className="unmatched-section__title">
 					{t.codesListTitle}{" "}
 					<span className="unmatched-section__count">
-						({uniqueCodes.length})
+						{uniqueCodes.length}
 					</span>
 				</h3>
-				<p className="unmatched-section__desc">{t.codesListDesc}</p>
 			</div>
 
 			<ul className="unmatched-section__list">

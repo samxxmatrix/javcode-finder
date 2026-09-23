@@ -9,7 +9,7 @@ import {
 const CARD = (
 	contentId: string,
 	alt: string,
-) => `<div class="card-container"><a href="/video/${contentId}" class="video-link" title="some title"><div class="card video-card"><div class="card-img-container"><img data-src="https://images.javtrailers.com/digital/video/${contentId}/${contentId}ps.w360.webp" alt="${alt}" class="card-img-top video-image"><span class="badge duration-badge">2:58:00</span></div></div></a></div>`;
+) => `<div class="card-container"><a href="/video/${contentId}" class="video-link" title="Some movie title with &amp; symbols"><div class="card video-card"><div class="card-img-container"><img data-src="https://images.javtrailers.com/digital/video/${contentId}/${contentId}ps.w360.webp" alt="${alt}" class="card-img-top video-image"><span class="badge duration-badge">2:58:00</span></div></div></a></div>`;
 
 describe("parseSearchPageHtml", () => {
 	it("returns the detail URL and contentId when the first card matches the code", () => {
@@ -17,6 +17,7 @@ describe("parseSearchPageHtml", () => {
 		expect(parseSearchPageHtml(html, "DLDSS-529")).toEqual({
 			detailUrl: "https://javtrailers.com/video/1dldss00529",
 			contentId: "1dldss00529",
+			title: "Some movie title with & symbols",
 		});
 	});
 
@@ -25,6 +26,7 @@ describe("parseSearchPageHtml", () => {
 		expect(parseSearchPageHtml(html, "dldss 529")).toEqual({
 			detailUrl: "https://javtrailers.com/video/1dldss00529",
 			contentId: "1dldss00529",
+			title: "Some movie title with & symbols",
 		});
 	});
 
@@ -53,6 +55,7 @@ describe("parseSearchPageHtml", () => {
 		expect(parseSearchPageHtml(html, "DLDSS-529")).toEqual({
 			detailUrl: "https://javtrailers.com/video/1dldss00529",
 			contentId: "1dldss00529",
+			title: "Some movie title with & symbols",
 		});
 	});
 

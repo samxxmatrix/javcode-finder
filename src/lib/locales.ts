@@ -14,7 +14,6 @@ export interface LocaleMessages {
 	retry: string;
 	truncatedWarning: string;
 	codesListTitle: string;
-	codesListDesc: string;
 	settingsTitle: string;
 	settingsDesc: string;
 	platformNameLabel: string;
@@ -68,8 +67,6 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retry: "重新尝试",
     truncatedWarning: "页面内容超过扫描上限，部分候选可能未纳入统计。",
     codesListTitle: "识别到的番号",
-    codesListDesc:
-      "点击番号可预览封面与预告片，点击按钮可定位页面位置，或直达在线观看站、在数据库站查看详情：",
     settingsTitle: "搜索与跳转设置",
     settingsDesc:
       "自定义外部平台跳转规则，支持 {code} 或 {番号} 占位符。设置永久保存在本地。",
@@ -124,8 +121,6 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retry: "重新嘗試",
     truncatedWarning: "頁面內容超過掃描上限，部分候選可能未納入統計。",
     codesListTitle: "識別到的番號",
-    codesListDesc:
-      "點擊番號可預覽封面與預告片，點擊按鈕可定位頁面位置，或直達線上看站、在資料庫站查看詳情：",
     settingsTitle: "搜尋與跳轉設定",
     settingsDesc:
       "自訂外部平台跳轉規則，支援 {code} 或 {番号} 佔位符。設定永久保存在本地。",
@@ -182,8 +177,6 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retry: "Retry",
     truncatedWarning: "Page text exceeded limit; scan was partially truncated.",
     codesListTitle: "Detected Codes",
-    codesListDesc:
-      "Click a code to preview its cover and trailer. Use the buttons to locate it on the page, watch online, or view details in the database:",
     settingsTitle: "Search & Navigation Settings",
     settingsDesc:
       "Customize external navigation rules. Supports {code} placeholder. Saved permanently in local storage.",

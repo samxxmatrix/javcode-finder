@@ -3,15 +3,27 @@ import { toComparisonKey } from "./normalize-code";
 export interface SearchPageResolution {
 	detailUrl: string;
 	contentId: string;
+	// 影片完整标题（来自卡片 a 标签的 title 属性），无标题时为 null
+	title: string | null;
+}
+
+/** 解码 SSR HTML 属性中常见的 HTML 实体 */
+function decodeHtmlEntities(text: string): string {
+	return text
+		.replace(/&amp;/g, "&")
+		.replace(/&#39;|&apos;/g, "'")
+		.replace(/&quot;/g, '"')
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">");
 }
 
 /**
  * 解析 javtrailers 搜索页 HTML，确认第一张结果卡片是否精确匹配目标番号。
- * 命中时返回其详情页 URL 与 Content ID（javtrailers 的完整番号格式，含前缀与补零，
- * 如 1dldss00547），否则返回 null（调用方回退到搜索页）。
+ * 命中时返回其详情页 URL、Content ID（javtrailers 的完整番号格式，含前缀与补零，
+ * 如 1dldss00547）与影片标题，否则返回 null（调用方回退到搜索页）。
  *
  * 搜索页为 SSR，卡片结构（已实测验证）：
- * <div class="card-container"><a href="/video/{contentId}">...<img alt="{番号} jav">
+ * <div class="card-container"><a href="/video/{contentId}" title="{标题}">...<img alt="{番号} jav">
  */
 export function parseSearchPageHtml(
 	html: string,
@@ -36,10 +48,17 @@ export function parseSearchPageHtml(
 	const altKey = toComparisonKey(altCode);
 	if (!altKey || !altKey.includes(targetKey)) return null;
 
+	// a 标签的 title 属性即影片完整标题（不含番号前缀）
+	const titleMatch = firstCard.match(
+		/href="\/video\/[a-zA-Z0-9_-]+"[^>]*title="([^"]*)"/,
+	);
+	const title = titleMatch ? decodeHtmlEntities(titleMatch[1]!) : null;
+
 	const contentId = hrefMatch[1]!.toLowerCase();
 	return {
 		detailUrl: `https://javtrailers.com/video/${contentId}`,
 		contentId,
+		title,
 	};
 }
 

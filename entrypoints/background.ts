@@ -1,4 +1,9 @@
 import { parseSearchPageHtml } from "../src/lib/javtrailers";
+import {
+	buildTranslateUrl,
+	parseTranslateResponse,
+	type TranslateTarget,
+} from "../src/lib/translate";
 
 export default defineBackground(() => {
 	// 给 media.javtrailers.com 响应注入 CORS 头，使扩展面板内的 hls.js 能跨域拉取 HLS 预告片流。
@@ -71,13 +76,39 @@ export default defineBackground(() => {
 			(
 				message: unknown,
 				_sender: unknown,
-				sendResponse: (response: {
-					detailUrl: string | null;
-					contentId: string | null;
-					debug?: string;
-				}) => void,
+				sendResponse: (response: unknown) => void,
 			): boolean | undefined => {
-				const msg = message as { type?: string; code?: string };
+				const msg = message as {
+					type?: string;
+					code?: string;
+					text?: string;
+					target?: TranslateTarget;
+				};
+
+				// 标题翻译：谷歌翻译公开端点，失败返回空译文（调用方回退原文）
+				if (msg?.type === "jt:translate" && msg.text) {
+					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
+					void (async () => {
+						try {
+							const res = await fetch(
+								buildTranslateUrl(msg.text!, target),
+								{ signal: AbortSignal.timeout(5000) },
+							);
+							if (!res.ok) {
+								sendResponse({ translated: "" });
+								return;
+							}
+							const data = await res.json();
+							sendResponse({
+								translated: parseTranslateResponse(data),
+							});
+						} catch {
+							sendResponse({ translated: "" });
+						}
+					})();
+					return true;
+				}
+
 				if (msg?.type !== "jt:resolve-detail" || !msg.code) return undefined;
 				const code = msg.code;
 
@@ -91,6 +122,7 @@ export default defineBackground(() => {
 							sendResponse({
 								detailUrl: null,
 								contentId: null,
+								title: null,
 								debug: `HTTP ${res.status}`,
 							});
 							return;
@@ -100,6 +132,7 @@ export default defineBackground(() => {
 						sendResponse({
 							detailUrl: resolution?.detailUrl ?? null,
 							contentId: resolution?.contentId ?? null,
+							title: resolution?.title ?? null,
 							debug: resolution
 								? undefined
 								: `no-match(len=${html.length})`,
@@ -108,6 +141,7 @@ export default defineBackground(() => {
 						sendResponse({
 							detailUrl: null,
 							contentId: null,
+							title: null,
 							debug: `fetch-error:${error instanceof Error ? error.message : String(error)}`,
 						});
 					}

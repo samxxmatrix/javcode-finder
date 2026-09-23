@@ -335,6 +335,7 @@ export const App: React.FC = () => {
 					<TrailerPreview
 						key={previewCode}
 						code={previewCode}
+						locale={locale}
 						t={t}
 						onClose={() => setPreviewCode(null)}
 					/>
