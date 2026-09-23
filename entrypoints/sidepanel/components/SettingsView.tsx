@@ -40,15 +40,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 	const [newHostInput, setNewHostInput] = useState("");
 	const [customRegex, setCustomRegex] = useState("");
 	const [regexError, setRegexError] = useState<string | null>(null);
+	const [previewVolume, setPreviewVolume] = useState(DEFAULT_SETTINGS.previewVolume);
 	const [savedMessage, setSavedMessage] = useState(false);
+
+	// 当前语言的官方默认模板（输入框为空时显示它，用户视角里输入框始终有具体值）
+	const defaultSupjavTemplate =
+		locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
 
 	useEffect(() => {
 		const current = getSettings();
-		setSupjav(current.supjavTemplate);
+		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
+		setSupjav(current.supjavTemplate || defaultSupjavTemplate);
 		setJavbus(current.javbusTemplate);
 		setLocaleOption(getSavedLocale());
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
+		setPreviewVolume(current.previewVolume);
 	}, []);
 
 	const handleLocaleSelect = (val: LocaleOption) => {
@@ -100,6 +107,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 			javbusTemplate: javbus,
 			excludedHosts,
 			customRegex: customRegex.trim() || DEFAULT_CODE_REGEX,
+			previewVolume,
 		});
 		saveLocale(localeOption);
 		onLocaleChange?.(getEffectiveLocale(localeOption));
@@ -111,11 +119,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
 	const handleReset = () => {
 		resetSettings();
-		setSupjav(DEFAULT_SETTINGS.supjavTemplate);
+		// 恢复默认：把当前语言的官方模板填入输入框（而非留空）
+		setSupjav(defaultSupjavTemplate);
 		setJavbus(DEFAULT_SETTINGS.javbusTemplate);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
+		setPreviewVolume(DEFAULT_SETTINGS.previewVolume);
 		setNewHostInput("");
 		saveLocale("auto");
 		setLocaleOption("auto");
@@ -181,6 +191,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 						<option value="zh-hant">繁體中文</option>
 						<option value="en">English</option>
 					</select>
+				</div>
+
+				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="preview-volume">
+						{t.previewVolumeLabel}
+					</label>
+					<div className="settings-field__volume-row">
+						<input
+							id="preview-volume"
+							type="range"
+							className="settings-field__range"
+							min={0}
+							max={100}
+							step={5}
+							value={previewVolume}
+							onChange={(e) => setPreviewVolume(Number(e.target.value))}
+						/>
+						<span className="settings-field__volume-value">
+							{previewVolume}%
+						</span>
+					</div>
 				</div>
 
 				<div className="settings-field">

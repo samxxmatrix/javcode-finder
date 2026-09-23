@@ -51,6 +51,7 @@ export interface LocaleMessages {
 	updateAvailableAria: (version: string) => string;
 	previewTitle: string;
 	playTrailer: string;
+	previewVolumeLabel: string;
 	trailerUnavailable: string;
 	trailerLoadFailed: string;
 	previewUnavailable: string;
@@ -80,7 +81,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
 		settingsTitle: "搜索与跳转设置",
 		settingsDesc:
 			"自定义外部平台跳转规则，支持 {code} 或 {番号} 占位符。设置永久保存在本地。",
-		supjavLabel: "supJAV 链接规则",
+		supjavLabel: "Supjav 链接规则",
 		javbusLabel: "JavBus / JavDB 链接规则",
 		saveSettings: "保存设置",
 		resetDefaults: "恢复默认",
@@ -113,8 +114,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
 		updateNow: "立即更新",
 		updateAvailableAria: (version) =>
 			`发现新版本 v${version}，在新标签页打开 GitHub 最新 Release`,
-		previewTitle: "预告片预览",
+		previewTitle: "预告片",
 		playTrailer: "播放预告片",
+		previewVolumeLabel: "预览视频音量",
 		trailerUnavailable: "该番号暂无预告片",
 		trailerLoadFailed: "预告片加载失败",
 		previewUnavailable: "未获取到预告片",
@@ -143,7 +145,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
 		settingsTitle: "搜尋與跳轉設定",
 		settingsDesc:
 			"自訂外部平台跳轉規則，支援 {code} 或 {番号} 佔位符。設定永久保存在本地。",
-		supjavLabel: "supJAV 連結規則",
+		supjavLabel: "Supjav 連結規則",
 		javbusLabel: "JavBus / JavDB 連結規則",
 		saveSettings: "儲存設定",
 		resetDefaults: "恢復預設",
@@ -178,6 +180,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
 			`發現新版本 v${version}，在新分頁開啟 GitHub 最新 Release`,
 		previewTitle: "預告片預覽",
 		playTrailer: "播放預告片",
+		previewVolumeLabel: "預覽影片音量",
 		trailerUnavailable: "該番號暫無預告片",
 		trailerLoadFailed: "預告片載入失敗",
 		previewUnavailable: "未獲取到預告片",
@@ -206,7 +209,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
 		settingsTitle: "Search & Navigation Settings",
 		settingsDesc:
 			"Customize external navigation rules. Supports {code} placeholder. Saved permanently in local storage.",
-		supjavLabel: "supJAV URL Template",
+		supjavLabel: "Supjav URL Template",
 		javbusLabel: "JavBus / JavDB URL Template",
 		saveSettings: "Save Settings",
 		resetDefaults: "Reset Defaults",
@@ -242,6 +245,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
 			`Version ${version} is available. Open the latest GitHub Release in a new tab`,
 		previewTitle: "Trailer Preview",
 		playTrailer: "Play Trailer",
+		previewVolumeLabel: "Preview volume",
 		trailerUnavailable: "No trailer available for this code",
 		trailerLoadFailed: "Failed to load trailer",
 		previewUnavailable: "Trailer unavailable",

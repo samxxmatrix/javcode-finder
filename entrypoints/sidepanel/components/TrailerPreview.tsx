@@ -4,6 +4,7 @@ import {
 	buildTrailerUrlFromContentId,
 } from "../../../src/lib/javtrailers";
 import type { LocaleMessages } from "../../../src/lib/locales";
+import { getSettings } from "../../../src/lib/settings";
 
 interface TrailerPreviewProps {
 	code: string;
@@ -96,6 +97,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const handlePlay = async () => {
 		const video = videoRef.current;
 		if (!video || status === "loading" || status === "playing") return;
+
+		// 播放开始时应用设置中的预览音量（0-100 → 0-1）
+		video.volume = getSettings().previewVolume / 100;
 
 		setStatus("loading");
 		try {

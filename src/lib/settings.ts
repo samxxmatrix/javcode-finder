@@ -13,6 +13,8 @@ export interface ExtensionSettings {
 	javbusTemplate: string;
 	excludedHosts: string[];
 	customRegex: string;
+	// 预览视频音量（0-100），所有预览播放统一使用
+	previewVolume: number;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	javbusTemplate: "https://javdb.com/search?q={code}",
 	excludedHosts: [],
 	customRegex: DEFAULT_CODE_REGEX,
+	previewVolume: 100,
 };
 
 export function normalizeDomain(input: string): string {
@@ -139,6 +142,12 @@ export function getSettings(): ExtensionSettings {
 				parsed.javbusTemplate.trim()
 					? parsed.javbusTemplate.trim()
 					: DEFAULT_SETTINGS.javbusTemplate,
+			previewVolume:
+				typeof parsed.previewVolume === "number" &&
+				parsed.previewVolume >= 0 &&
+				parsed.previewVolume <= 100
+					? parsed.previewVolume
+					: DEFAULT_SETTINGS.previewVolume,
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -181,6 +190,12 @@ export function saveSettings(
 				settings.customRegex !== undefined && settings.customRegex.trim()
 					? settings.customRegex.trim()
 					: current.customRegex,
+			previewVolume:
+				settings.previewVolume !== undefined &&
+				settings.previewVolume >= 0 &&
+				settings.previewVolume <= 100
+					? settings.previewVolume
+					: current.previewVolume,
 		};
 		const storage = getStorage();
 		if (storage) {
