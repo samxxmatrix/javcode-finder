@@ -1,25 +1,28 @@
-# JavRanking browser extension
+# JavCode Finder Browser Extension
 
-[简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md)
+[简体中文](README.md) · [繁體中文](README.zh-TW.md)
 
-The JavRanking browser extension identifies video codes on the active page after you click its browser toolbar icon, then shows matching JavRanking ranking information.
+JavCode Finder scans the current page for video codes when you click the toolbar icon, and provides:
 
-![screenshot](https://pub-46be2c0b616d4f749dab2ccd9deb9827.r2.dev/social-preview.png)
+- **Cover & trailer preview**: click a code to preview its cover from JavTrailers in the side panel, with optional HLS trailer playback
+- **Page locate**: find and highlight where the code appears on the current page
+- **Quick navigation**: jump straight to the JavTrailers detail page (matched by Content ID via the search page), or view details on JavDB
+- **Custom rules**: customizable code regex, external navigation templates, and excluded sites
 
-## Install in Chrome or Edge
+## Install on Chrome or Edge
 
 1. Download the Chromium ZIP from [GitHub Releases](https://github.com/aizhimou/javranking-extension/releases).
-2. Extract it to a permanent local folder.
+2. Unzip it into a folder you will keep.
 3. Open `chrome://extensions` or `edge://extensions`.
-4. Enable **Developer mode**, choose **Load unpacked**, then select the extracted folder containing `manifest.json`.
+4. Enable **Developer mode**, choose **Load unpacked**, and select the folder containing `manifest.json`.
 
-Unpacked extensions update manually: download and extract the new release, then choose **Reload** on the extension card or load the new folder. The extension displays an update notice at the top when GitHub has a newer version.
+Unpacked extension updates must be done manually: download and unzip the new version, then choose **Reload** on the extension card. An update notice appears at the top of the extension when a newer version is on GitHub.
 
-Firefox supports temporary development loading. Persistent installation requires a Mozilla-signed XPI, which is not currently published.
+Firefox supports temporary development loads; a Mozilla-signed XPI for permanent install is not provided yet.
 
-## Verify and build from source
+## Build from source
 
-Node.js 20.19 or later is required.
+Requires Node.js 20.19 or newer.
 
 ```sh
 npm ci
@@ -29,15 +32,13 @@ npm run build
 npm run zip
 ```
 
-The production ZIP is written to `.output/`. Build artifacts are not committed. You can inspect a tagged source release, build it locally, and compare the resulting checksum against `SHA256SUMS.txt` in the GitHub Release.
+The production ZIP is output to `.output/`. Build artifacts are not committed to Git.
 
 ## Privacy
 
-The extension reads the active top-level page only after the user triggers it. It does not send or persist page URLs, page text, DOM content, video-code candidates, or browsing activity.
+The extension only reads the current top-level page after explicit user action. It never transmits or stores page URLs, page text, DOM content, code candidates, or browsing activity.
 
-It fetches JavRanking's published static search index to find matches. Each time the extension UI opens, it also reads the latest release version from GitHub's public API. Neither request includes page or user data.
-
-See the [extension design document](docs/browser-extension.md) for the complete product, static data contract, privacy, compatibility, and release specification.
+Cover and trailer data is fetched from javtrailers.com on demand only after the user clicks a code; navigation resolution requests the JavTrailers search page via the background script and contains no page or user data.
 
 ## License
 

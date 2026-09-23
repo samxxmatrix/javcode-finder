@@ -122,7 +122,7 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 
 		// Handle cycling through multiple matches across repeated clicks
 		const win = (typeof window !== "undefined" ? window : globalThis) as any;
-		const stateKey = "__javranking_locate_state";
+		const stateKey = "__javcode_locate_state";
 		const state = win[stateKey] || { code: "", index: -1 };
 		const compKey = cleanCode.toUpperCase();
 		let targetIndex = 0;
@@ -141,7 +141,7 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 		}
 
 		// Clean up any existing locate badges
-		document.querySelectorAll(".javranking-locate-badge").forEach((el) => {
+		document.querySelectorAll(".javcode-locate-badge").forEach((el) => {
 			const parent = el.parentNode;
 			if (parent) {
 				while (el.firstChild) {
@@ -153,11 +153,11 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 		});
 
 		// Ensure pulse keyframe style is present
-		if (!document.getElementById("javranking-locate-style")) {
+		if (!document.getElementById("javcode-locate-style")) {
 			const styleEl = document.createElement("style");
-			styleEl.id = "javranking-locate-style";
+			styleEl.id = "javcode-locate-style";
 			styleEl.textContent = `
-				@keyframes javranking-locate-pulse {
+				@keyframes javcode-locate-pulse {
 					0% { transform: scale(1); box-shadow: 0 0 0 3px #d97706, 0 0 12px rgba(245, 158, 11, 0.6); }
 					50% { transform: scale(1.15); box-shadow: 0 0 0 5px #f59e0b, 0 0 28px rgba(245, 158, 11, 1); }
 					100% { transform: scale(1); box-shadow: 0 0 0 3px #d97706, 0 0 12px rgba(245, 158, 11, 0.6); }
@@ -168,7 +168,7 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 
 		// Wrap the exact matched characters with a prominent golden badge
 		const mark = document.createElement("mark");
-		mark.className = "javranking-locate-badge";
+		mark.className = "javcode-locate-badge";
 		mark.style.cssText = `
 			background: #f59e0b !important;
 			color: #000000 !important;
@@ -180,7 +180,7 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 			display: inline-block !important;
 			line-height: 1.2 !important;
 			vertical-align: baseline !important;
-			animation: javranking-locate-pulse 0.7s ease-in-out 3 !important;
+			animation: javcode-locate-pulse 0.7s ease-in-out 3 !important;
 			position: relative !important;
 			z-index: 2147483640 !important;
 			text-shadow: none !important;

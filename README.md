@@ -1,10 +1,13 @@
-# JavRanking 浏览器扩展
+# JavCode Finder 浏览器扩展
 
 [English](README.en.md) · [繁體中文](README.zh-TW.md)
 
-JavRanking 浏览器扩展会在你主动点击浏览器工具栏图标后，识别当前页面中的影片番号，并展示可对应的 JavRanking 榜单资料。
+JavCode Finder 会在你主动点击浏览器工具栏图标后，识别当前页面中的影片番号，并提供：
 
-![screenshot](https://pub-46be2c0b616d4f749dab2ccd9deb9827.r2.dev/social-preview.png)
+- **封面与预告片预览**：点击番号，在侧边栏内查看来自 JavTrailers 的封面，并可点击播放预告片（HLS）
+- **页面定位**：一键在当前网页中定位并高亮该番号出现的位置
+- **快捷跳转**：直达 JavTrailers 详情页（通过搜索页精确匹配 Content ID），或在 JavDB 中查看详情
+- **自定义规则**：可自定义番号识别正则、外部跳转模板与排除站点
 
 ## 安装 Chrome 或 Edge 版本
 
@@ -13,7 +16,7 @@ JavRanking 浏览器扩展会在你主动点击浏览器工具栏图标后，识
 3. 打开 `chrome://extensions` 或 `edge://extensions`。
 4. 开启 **Developer mode**，选择 **Load unpacked**，再选择包含 `manifest.json` 的解压文件夹。
 
-Unpacked extension 的更新需要手动完成：下载并解压新版后，在扩展卡片选择 **Reload**，或加载新的文件夹。当 GitHub 有更高版本时，扩展顶部会显示更新提醒。
+Unpacked extension 的更新需要手动完成：下载并解压新版后，在扩展卡片选择 **Reload**。当 GitHub 有更高版本时，扩展顶部会显示更新提醒。
 
 Firefox 可用于 temporary development load；持久安装仍需要 Mozilla 签名的 XPI，目前尚未提供。
 
@@ -29,15 +32,13 @@ npm run build
 npm run zip
 ```
 
-production ZIP 会输出到 `.output/`。构建产物不会提交到 Git；你可以检查 tag 的源代码并自行构建，再用 Release 中的 `SHA256SUMS.txt` 比对文件校验和。
+production ZIP 会输出到 `.output/`。构建产物不会提交到 Git。
 
 ## 隐私
 
 扩展只会在用户主动触发后读取当前顶层页面。它不会传送或保存页面 URL、页面文字、DOM 内容、番号候选或浏览活动。
 
-它会读取 JavRanking 已发布的静态搜索索引来查找匹配项；每次打开扩展 UI 时，还会向 GitHub 公开 API 读取最新 Release 的版本号。两者都不包含任何页面或用户数据。
-
-完整的产品、static data contract、隐私、兼容性与发布规范见 [extension design document](docs/browser-extension.md)。
+封面与预告片数据仅在用户点击番号后按需从 javtrailers.com 加载；跳转解析通过 background 请求 javtrailers 搜索页完成，不包含任何页面或用户数据。
 
 ## 许可证
 

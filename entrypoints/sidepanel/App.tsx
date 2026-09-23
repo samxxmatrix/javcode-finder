@@ -1,9 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { getChongCode, syncWithCloud } from "../../src/lib/chong-store";
 import { extractCandidatesInTab } from "../../src/lib/extract-codes";
-import { IndexCacheManager } from "../../src/lib/index-cache";
 import { messages } from "../../src/lib/locales";
-import { toComparisonKey } from "../../src/lib/normalize-code";
 import {
 	DEFAULT_CODE_REGEX,
 	getEffectiveLocale,
@@ -12,16 +9,12 @@ import {
 } from "../../src/lib/settings";
 import type {
 	ExtractionResult,
-	MatchedResult,
 	PopupStatus,
-	SearchIndex,
-	SearchVideo,
 	SupportedLocale,
 } from "../../src/lib/types";
-import { buildJavRankingUrl } from "../../src/lib/url";
-import { ResultCard } from "./components/ResultCard";
+import { CodeList } from "./components/CodeList";
 import { SettingsView } from "./components/SettingsView";
-import { UnmatchedList } from "./components/UnmatchedList";
+import { TrailerPreview } from "./components/TrailerPreview";
 import { UpdateNotice } from "../shared/UpdateNotice";
 
 export const App: React.FC = () => {
@@ -38,138 +31,92 @@ export const App: React.FC = () => {
 
 	const [status, setStatus] = useState<PopupStatus>("loading");
 	const [showSettings, setShowSettings] = useState(false);
-	const [candidateCount, setCandidateCount] = useState(0);
-	const [matchedResults, setMatchedResults] = useState<MatchedResult[]>([]);
-	const [unmatchedCandidates, setUnmatchedCandidates] = useState<string[]>([]);
+	const [candidates, setCandidates] = useState<string[]>([]);
 	const [truncated, setTruncated] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
+	// 点击番号后在列表上方展开的预告片预览
+	const [previewCode, setPreviewCode] = useState<string | null>(null);
 
-	// Recommendations in empty state
-	const [indexVideos, setIndexVideos] = useState<SearchVideo[]>([]);
-	const [recommendMode, setRecommendMode] = useState<"top_rated" | "lucky">(
-		"lucky",
-	);
-	const [topRatedCount, setTopRatedCount] = useState(10);
-	const [luckyPool, setLuckyPool] = useState<SearchVideo[]>([]);
-	const [luckyCount, setLuckyCount] = useState(10);
-	const [isSyncing, setIsSyncing] = useState(false);
-
-	const cacheManager = React.useMemo(() => new IndexCacheManager(), []);
-
-	const syncMarks = React.useCallback(async () => {
-		if (!getChongCode()) return;
-		try {
-			setIsSyncing(true);
-			await syncWithCloud();
-		} catch (err) {
-			console.warn("Cloud sync failed:", err);
-		} finally {
-			setIsSyncing(false);
+	// 提取当前绑定/激活标签页的番号候选
+	const extractFromActiveTab = async (
+		settings: ReturnType<typeof getSettings>,
+	): Promise<ExtractionResult & { excluded?: boolean }> => {
+		let activeTab: { id?: number; url?: string } | undefined;
+		if (boundTabId) {
+			try {
+				activeTab = await browser.tabs.get(boundTabId);
+			} catch {
+				// Bound tab might have closed or cannot be retrieved
+			}
 		}
-	}, []);
+		if (!activeTab) {
+			// Query active tab in the browser window
+			let tabs = await browser.tabs.query({
+				active: true,
+				lastFocusedWindow: true,
+			});
+			if (!tabs || tabs.length === 0) {
+				tabs = await browser.tabs.query({
+					active: true,
+					currentWindow: true,
+				});
+			}
+			activeTab = tabs && tabs.length > 0 ? tabs[0] : undefined;
+		}
+		if (!activeTab || !activeTab.id) {
+			return { candidates: [], truncated: false, unsupported: true };
+		}
 
-	const handleRefresh = async () => {
-		await Promise.allSettled([runScan(), syncMarks()]);
+		const url = activeTab.url || "";
+		if (isHostExcluded(url, settings.excludedHosts)) {
+			return { candidates: [], truncated: false, excluded: true };
+		}
+
+		// Check for restricted URLs if available
+		const lowerUrl = url.toLowerCase();
+		if (
+			lowerUrl.startsWith("chrome://") ||
+			lowerUrl.startsWith("chrome-extension://") ||
+			lowerUrl.startsWith("edge://") ||
+			lowerUrl.startsWith("about:") ||
+			lowerUrl.startsWith("chrome.google.com/webstore") ||
+			lowerUrl.startsWith("chromewebstore.google.com") ||
+			lowerUrl.startsWith("addons.mozilla.org")
+		) {
+			return { candidates: [], truncated: false, unsupported: true };
+		}
+
+		try {
+			const results = await browser.scripting.executeScript({
+				target: { tabId: activeTab.id },
+				func: extractCandidatesInTab,
+				args: [settings.customRegex || DEFAULT_CODE_REGEX],
+			});
+
+			const firstResult =
+				results && results.length > 0 ? results[0]?.result : undefined;
+			if (!firstResult) {
+				return { candidates: [], truncated: false };
+			}
+
+			return firstResult as ExtractionResult;
+		} catch (err) {
+			console.warn("ExecuteScript failed on tab:", activeTab.id, err);
+			return { candidates: [], truncated: false, unsupported: true };
+		}
 	};
 
 	const runScan = async () => {
 		setStatus("loading");
 		setErrorMessage(null);
-		setMatchedResults([]);
-		setUnmatchedCandidates([]);
-		setCandidateCount(0);
+		setCandidates([]);
 		setTruncated(false);
-		setLuckyPool([]);
-		setTopRatedCount(10);
-		setLuckyCount(10);
+		setPreviewCode(null);
 
 		const settings = getSettings();
 
 		try {
-			// 1. Concurrently fetch/load static index and extract page candidates
-			const indexPromise = cacheManager.loadIndex(locale);
-
-			const extractionPromise = (async (): Promise<
-				ExtractionResult & { excluded?: boolean }
-			> => {
-				let activeTab: { id?: number; url?: string } | undefined;
-				if (boundTabId) {
-					try {
-						activeTab = await browser.tabs.get(boundTabId);
-					} catch {
-						// Bound tab might have closed or cannot be retrieved
-					}
-				}
-				if (!activeTab) {
-					// Query active tab in the browser window
-					let tabs = await browser.tabs.query({
-						active: true,
-						lastFocusedWindow: true,
-					});
-					if (!tabs || tabs.length === 0) {
-						tabs = await browser.tabs.query({
-							active: true,
-							currentWindow: true,
-						});
-					}
-					activeTab = tabs && tabs.length > 0 ? tabs[0] : undefined;
-				}
-				if (!activeTab || !activeTab.id) {
-					return { candidates: [], truncated: false, unsupported: true };
-				}
-
-				const url = activeTab.url || "";
-				if (isHostExcluded(url, settings.excludedHosts)) {
-					return { candidates: [], truncated: false, excluded: true };
-				}
-
-				// Check for restricted URLs if available
-				const lowerUrl = url.toLowerCase();
-				if (
-					lowerUrl.startsWith("chrome://") ||
-					lowerUrl.startsWith("chrome-extension://") ||
-					lowerUrl.startsWith("edge://") ||
-					lowerUrl.startsWith("about:") ||
-					lowerUrl.startsWith("chrome.google.com/webstore") ||
-					lowerUrl.startsWith("chromewebstore.google.com") ||
-					lowerUrl.startsWith("addons.mozilla.org")
-				) {
-					return { candidates: [], truncated: false, unsupported: true };
-				}
-
-				try {
-					const results = await browser.scripting.executeScript({
-						target: { tabId: activeTab.id },
-						func: extractCandidatesInTab,
-						args: [settings.customRegex || DEFAULT_CODE_REGEX],
-					});
-
-					const firstResult =
-						results && results.length > 0
-							? results[0]?.result
-							: undefined;
-					if (!firstResult) {
-						return { candidates: [], truncated: false };
-					}
-
-					return firstResult as ExtractionResult;
-				} catch (err) {
-					console.warn("ExecuteScript failed on tab:", activeTab.id, err);
-					return { candidates: [], truncated: false, unsupported: true };
-				}
-			})();
-
-			const [searchIndex, extraction] = await Promise.all([
-				indexPromise,
-				extractionPromise,
-			]);
-
-			setIndexVideos(searchIndex.videos);
-			if (searchIndex.videos.length > 0) {
-				setLuckyPool(
-					[...searchIndex.videos].sort(() => Math.random() - 0.5),
-				);
-			}
+			const extraction = await extractFromActiveTab(settings);
 
 			if (extraction.excluded) {
 				setStatus("excluded_site");
@@ -182,60 +129,20 @@ export const App: React.FC = () => {
 			}
 
 			setTruncated(extraction.truncated);
-			setCandidateCount(extraction.candidates.length);
+			setCandidates(extraction.candidates);
 
-			if (extraction.candidates.length === 0) {
-				setStatus("no_candidates");
-				return;
-			}
-
-			// 2. Build fast lookup map for index codes
-			const codeMap = new Map<string, (typeof searchIndex.videos)[0]>();
-			for (const video of searchIndex.videos) {
-				if (!video.code) continue;
-				const compKey = toComparisonKey(video.code);
-				if (compKey && !codeMap.has(compKey)) {
-					codeMap.set(compKey, video);
-				}
-			}
-
-			// 3. Match candidates in first appearance order
-			const matches: MatchedResult[] = [];
-			const seenVideoIds = new Set<number>();
-
-			for (const candidate of extraction.candidates) {
-				const candidateKey = toComparisonKey(candidate);
-				if (!candidateKey) continue;
-
-				const matchedVideo = codeMap.get(candidateKey);
-				if (matchedVideo && !seenVideoIds.has(matchedVideo.videoId)) {
-					seenVideoIds.add(matchedVideo.videoId);
-					matches.push({
-						candidate,
-						comparisonKey: candidateKey,
-						video: matchedVideo,
-					});
-				}
-			}
-
-			setMatchedResults(matches);
-
-			const matchedCandidateKeys = new Set(matches.map((m) => m.comparisonKey));
-			const unmatched = extraction.candidates.filter(
-				(c) => !matchedCandidateKeys.has(toComparisonKey(c)),
+			setStatus(
+				extraction.candidates.length === 0 ? "no_candidates" : "results",
 			);
-			setUnmatchedCandidates(unmatched);
-
-			if (matches.length === 0) {
-				setStatus("no_confirmed_matches");
-			} else {
-				setStatus("results");
-			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
 			setErrorMessage(msg);
 			setStatus("error");
 		}
+	};
+
+	const handleRefresh = async () => {
+		await runScan();
 	};
 
 	useEffect(() => {
@@ -254,14 +161,12 @@ export const App: React.FC = () => {
 		}
 
 		runScan();
-		syncMarks();
 
 		const handleTabActivated = () => {
 			// If bound to a specific tab, do not re-scan when switching to other tabs
 			if (!boundTabId) {
 				runScan();
 			}
-			syncMarks();
 		};
 
 		const handleTabUpdated = (
@@ -273,27 +178,8 @@ export const App: React.FC = () => {
 				changeInfo.status === "complete"
 			) {
 				runScan();
-				syncMarks();
 			}
 		};
-
-		let lastFocusSync = 0;
-		const handleWindowFocus = () => {
-			const now = Date.now();
-			// Auto sync if user returns to side panel and it's been more than 3 seconds
-			if (now - lastFocusSync > 3000) {
-				lastFocusSync = now;
-				syncMarks();
-			}
-		};
-
-		window.addEventListener("focus", handleWindowFocus);
-		const handleVisibilityChange = () => {
-			if (document.visibilityState === "visible") {
-				handleWindowFocus();
-			}
-		};
-		document.addEventListener("visibilitychange", handleVisibilityChange);
 
 		if (typeof browser !== "undefined" && browser.tabs) {
 			browser.tabs.onActivated?.addListener(handleTabActivated);
@@ -308,68 +194,19 @@ export const App: React.FC = () => {
 					// Ignore
 				}
 			}
-			window.removeEventListener("focus", handleWindowFocus);
-			document.removeEventListener("visibilitychange", handleVisibilityChange);
 			if (typeof browser !== "undefined" && browser.tabs) {
 				browser.tabs.onActivated?.removeListener(handleTabActivated);
 				browser.tabs.onUpdated?.removeListener(handleTabUpdated);
 			}
 		};
-	}, [locale, boundTabId, syncMarks]);
-
-
-	const topRatedVideos = React.useMemo(() => {
-		return [...indexVideos].sort(
-			(a, b) =>
-				(a.rank ?? 999999) - (b.rank ?? 999999) ||
-				(b.score ?? 0) - (a.score ?? 0),
-		);
-	}, [indexVideos]);
-
-	const displayedVideos =
-		recommendMode === "top_rated"
-			? topRatedVideos.slice(0, topRatedCount)
-			: (luckyPool.length > 0 ? luckyPool : topRatedVideos).slice(
-					0,
-					luckyCount,
-				);
-
-	const hasMoreRecommendations =
-		recommendMode === "top_rated"
-			? topRatedCount < topRatedVideos.length
-			: luckyCount <
-				(luckyPool.length > 0 ? luckyPool.length : topRatedVideos.length);
-
-	const handleLoadMore = () => {
-		if (recommendMode === "top_rated") {
-			setTopRatedCount((prev) => prev + 10);
-		} else {
-			setLuckyCount((prev) => prev + 10);
-		}
-	};
+	}, [locale, boundTabId]);
 
 	return (
 		<div className="popup-container">
 			<header className="popup-header">
 				<div className="popup-header__brand">
-					<h1 className="popup-header__title">
-						<a
-							href={buildJavRankingUrl(`/${locale}/`, {
-								campaign: "header_logo",
-							})}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="popup-header__logo-link"
-							title="JavRanking Home"
-						>
-							<img
-								src="/brand-logo.png"
-								alt="JavRanking"
-								className="popup-header__logo"
-								width="76"
-								height="25"
-							/>
-						</a>
+					<h1 className="popup-header__title popup-header__title--text">
+						{t.title}
 					</h1>
 				</div>
 				<div className="popup-header__actions">
@@ -379,15 +216,15 @@ export const App: React.FC = () => {
 						onClick={handleRefresh}
 						title={
 							locale === "zh-hans"
-								? "重新扫描页面与同步标记"
+								? "重新扫描页面"
 								: locale === "zh-hant"
-									? "重新掃描頁面與同步標記"
-									: "Rescan Page & Sync Marks"
+									? "重新掃描頁面"
+									: "Rescan Page"
 						}
 						aria-label="Rescan"
 					>
 						<svg
-							className={`icon-refresh ${status === "loading" || isSyncing ? "icon-refresh--spinning" : ""}`}
+							className={`icon-refresh ${status === "loading" ? "icon-refresh--spinning" : ""}`}
 
 							viewBox="0 0 20 20"
 							fill="currentColor"
@@ -402,25 +239,6 @@ export const App: React.FC = () => {
 							/>
 						</svg>
 					</button>
-					<a
-						href={buildJavRankingUrl(`/${locale}/marks`)}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="popup-header__icon-link"
-						title={t.viewMyMarksTooltip}
-						aria-label={t.viewMyMarksTooltip}
-					>
-						<svg
-							className="icon-bookmark"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							width="15"
-							height="15"
-							aria-hidden="true"
-						>
-							<path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.218.584L8 12.047l-3.782 2.787A.75.75 0 0 1 3 14.25V2.75Z" />
-						</svg>
-					</a>
 					<button
 						type="button"
 						className={`popup-header__icon-btn ${showSettings ? "popup-header__icon-btn--active" : ""}`}
@@ -466,6 +284,15 @@ export const App: React.FC = () => {
 			)}
 
 			<main className="popup-main">
+				{previewCode && !showSettings && (
+					// key 强制切换番号时重挂载：立即销毁旧 hls 实例停止播放，并重置加载状态
+					<TrailerPreview
+						key={previewCode}
+						code={previewCode}
+						t={t}
+						onClose={() => setPreviewCode(null)}
+					/>
+				)}
 				{showSettings ? (
 					<SettingsView
 						locale={locale}
@@ -531,98 +358,6 @@ export const App: React.FC = () => {
 										</p>
 									</div>
 								</div>
-
-								{indexVideos.length > 0 && (
-									<div className="popup-recommendations">
-										<div className="popup-recommendations__bar">
-											<div className="popup-recommendations__headline">
-												<span className="popup-recommendations__badge">🔥</span>
-												<h3 className="popup-recommendations__title">
-													{t.recommendedTitle}
-												</h3>
-											</div>
-											<div className="popup-recommendations__tabs" role="tablist">
-												<button
-													type="button"
-													role="tab"
-													aria-selected={recommendMode === "lucky"}
-													className={`popup-recommendations__tab ${
-														recommendMode === "lucky"
-															? "popup-recommendations__tab--active"
-															: ""
-													}`}
-													onClick={() => {
-														setRecommendMode("lucky");
-														if (luckyPool.length === 0 && indexVideos.length > 0) {
-															setLuckyPool(
-																[...indexVideos].sort(() => Math.random() - 0.5),
-															);
-														}
-													}}
-												>
-													{t.feelingLucky}
-												</button>
-												<button
-													type="button"
-													role="tab"
-													aria-selected={recommendMode === "top_rated"}
-													className={`popup-recommendations__tab ${
-														recommendMode === "top_rated"
-															? "popup-recommendations__tab--active"
-															: ""
-													}`}
-													onClick={() => setRecommendMode("top_rated")}
-												>
-													{t.topRated}
-												</button>
-											</div>
-										</div>
-
-										<div className="popup-results__list">
-											{displayedVideos.map((video, idx) => (
-												<ResultCard
-													key={`${video.videoId}-${recommendMode}-${idx}`}
-													item={{
-														candidate: video.code || "",
-														comparisonKey: toComparisonKey(video.code || ""),
-														video,
-													}}
-													locale={locale}
-													t={t}
-													showLocate={false}
-												/>
-											))}
-										</div>
-
-										{hasMoreRecommendations && (
-											<div className="popup-recommendations__footer">
-												<button
-													type="button"
-													className="popup-btn popup-btn--secondary popup-recommendations__more-btn"
-													onClick={handleLoadMore}
-												>
-													{t.loadMore}
-												</button>
-											</div>
-										)}
-									</div>
-								)}
-							</div>
-						)}
-
-						{status === "no_confirmed_matches" && (
-							<div className="popup-no-matches">
-								<div className="popup-state popup-state--empty">
-									<div className="popup-state__icon">📋</div>
-									<h2 className="popup-state__title">{t.noConfirmedTitle}</h2>
-									<p className="popup-state__desc">{t.noConfirmedDesc}</p>
-									<p className="popup-state__subdesc">
-										{t.summary(candidateCount, 0)}
-									</p>
-								</div>
-								{unmatchedCandidates.length > 0 && (
-									<UnmatchedList candidates={unmatchedCandidates} t={t} />
-								)}
 							</div>
 						)}
 
@@ -647,23 +382,16 @@ export const App: React.FC = () => {
 							<div className="popup-results">
 								<div className="popup-results__bar">
 									<span className="popup-results__summary">
-										{t.summary(candidateCount, matchedResults.length)}
+										{t.summary(candidates.length)}
 									</span>
-									<p className="popup-results__hint">{t.clickHint}</p>
 								</div>
-								<div className="popup-results__list">
-									{matchedResults.map((item) => (
-										<ResultCard
-											key={`${item.video.videoId}-${item.comparisonKey}`}
-											item={item}
-											locale={locale}
-											t={t}
-										/>
-									))}
-								</div>
-								{unmatchedCandidates.length > 0 && (
-									<UnmatchedList candidates={unmatchedCandidates} t={t} />
-								)}
+								<CodeList
+									candidates={candidates}
+									t={t}
+									locale={locale}
+									selectedCode={previewCode}
+									onPreview={setPreviewCode}
+								/>
 							</div>
 						)}
 					</>

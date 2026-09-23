@@ -1,4 +1,123 @@
+import { parseSearchPageHtml } from "../src/lib/javtrailers";
+
 export default defineBackground(() => {
+	// 给 media.javtrailers.com 响应注入 CORS 头，使扩展面板内的 hls.js 能跨域拉取 HLS 预告片流。
+	// 仅 Chromium 的 declarativeNetRequest 支持修改响应头；Firefox 上跳过（播放侧走失败降级）。
+	const setupTrailerCors = () => {
+		const dnr = (
+			globalThis as typeof globalThis & {
+				chrome?: {
+					declarativeNetRequest?: {
+						updateDynamicRules?: (options: {
+							removeRuleIds: number[];
+							addRules: Array<{
+								id: number;
+								priority: number;
+								action: {
+									type: "modifyHeaders";
+									responseHeaders: Array<{
+										header: string;
+										operation: "set";
+										value: string;
+									}>;
+								};
+								condition: {
+									urlFilter: string;
+									resourceTypes: string[];
+								};
+							}>;
+						}) => Promise<void>;
+					};
+				};
+			}
+		).chrome?.declarativeNetRequest;
+
+		if (!dnr?.updateDynamicRules) return;
+
+		dnr.updateDynamicRules({
+			removeRuleIds: [9001],
+			addRules: [
+				{
+					id: 9001,
+					priority: 1,
+					action: {
+						type: "modifyHeaders",
+						responseHeaders: [
+							{
+								header: "Access-Control-Allow-Origin",
+								operation: "set",
+								value: "*",
+							},
+						],
+					},
+					condition: {
+						urlFilter: "||media.javtrailers.com",
+						resourceTypes: ["xmlhttprequest", "media", "other"],
+					},
+				},
+			],
+		}).catch((error: unknown) => {
+			console.warn("Failed to register trailer CORS rule:", error);
+		});
+	};
+
+	setupTrailerCors();
+
+	// 解析 javtrailers 搜索页第一张卡片，返回确认匹配的详情页 URL 与 Content ID。
+	// 面板页面直接 fetch 该站会被 CORS 拦截，而 background 持有 host_permissions 不受限。
+	// 用原生回调模式（sendResponse + return true），避免 polyfill Promise 响应在部分环境不生效。
+	if (typeof browser !== "undefined" && browser.runtime?.onMessage) {
+		browser.runtime.onMessage.addListener(
+			(
+				message: unknown,
+				_sender: unknown,
+				sendResponse: (response: {
+					detailUrl: string | null;
+					contentId: string | null;
+					debug?: string;
+				}) => void,
+			): boolean | undefined => {
+				const msg = message as { type?: string; code?: string };
+				if (msg?.type !== "jt:resolve-detail" || !msg.code) return undefined;
+				const code = msg.code;
+
+				void (async () => {
+					try {
+						const res = await fetch(
+							`https://javtrailers.com/search/${encodeURIComponent(code)}`,
+							{ signal: AbortSignal.timeout(5000) },
+						);
+						if (!res.ok) {
+							sendResponse({
+								detailUrl: null,
+								contentId: null,
+								debug: `HTTP ${res.status}`,
+							});
+							return;
+						}
+						const html = await res.text();
+						const resolution = parseSearchPageHtml(html, code);
+						sendResponse({
+							detailUrl: resolution?.detailUrl ?? null,
+							contentId: resolution?.contentId ?? null,
+							debug: resolution
+								? undefined
+								: `no-match(len=${html.length})`,
+						});
+					} catch (error) {
+						sendResponse({
+							detailUrl: null,
+							contentId: null,
+							debug: `fetch-error:${error instanceof Error ? error.message : String(error)}`,
+						});
+					}
+				})();
+
+				return true; // 保持消息通道直到 sendResponse 被调用
+			},
+		);
+	}
+
 	// Enable opening the side panel on extension action click in supported Chromium browsers
 	const chromium = globalThis as typeof globalThis & {
 		chrome?: {

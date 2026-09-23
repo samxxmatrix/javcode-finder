@@ -9,6 +9,7 @@ import {
 	normalizeDomain,
 	resetSettings,
 	resolveSearchUrl,
+	resolveSupjavUrl,
 	saveLocale,
 	saveSettings,
 	SETTINGS_STORAGE_KEY,
@@ -40,20 +41,26 @@ describe("settings", () => {
 
 	it("saves and retrieves custom templates", () => {
 		saveSettings({
-			javtrailersTemplate: "https://custom.example.com/{code}",
+			supjavTemplate: "https://custom.example.com/{code}",
 			javbusTemplate: "https://www.javbus.com/{code}",
 		});
 
 		const saved = getSettings();
-		expect(saved.javtrailersTemplate).toBe("https://custom.example.com/{code}");
+		expect(saved.supjavTemplate).toBe("https://custom.example.com/{code}");
 		expect(saved.javbusTemplate).toBe("https://www.javbus.com/{code}");
+	});
+
+	it("saves an empty supjav template (means follow locale)", () => {
+		saveSettings({ supjavTemplate: "https://custom.example.org/{code}" });
+		saveSettings({ supjavTemplate: "" });
+		expect(getSettings().supjavTemplate).toBe("");
 	});
 
 	it("resets to default settings", () => {
 		saveSettings({
-			javtrailersTemplate: "https://custom.example.org/{code}",
+			supjavTemplate: "https://custom.example.org/{code}",
 		});
-		expect(getSettings().javtrailersTemplate).toBe(
+		expect(getSettings().supjavTemplate).toBe(
 			"https://custom.example.org/{code}",
 		);
 
@@ -61,34 +68,67 @@ describe("settings", () => {
 		expect(getSettings()).toEqual(DEFAULT_SETTINGS);
 	});
 
-	describe("migration from legacy missavTemplate", () => {
-		const LEGACY_DEFAULT = "https://missav.ws/cn/{code}";
-		const writeLegacy = (missavTemplate: string) => {
-			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({ missavTemplate });
-		};
-
-		it("keeps a user-customized legacy template", () => {
-			writeLegacy("https://custom.missav.ai/{code}");
-			expect(getSettings().javtrailersTemplate).toBe(
+	describe("migration from legacy templates", () => {
+		it("keeps a user-customized legacy missav template", () => {
+			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+				missavTemplate: "https://custom.missav.ai/{code}",
+			});
+			expect(getSettings().supjavTemplate).toBe(
 				"https://custom.missav.ai/{code}",
 			);
 		});
 
-		it("uses the new default when legacy value equals the old default", () => {
-			writeLegacy(LEGACY_DEFAULT);
-			expect(getSettings().javtrailersTemplate).toBe(
-				DEFAULT_SETTINGS.javtrailersTemplate,
+		it("keeps a user-customized legacy javtrailers template", () => {
+			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+				javtrailersTemplate: "https://custom.jt.example/{code}",
+			});
+			expect(getSettings().supjavTemplate).toBe(
+				"https://custom.jt.example/{code}",
 			);
 		});
 
-		it("prefers the new field when both are present", () => {
+		it("falls back to the new default when legacy values equal old defaults", () => {
 			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
-				missavTemplate: "https://custom.missav.ai/{code}",
+				missavTemplate: "https://missav.ws/cn/{code}",
 				javtrailersTemplate: "https://javtrailers.com/search/{code}",
 			});
-			expect(getSettings().javtrailersTemplate).toBe(
-				"https://javtrailers.com/search/{code}",
+			expect(getSettings().supjavTemplate).toBe(
+				DEFAULT_SETTINGS.supjavTemplate,
 			);
+		});
+
+		it("prefers the new field when present", () => {
+			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+				missavTemplate: "https://custom.missav.ai/{code}",
+				javtrailersTemplate: "https://custom.jt.example/{code}",
+				supjavTemplate: "https://supjav.com/zh/?s={code}",
+			});
+			expect(getSettings().supjavTemplate).toBe(
+				"https://supjav.com/zh/?s={code}",
+			);
+		});
+	});
+
+	describe("resolveSupjavUrl", () => {
+		it("uses the zh template for zh-hans and zh-hant locales", () => {
+			expect(resolveSupjavUrl("", "DLDSS-547", "zh-hans")).toBe(
+				"https://supjav.com/zh/?s=DLDSS-547",
+			);
+			expect(resolveSupjavUrl("", "DLDSS-547", "zh-hant")).toBe(
+				"https://supjav.com/zh/?s=DLDSS-547",
+			);
+		});
+
+		it("uses the plain template for the en locale", () => {
+			expect(resolveSupjavUrl("", "DLDSS-547", "en")).toBe(
+				"https://supjav.com/?s=DLDSS-547",
+			);
+		});
+
+		it("prefers a user-customized template over locale defaults", () => {
+			expect(
+				resolveSupjavUrl("https://custom.example/{code}", "DLDSS-547", "zh-hans"),
+			).toBe("https://custom.example/DLDSS-547");
 		});
 	});
 

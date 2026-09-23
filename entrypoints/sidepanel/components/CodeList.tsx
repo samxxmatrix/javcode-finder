@@ -2,16 +2,27 @@ import React, { useState } from "react";
 import { locateCodeInActiveTab } from "../../../src/lib/locate-code";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { normalizeCode } from "../../../src/lib/normalize-code";
-import { getSettings, resolveSearchUrl } from "../../../src/lib/settings";
+import {
+	getSettings,
+	resolveSearchUrl,
+	resolveSupjavUrl,
+} from "../../../src/lib/settings";
+import type { SupportedLocale } from "../../../src/lib/types";
 
-interface UnmatchedListProps {
+interface CodeListProps {
 	candidates: string[];
 	t: LocaleMessages;
+	locale: SupportedLocale;
+	selectedCode: string | null;
+	onPreview: (code: string) => void;
 }
 
-export const UnmatchedList: React.FC<UnmatchedListProps> = ({
+export const CodeList: React.FC<CodeListProps> = ({
 	candidates,
 	t,
+	locale,
+	selectedCode,
+	onPreview,
 }) => {
 	if (candidates.length === 0) return null;
 
@@ -38,6 +49,16 @@ export const UnmatchedList: React.FC<UnmatchedListProps> = ({
 		}
 	}
 
+	// 直接按模板打开 supJAV 搜索页（无需解析）
+	const handleSupjavClick = async (code: string) => {
+		const url = resolveSupjavUrl(settings.supjavTemplate, code, locale);
+		try {
+			await browser.tabs.create({ url });
+		} catch {
+			window.open(url, "_blank", "noopener,noreferrer");
+		}
+	};
+
 	const handleLocate = async (code: string) => {
 		const res = await locateCodeInActiveTab(code);
 		setLocateStates((prev) => ({
@@ -60,23 +81,42 @@ export const UnmatchedList: React.FC<UnmatchedListProps> = ({
 		<section className="unmatched-section">
 			<div className="unmatched-section__header">
 				<h3 className="unmatched-section__title">
-					{t.unmatchedTitle}{" "}
+					{t.codesListTitle}{" "}
 					<span className="unmatched-section__count">
 						({uniqueCodes.length})
 					</span>
 				</h3>
-				<p className="unmatched-section__desc">{t.unmatchedDesc}</p>
+				<p className="unmatched-section__desc">{t.codesListDesc}</p>
 			</div>
 
 			<ul className="unmatched-section__list">
 				{uniqueCodes.map((code) => {
-					const javtrailersUrl = resolveSearchUrl(settings.javtrailersTemplate, code);
 					const javdbUrl = resolveSearchUrl(settings.javbusTemplate, code);
 					const locateState = locateStates[code] || { status: "idle" };
 
+					const isSelected = code === selectedCode;
 					return (
 						<li key={code} className="unmatched-item">
-							<span className="unmatched-item__code">{code}</span>
+							<span
+								className={`unmatched-item__code ${
+									isSelected ? "unmatched-item__code--selected" : ""
+								}`}
+								role={isSelected ? undefined : "button"}
+								tabIndex={isSelected ? -1 : 0}
+								title={isSelected ? undefined : t.previewTitle}
+								onClick={() => {
+									// 已选中的番号不再响应点击
+									if (!isSelected) onPreview(code);
+								}}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" || e.key === " ") {
+										e.preventDefault();
+										if (!isSelected) onPreview(code);
+									}
+								}}
+							>
+								{code}
+							</span>
 							<div className="unmatched-item__links">
 								<button
 									type="button"
@@ -139,15 +179,14 @@ export const UnmatchedList: React.FC<UnmatchedListProps> = ({
 										</>
 									)}
 								</button>
-								<a
-									href={javtrailersUrl}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="unmatched-item__link unmatched-item__link--javtrailers"
-									title={`Search ${code} on JavTrailers`}
+								<button
+									type="button"
+									className="unmatched-item__link unmatched-item__link--supjav"
+									title={`Search ${code} on supJAV`}
+									onClick={() => handleSupjavClick(code)}
 								>
-									{t.javtrailers}
-								</a>
+									{t.supjav}
+								</button>
 								<a
 									href={javdbUrl}
 									target="_blank"

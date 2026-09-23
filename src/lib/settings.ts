@@ -3,8 +3,13 @@ import type { SupportedLocale } from "./types";
 
 export const DEFAULT_CODE_REGEX = "\\b[A-Za-z]{3,6}[-—–\\s]+\\d{3,6}\\b";
 
+// supjav 官方搜索模板按语言区分：中文/繁中走 /zh/ 前缀，英文无前缀
+export const SUPJAV_ZH_TEMPLATE = "https://supjav.com/zh/?s={code}";
+export const SUPJAV_EN_TEMPLATE = "https://supjav.com/?s={code}";
+
 export interface ExtensionSettings {
-	javtrailersTemplate: string;
+	// 空字符串 = 未自定义，跳转时按界面语言选择 supjav 官方模板
+	supjavTemplate: string;
 	javbusTemplate: string;
 	excludedHosts: string[];
 	customRegex: string;
@@ -15,13 +20,15 @@ export type LocaleOption = "auto" | SupportedLocale;
 export const SETTINGS_STORAGE_KEY = "javranking_search_settings";
 export const LOCALE_STORAGE_KEY = "javranking_user_locale";
 
-// 旧版本默认跳转 MissAV；若用户从未自定义过该模板，升级后应改用 JavTrailers
+// 旧版本默认跳转 MissAV；若用户从未自定义过该模板，升级后应改用新默认
 export const LEGACY_MISSAV_TEMPLATE = "https://missav.ws/cn/{code}";
+// 旧版本默认跳转 JavTrailers 搜索页
+export const LEGACY_JAVTRAILERS_TEMPLATE = "https://javtrailers.com/search/{code}";
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-	javtrailersTemplate: "https://javtrailers.com/search/{code}",
+	supjavTemplate: "",
 	javbusTemplate: "https://javdb.com/search?q={code}",
-	excludedHosts: ["javranking.cc"],
+	excludedHosts: [],
 	customRegex: DEFAULT_CODE_REGEX,
 };
 
@@ -102,22 +109,31 @@ export function getSettings(): ExtensionSettings {
 					.filter(Boolean)
 			: DEFAULT_SETTINGS.excludedHosts;
 
-		// 迁移旧字段 missavTemplate：用户自定义过（≠ 旧默认值）则保留，否则改用 JavTrailers 默认
+		// 旧字段迁移链：supjavTemplate → javtrailersTemplate → missavTemplate。
+		// 用户自定义过（≠ 各自旧默认值）则保留为 supjav 模板，否则用新默认（空 = 跟随语言）。
 		const legacyMissav =
 			typeof parsed.missavTemplate === "string" && parsed.missavTemplate.trim()
 				? parsed.missavTemplate.trim()
 				: null;
-		const migratedJavtrailers =
-			legacyMissav && legacyMissav !== LEGACY_MISSAV_TEMPLATE
-				? legacyMissav
-				: DEFAULT_SETTINGS.javtrailersTemplate;
+		const legacyJavtrailers =
+			typeof parsed.javtrailersTemplate === "string" &&
+			parsed.javtrailersTemplate.trim()
+				? parsed.javtrailersTemplate.trim()
+				: null;
+		const migratedTemplate =
+			legacyJavtrailers &&
+			legacyJavtrailers !== LEGACY_JAVTRAILERS_TEMPLATE
+				? legacyJavtrailers
+				: legacyMissav && legacyMissav !== LEGACY_MISSAV_TEMPLATE
+					? legacyMissav
+					: DEFAULT_SETTINGS.supjavTemplate;
 
 		return {
-			javtrailersTemplate:
-				typeof parsed.javtrailersTemplate === "string" &&
-				parsed.javtrailersTemplate.trim()
-					? parsed.javtrailersTemplate.trim()
-					: migratedJavtrailers,
+			supjavTemplate:
+				typeof parsed.supjavTemplate === "string" &&
+				parsed.supjavTemplate.trim()
+					? parsed.supjavTemplate.trim()
+					: migratedTemplate,
 			javbusTemplate:
 				typeof parsed.javbusTemplate === "string" &&
 				parsed.javbusTemplate.trim()
@@ -141,11 +157,11 @@ export function saveSettings(
 	try {
 		const current = getSettings();
 		const updated: ExtensionSettings = {
-			javtrailersTemplate:
-				settings.javtrailersTemplate !== undefined &&
-				settings.javtrailersTemplate.trim()
-					? settings.javtrailersTemplate.trim()
-					: current.javtrailersTemplate,
+			// 传入空字符串表示"恢复默认（跟随语言）"，因此与未传字段区分处理
+			supjavTemplate:
+				settings.supjavTemplate !== undefined
+					? settings.supjavTemplate.trim()
+					: current.supjavTemplate,
 			javbusTemplate:
 				settings.javbusTemplate !== undefined &&
 				settings.javbusTemplate.trim()
@@ -247,4 +263,20 @@ export function resolveSearchUrl(template: string, code: string): string {
 	}
 
 	return `${trimmedTemplate}/${encoded}`;
+}
+
+/**
+ * 构造 supJAV 跳转 URL：用户自定义模板优先；
+ * 模板为空时按界面语言使用官方默认（中文/繁中走 /zh/ 前缀，英文无前缀）。
+ */
+export function resolveSupjavUrl(
+	template: string,
+	code: string,
+	locale: SupportedLocale,
+): string {
+	if (template && template.trim()) {
+		return resolveSearchUrl(template, code);
+	}
+	const base = locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
+	return resolveSearchUrl(base, code);
 }

@@ -133,7 +133,7 @@ describe("locateCodeInTab", () => {
 
 		expect(markElements.length).toBe(1);
 		const mark = markElements[0];
-		expect(mark.className).toBe("javranking-locate-badge");
+		expect(mark.className).toBe("javcode-locate-badge");
 		expect(mark.scrollIntoView).toHaveBeenCalledWith({
 			behavior: "smooth",
 			block: "center",
