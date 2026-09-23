@@ -1,6 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, {
+	forwardRef,
+	useEffect,
+	useImperativeHandle,
+	useState,
+} from "react";
 import type { LocaleMessages } from "../../../src/lib/locales";
-import { EXTENSION_VERSION } from "../../../src/lib/release";
 import {
 	DEFAULT_CODE_REGEX,
 	DEFAULT_SETTINGS,
@@ -27,14 +31,18 @@ interface SettingsViewProps {
 	onLocaleChange?: (locale: SupportedLocale) => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({
-	locale,
-	t,
-	onBack,
-	onLocaleChange,
-}) => {
+// 暴露给顶部图标按钮的保存/重置操作；save 返回是否保存成功（校验失败时为 false）
+export interface SettingsViewHandle {
+	save: () => boolean;
+	reset: () => void;
+}
+
+export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
+	function SettingsView({ locale, t, onBack, onLocaleChange }, ref) {
 	const [supjav, setSupjav] = useState("");
 	const [javbus, setJavbus] = useState("");
+	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
+	const [javdbName, setJavdbName] = useState(DEFAULT_SETTINGS.javdbName);
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -52,6 +60,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
 		setSupjav(current.supjavTemplate || defaultSupjavTemplate);
 		setJavbus(current.javbusTemplate);
+		setSupjavName(current.supjavName || DEFAULT_SETTINGS.supjavName);
+		setJavdbName(current.javdbName || DEFAULT_SETTINGS.javdbName);
 		setLocaleOption(getSavedLocale());
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
@@ -96,11 +106,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 		setRegexError(null);
 	};
 
-	const handleSave = (e: React.FormEvent) => {
-		e.preventDefault();
+	// 保存当前配置（表单提交与顶部图标按钮共用）；返回是否保存成功
+	const saveCurrent = (): boolean => {
 		if (customRegex.trim() && !isValidRegex(customRegex)) {
 			setRegexError(t.regexSyntaxError);
-			return;
+			return false;
 		}
 		saveSettings({
 			supjavTemplate: supjav,
@@ -108,6 +118,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 			excludedHosts,
 			customRegex: customRegex.trim() || DEFAULT_CODE_REGEX,
 			previewVolume,
+			supjavName,
+			javdbName,
 		});
 		saveLocale(localeOption);
 		onLocaleChange?.(getEffectiveLocale(localeOption));
@@ -115,13 +127,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 		setTimeout(() => {
 			setSavedMessage(false);
 		}, 2000);
+		return true;
 	};
+
+	const handleSave = (e: React.FormEvent) => {
+		e.preventDefault();
+		saveCurrent();
+	};
+
+	useImperativeHandle(ref, () => ({
+		save: saveCurrent,
+		reset: handleReset,
+	}));
 
 	const handleReset = () => {
 		resetSettings();
 		// 恢复默认：把当前语言的官方模板填入输入框（而非留空）
 		setSupjav(defaultSupjavTemplate);
 		setJavbus(DEFAULT_SETTINGS.javbusTemplate);
+		setSupjavName(DEFAULT_SETTINGS.supjavName);
+		setJavdbName(DEFAULT_SETTINGS.javdbName);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
@@ -171,7 +196,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 				<span id="extension-version-label" className="settings-version__label">
 					{t.extensionVersionLabel}
 				</span>
-				<code className="settings-version__value">v{EXTENSION_VERSION}</code>
+				<code className="settings-version__value">
+					v{browser.runtime.getManifest().version}
+				</code>
 			</section>
 
 			<form className="settings-view__form" onSubmit={handleSave}>
@@ -297,8 +324,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 				</div>
 
 				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="supjav-name">
+						{t.platformNameLabel}
+					</label>
+					<input
+						id="supjav-name"
+						type="text"
+						className="settings-field__input"
+						value={supjavName}
+						onChange={(e) => setSupjavName(e.target.value)}
+						placeholder={DEFAULT_SETTINGS.supjavName}
+						spellCheck={false}
+						autoComplete="off"
+					/>
+				</div>
+
+				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="supjav-template">
-						{t.supjavLabel}
+						{t.platformUrlLabel(supjavName || DEFAULT_SETTINGS.supjavName)}
 					</label>
 					<input
 						id="supjav-template"
@@ -323,8 +366,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 				</div>
 
 				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="javdb-name">
+						{t.platformNameLabel}
+					</label>
+					<input
+						id="javdb-name"
+						type="text"
+						className="settings-field__input"
+						value={javdbName}
+						onChange={(e) => setJavdbName(e.target.value)}
+						placeholder={DEFAULT_SETTINGS.javdbName}
+						spellCheck={false}
+						autoComplete="off"
+					/>
+				</div>
+
+				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="javbus-template">
-						{t.javbusLabel}
+						{t.platformUrlLabel(javdbName || DEFAULT_SETTINGS.javdbName)}
 					</label>
 					<input
 						id="javbus-template"
@@ -346,27 +405,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 					</div>
 				</div>
 
-				<div className="settings-view__actions">
-					<button
-						type="submit"
-						className="popup-btn popup-btn--primary settings-btn--save"
-					>
-						{t.saveSettings}
-					</button>
-					<button
-						type="button"
-						className="settings-btn--reset"
-						onClick={handleReset}
-					>
-						{t.resetDefaults}
-					</button>
-					{savedMessage && (
-						<span className="settings-view__saved-toast">
-							{t.settingsSaved}
-						</span>
-					)}
-				</div>
+				{savedMessage && (
+					<span className="settings-view__saved-toast" role="status">
+						{t.settingsSaved}
+					</span>
+				)}
 			</form>
 		</div>
-	);
-};
+		);
+	},
+);

@@ -3,6 +3,7 @@ import { locateCodeInActiveTab } from "../../../src/lib/locate-code";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { normalizeCode } from "../../../src/lib/normalize-code";
 import {
+	DEFAULT_SETTINGS,
 	getSettings,
 	resolveSearchUrl,
 	resolveSupjavUrl,
@@ -27,6 +28,9 @@ export const CodeList: React.FC<CodeListProps> = ({
 	if (candidates.length === 0) return null;
 
 	const settings = getSettings();
+	// 按钮显示名称来自配置，空值时回退默认名称
+	const supjavName = settings.supjavName || DEFAULT_SETTINGS.supjavName;
+	const javdbName = settings.javdbName || DEFAULT_SETTINGS.javdbName;
 	const [locateStates, setLocateStates] = useState<
 		Record<
 			string,
@@ -182,19 +186,19 @@ export const CodeList: React.FC<CodeListProps> = ({
 								<button
 									type="button"
 									className="unmatched-item__link unmatched-item__link--supjav"
-									title={`Search ${code} on supJAV`}
+									title={`Search ${code} on ${supjavName}`}
 									onClick={() => handleSupjavClick(code)}
 								>
-									{t.supjav}
+									{supjavName}
 								</button>
 								<a
 									href={javdbUrl}
 									target="_blank"
 									rel="noopener noreferrer"
 									className="unmatched-item__link unmatched-item__link--javdb"
-									title={`Search ${code} on JavDB`}
+									title={`Search ${code} on ${javdbName}`}
 								>
-									{t.javdb}
+									{javdbName}
 								</a>
 							</div>
 						</li>

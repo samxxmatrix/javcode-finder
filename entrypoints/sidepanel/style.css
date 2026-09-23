@@ -49,9 +49,11 @@ button:focus-visible {
 ::-webkit-scrollbar {
 	width: 6px;
 }
+
 ::-webkit-scrollbar-track {
 	background: var(--bg-base);
 }
+
 ::-webkit-scrollbar-thumb {
 	background: var(--border-strong);
 	border-radius: 3px;
@@ -117,64 +119,18 @@ button:focus-visible {
 	cursor: pointer;
 	transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
+
 .popup-header__icon-btn:hover {
 	color: var(--accent-gold);
 	border-color: var(--accent-gold);
 }
+
 .popup-header__icon-btn--active {
 	color: var(--accent-gold);
 	background-color: rgba(245, 158, 11, 0.15);
 	border-color: var(--accent-gold);
 }
 
-.popup-update-notice {
-	background-color: rgba(245, 158, 11, 0.12);
-	border-bottom: 1px solid rgba(245, 158, 11, 0.45);
-}
-
-.popup-update-notice__link {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 10px 16px;
-	color: var(--text-primary);
-	text-decoration: none;
-	transition: background-color 0.15s ease;
-}
-
-.popup-update-notice__link:hover {
-	background-color: rgba(245, 158, 11, 0.18);
-}
-
-.popup-update-notice__icon {
-	width: 18px;
-	height: 18px;
-	flex: 0 0 auto;
-	color: var(--accent-gold-text);
-}
-
-.popup-update-notice__copy {
-	display: flex;
-	min-width: 0;
-	flex: 1;
-	flex-direction: column;
-	gap: 1px;
-	font-size: 12px;
-	line-height: 1.35;
-}
-
-.popup-update-notice__copy strong {
-	font-size: 13px;
-	color: var(--accent-gold-text);
-}
-
-.popup-update-notice__action {
-	flex: 0 0 auto;
-	font-size: 12px;
-	font-weight: 700;
-	color: var(--accent-gold-text);
-	white-space: nowrap;
-}
 .icon-gear,
 .icon-refresh {
 	width: 16px;
@@ -186,6 +142,7 @@ button:focus-visible {
 	from {
 		transform: rotate(0deg);
 	}
+
 	to {
 		transform: rotate(360deg);
 	}
@@ -206,6 +163,7 @@ button:focus-visible {
 	font-size: 13px;
 	line-height: 1.4;
 }
+
 .icon-warning {
 	width: 16px;
 	height: 16px;
@@ -227,27 +185,32 @@ button:focus-visible {
 	text-align: center;
 	padding: 36px 16px;
 }
+
 .popup-state__icon {
 	font-size: 34px;
 	margin-bottom: 12px;
 }
+
 .popup-state__title {
 	font-size: 16px;
 	font-weight: 700;
 	margin-bottom: 6px;
 	color: var(--text-primary);
 }
+
 .popup-state__desc {
 	font-size: 13.5px;
 	color: var(--text-secondary);
 	max-width: 320px;
 	line-height: 1.5;
 }
+
 .popup-state__message {
 	font-size: 14px;
 	color: var(--text-secondary);
 	margin-top: 4px;
 }
+
 .spinner {
 	width: 28px;
 	height: 28px;
@@ -257,8 +220,11 @@ button:focus-visible {
 	animation: spin 0.8s linear infinite;
 	margin-bottom: 14px;
 }
+
 @keyframes spin {
-	to { transform: rotate(360deg); }
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .popup-btn {
@@ -275,10 +241,12 @@ button:focus-visible {
 	align-items: center;
 	justify-content: center;
 }
+
 .popup-btn--primary {
 	background-color: var(--accent-gold);
 	color: #000;
 }
+
 .popup-btn--primary:hover {
 	background-color: var(--accent-gold-hover);
 }
@@ -288,6 +256,7 @@ button:focus-visible {
 	border: 1px solid var(--border-strong);
 	color: var(--text-secondary);
 }
+
 .popup-btn--secondary:hover {
 	border-color: var(--accent-gold);
 	color: var(--accent-gold);
@@ -339,8 +308,6 @@ button:focus-visible {
 }
 
 .unmatched-section {
-	margin-top: 18px;
-	padding-top: 16px;
 	border-top: 1px solid var(--border-subtle);
 }
 
@@ -453,13 +420,13 @@ button:focus-visible {
 }
 
 .unmatched-item__link--supjav:hover {
-	border-color: #d8201d;
-	color: #d8201d;
+	border-color: var(--accent-gold);
+	color: var(--accent-gold);
 }
 
 .unmatched-item__link--javdb:hover {
-	border-color: #3273dc;
-	color: #3273dc;
+	border-color: var(--accent-gold);
+	color: var(--accent-gold);
 }
 
 .unmatched-item__link--locate {
@@ -521,6 +488,7 @@ button:focus-visible {
 	border-radius: 4px;
 	transition: color 0.15s ease, background-color 0.15s ease;
 }
+
 .settings-view__back-btn:hover {
 	color: var(--accent-gold-hover);
 	background-color: var(--bg-surface-hover);
@@ -613,6 +581,7 @@ button:focus-visible {
 	border-radius: 4px;
 	transition: color 0.15s ease, background-color 0.15s ease;
 }
+
 .settings-field__reset-link:hover {
 	color: var(--accent-gold-hover);
 	background-color: var(--bg-surface-hover);
@@ -630,6 +599,7 @@ button:focus-visible {
 	outline: none;
 	transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+
 .settings-field__input:focus {
 	border-color: var(--accent-gold);
 	box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
@@ -643,6 +613,7 @@ button:focus-visible {
 .settings-field__input--error {
 	border-color: var(--accent-red) !important;
 }
+
 .settings-field__input--error:focus {
 	box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25) !important;
 }
@@ -691,6 +662,7 @@ button:focus-visible {
 	border-radius: 2px;
 	transition: color 0.15s ease, background-color 0.15s ease;
 }
+
 .excluded-host-chip__remove:hover {
 	color: var(--accent-red);
 	background-color: rgba(239, 68, 68, 0.15);
@@ -725,10 +697,12 @@ button:focus-visible {
 	cursor: pointer;
 	transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+
 .settings-field__select:focus {
 	border-color: var(--accent-gold);
 	box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
 }
+
 .settings-field__select option {
 	background-color: var(--bg-surface);
 	color: var(--text-primary);
@@ -783,6 +757,7 @@ button:focus-visible {
 	cursor: pointer;
 	transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
 }
+
 .settings-btn--reset:hover {
 	color: var(--text-primary);
 	border-color: var(--border-strong);

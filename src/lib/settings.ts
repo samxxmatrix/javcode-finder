@@ -15,6 +15,9 @@ export interface ExtensionSettings {
 	customRegex: string;
 	// 预览视频音量（0-100），所有预览播放统一使用
 	previewVolume: number;
+	// 跳转按钮显示名称（空 = 使用默认名称）
+	supjavName: string;
+	javdbName: string;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -33,6 +36,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	excludedHosts: [],
 	customRegex: DEFAULT_CODE_REGEX,
 	previewVolume: 100,
+	supjavName: "Supjav",
+	javdbName: "JavDB",
 };
 
 export function normalizeDomain(input: string): string {
@@ -148,6 +153,14 @@ export function getSettings(): ExtensionSettings {
 				parsed.previewVolume <= 100
 					? parsed.previewVolume
 					: DEFAULT_SETTINGS.previewVolume,
+			supjavName:
+				typeof parsed.supjavName === "string" && parsed.supjavName.trim()
+					? parsed.supjavName.trim()
+					: DEFAULT_SETTINGS.supjavName,
+			javdbName:
+				typeof parsed.javdbName === "string" && parsed.javdbName.trim()
+					? parsed.javdbName.trim()
+					: DEFAULT_SETTINGS.javdbName,
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -196,6 +209,14 @@ export function saveSettings(
 				settings.previewVolume <= 100
 					? settings.previewVolume
 					: current.previewVolume,
+			supjavName:
+				settings.supjavName !== undefined
+					? settings.supjavName.trim()
+					: current.supjavName,
+			javdbName:
+				settings.javdbName !== undefined
+					? settings.javdbName.trim()
+					: current.javdbName,
 		};
 		const storage = getStorage();
 		if (storage) {

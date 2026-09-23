@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { extractCandidatesInTab } from "../../src/lib/extract-codes";
 import { messages } from "../../src/lib/locales";
 import {
@@ -13,9 +13,8 @@ import type {
 	SupportedLocale,
 } from "../../src/lib/types";
 import { CodeList } from "./components/CodeList";
-import { SettingsView } from "./components/SettingsView";
+import { SettingsView, type SettingsViewHandle } from "./components/SettingsView";
 import { TrailerPreview } from "./components/TrailerPreview";
-import { UpdateNotice } from "../shared/UpdateNotice";
 
 export const App: React.FC = () => {
 	const [locale, setLocale] = useState<SupportedLocale>(() =>
@@ -36,6 +35,8 @@ export const App: React.FC = () => {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	// 点击番号后在列表上方展开的预告片预览
 	const [previewCode, setPreviewCode] = useState<string | null>(null);
+	// 顶部图标按钮调用设置页的保存/重置
+	const settingsRef = useRef<SettingsViewHandle>(null);
 
 	// 提取当前绑定/激活标签页的番号候选
 	const extractFromActiveTab = async (
@@ -210,35 +211,81 @@ export const App: React.FC = () => {
 					</h1>
 				</div>
 				<div className="popup-header__actions">
-					<button
-						type="button"
-						className="popup-header__icon-btn"
-						onClick={handleRefresh}
-						title={
-							locale === "zh-hans"
-								? "重新扫描页面"
-								: locale === "zh-hant"
-									? "重新掃描頁面"
-									: "Rescan Page"
-						}
-						aria-label="Rescan"
-					>
-						<svg
-							className={`icon-refresh ${status === "loading" ? "icon-refresh--spinning" : ""}`}
-
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							width="16"
-							height="16"
-							aria-hidden="true"
+					{showSettings ? (
+						<>
+							{/* 设置页：保存与恢复默认以图标方式置于顶部，替代原底部按钮 */}
+							<button
+								type="button"
+								className="popup-header__icon-btn"
+								onClick={() => {
+									// 保存成功（正则校验通过）后自动回到识别页面
+									if (settingsRef.current?.save()) {
+										setShowSettings(false);
+										runScan();
+									}
+								}}
+								title={t.saveSettings}
+								aria-label={t.saveSettings}
+							>
+								<svg
+									viewBox="0 0 1024 1024"
+									fill="currentColor"
+									width="15"
+									height="15"
+									aria-hidden="true"
+								>
+									<path d="M838.29394531 149.45142937H742.71314812v286.74316406c0 28.01462173-26.36770249 41.19847298-52.73463249 41.19847298H327.42994499c-28.01539421 0-46.14309311-14.83154297-46.14309311-41.19847298v-286.74316406H179.11451531c-28.01539421 0-46.14309311 29.66308594-46.14309312 57.67770767V833.35009766c0 26.36693001 18.1276989 41.19847298 46.14309312 41.19847297H838.29394531c28.01539421 0 52.73463249-14.83154297 52.7346325-41.19847297V207.12913704c0-28.01462173-26.36770249-57.67770767-52.7346325-57.67770767z"></path><path d="M327.42994499 446.08228874H689.97851563c9.88769531 0 19.77539063 0 19.77539062-8.24000358V149.45142937H314.24609375V437.84228516c0 8.24000359 3.29615593 8.24000359 13.18385124 8.24000358z m283.44700814-173.03466796c0-9.88769531 6.59153938-16.48000718 16.47923469-16.48000718s16.48000718 6.59231186 16.48000717 16.48000718V338.96533203c0 9.88769531-6.59231186 16.47923469-16.48000717 16.47923469S610.87695313 348.85302734 610.87695313 338.96533203v-65.91771126z" />
+								</svg>
+							</button>
+							<button
+								type="button"
+								className="popup-header__icon-btn"
+								onClick={() => settingsRef.current?.reset()}
+								title={t.resetDefaults}
+								aria-label={t.resetDefaults}
+							>
+								<svg
+									viewBox="0 0 1024 1024"
+									fill="currentColor"
+									width="16"
+									height="16"
+									aria-hidden="true"
+								>
+									<path d="M512 124.540541C297.513514 124.540541 124.540541 297.513514 124.540541 512s172.972973 387.459459 387.459459 387.459459 387.459459-172.972973 387.459459-387.459459S726.486486 124.540541 512 124.540541zM257.383784 361.167568l40.12973-11.070271 9.686486 35.978379c9.686486-16.605405 22.140541-31.827027 35.978378-45.664865 48.432432-47.048649 106.551351-70.572973 174.356757-70.572973 67.805405 0 125.924324 23.524324 174.356757 70.572973 23.524324 22.140541 41.513514 48.432432 53.967567 78.875675l-38.745945 16.605406c-9.686486-24.908108-24.908108-47.048649-44.281082-65.037838-40.12973-38.745946-88.562162-59.502703-145.297297-59.502703s-105.167568 19.372973-145.297297 59.502703c-12.454054 11.07027-22.140541 24.908108-31.827027 38.745946l40.12973-11.07027 11.07027 40.129729-106.551352 27.675676-27.675675-105.167567z m484.324324 307.2l-9.686486-35.978379c-11.07027 19.372973-24.908108 35.978378-40.12973 51.2-48.432432 47.048649-106.551351 70.572973-174.356757 70.572973-67.805405 0-125.924324-23.524324-174.356757-70.572973-23.524324-22.140541-41.513514-48.432432-53.967567-78.875675l38.745946-16.605406c9.686486 24.908108 24.908108 47.048649 44.281081 65.037838 40.12973 38.745946 88.562162 59.502703 145.297297 59.502703s105.167568-19.372973 145.297297-59.502703c13.837838-12.454054 24.908108-27.675676 34.594595-44.281081l-38.745946 11.07027-11.07027-40.12973 106.551351-27.675675 29.05946 105.167567-41.513514 11.070271z" />
+								</svg>
+							</button>
+						</>
+					) : (
+						<button
+							type="button"
+							className="popup-header__icon-btn"
+							onClick={handleRefresh}
+							title={
+								locale === "zh-hans"
+									? "重新扫描页面"
+									: locale === "zh-hant"
+										? "重新掃描頁面"
+										: "Rescan Page"
+							}
+							aria-label="Rescan"
 						>
-							<path
-								fillRule="evenodd"
-								d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-								clipRule="evenodd"
-							/>
-						</svg>
-					</button>
+							<svg
+								className={`icon-refresh ${status === "loading" ? "icon-refresh--spinning" : ""}`}
+
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								width="16"
+								height="16"
+								aria-hidden="true"
+							>
+								<path
+									fillRule="evenodd"
+									d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+									clipRule="evenodd"
+								/>
+							</svg>
+						</button>
+					)}
 					<button
 						type="button"
 						className={`popup-header__icon-btn ${showSettings ? "popup-header__icon-btn--active" : ""}`}
@@ -263,7 +310,6 @@ export const App: React.FC = () => {
 					</button>
 				</div>
 			</header>
-			<UpdateNotice t={t} />
 
 			{truncated && !showSettings && (
 				<div className="popup-alert popup-alert--warning" role="alert">
@@ -295,6 +341,7 @@ export const App: React.FC = () => {
 				)}
 				{showSettings ? (
 					<SettingsView
+						ref={settingsRef}
 						locale={locale}
 						t={t}
 						onBack={() => {
@@ -380,11 +427,6 @@ export const App: React.FC = () => {
 
 						{status === "results" && (
 							<div className="popup-results">
-								<div className="popup-results__bar">
-									<span className="popup-results__summary">
-										{t.summary(candidates.length)}
-									</span>
-								</div>
 								<CodeList
 									candidates={candidates}
 									t={t}

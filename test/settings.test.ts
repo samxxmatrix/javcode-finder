@@ -56,6 +56,20 @@ describe("settings", () => {
 		expect(getSettings().supjavTemplate).toBe("");
 	});
 
+	it("saves and restores custom button names", () => {
+		saveSettings({
+			supjavName: "Supjav2",
+			javdbName: "DB",
+		});
+		expect(getSettings().supjavName).toBe("Supjav2");
+		expect(getSettings().javdbName).toBe("DB");
+
+		// 清空名称 → 回退默认名称
+		saveSettings({ supjavName: "", javdbName: "" });
+		expect(getSettings().supjavName).toBe(DEFAULT_SETTINGS.supjavName);
+		expect(getSettings().javdbName).toBe(DEFAULT_SETTINGS.javdbName);
+	});
+
 	it("resets to default settings", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.org/{code}",
