@@ -38,14 +38,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 	const supjavName = settings.supjavName || DEFAULT_SETTINGS.supjavName;
 	const javdbName = settings.javdbName || DEFAULT_SETTINGS.javdbName;
 	const [locateStates, setLocateStates] = useState<
-		Record<
-			string,
-			{
-				status: "idle" | "success" | "not_found";
-				index?: number;
-				total?: number;
-			}
-		>
+		Record<string, { status: "idle" | "success" | "not_found" }>
 	>({});
 
 	// Deduplicate candidates
@@ -73,11 +66,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 		const res = await locateCodeInActiveTab(code);
 		setLocateStates((prev) => ({
 			...prev,
-			[code]: {
-				status: res.found ? "success" : "not_found",
-				index: res.matchIndex,
-				total: res.totalMatches,
-			},
+			[code]: { status: res.found ? "success" : "not_found" },
 		}));
 		setTimeout(() => {
 			setLocateStates((prev) => ({
@@ -109,17 +98,25 @@ export const CodeList: React.FC<CodeListProps> = ({
 							<span
 								className={`unmatched-item__code ${
 									isSelected ? "unmatched-item__code--selected" : ""
+								} ${
+									locateState.status === "success"
+										? "unmatched-item__code--locate-success"
+										: locateState.status === "not_found"
+											? "unmatched-item__code--locate-fail"
+											: ""
 								}`}
 								role={isSelected ? undefined : "button"}
 								tabIndex={isSelected ? -1 : 0}
 								title={isSelected ? undefined : t.previewTitle}
 								onClick={() => {
-									// 已选中的番号不再响应点击
+									// 点击番号：定位目标页面（重复点击循环下一匹配）+ 未选中时打开预览
+									void handleLocate(code);
 									if (!isSelected) onPreview(code);
 								}}
 								onKeyDown={(e) => {
 									if (e.key === "Enter" || e.key === " ") {
 										e.preventDefault();
+										void handleLocate(code);
 										if (!isSelected) onPreview(code);
 									}
 								}}
@@ -139,67 +136,6 @@ export const CodeList: React.FC<CodeListProps> = ({
 								</button>
 							)}
 							<div className="unmatched-item__links">
-								<button
-									type="button"
-									className={`unmatched-item__link unmatched-item__link--locate ${
-										locateState.status === "success"
-											? "unmatched-item__link--locate-success"
-											: locateState.status === "not_found"
-												? "unmatched-item__link--locate-fail"
-												: ""
-									}`}
-									onClick={() => handleLocate(code)}
-									title={t.locateTitle}
-									aria-label={`${t.locateTitle}: ${code}`}
-								>
-									{locateState.status === "success" ? (
-										<>
-											<svg
-												className="icon-locate"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-												width="13"
-												height="13"
-												aria-hidden="true"
-											>
-												<path
-													fillRule="evenodd"
-													d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-													clipRule="evenodd"
-												/>
-											</svg>
-											<span>
-												{locateState.total && locateState.total > 1
-													? `${t.locateSuccess} (${locateState.index}/${locateState.total})`
-													: t.locateSuccess}
-											</span>
-										</>
-									) : locateState.status === "not_found" ? (
-										<span>{t.locateNotFound}</span>
-									) : (
-										<>
-											<svg
-												className="icon-locate"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												strokeWidth="2.2"
-												strokeLinecap="round"
-												strokeLinejoin="round"
-												width="13"
-												height="13"
-												aria-hidden="true"
-											>
-												<circle cx="12" cy="12" r="7" />
-												<line x1="12" y1="1" x2="12" y2="5" />
-												<line x1="12" y1="19" x2="12" y2="23" />
-												<line x1="1" y1="12" x2="5" y2="12" />
-												<line x1="19" y1="12" x2="23" y2="12" />
-											</svg>
-											<span>{t.locate}</span>
-										</>
-									)}
-								</button>
 								<button
 									type="button"
 									className="unmatched-item__link unmatched-item__link--supjav"

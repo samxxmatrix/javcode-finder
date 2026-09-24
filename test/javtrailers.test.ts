@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildCoverUrlFromContentId,
 	buildTrailerUrlFromContentId,
+	parseDetailPageFallback,
 	parseSearchPageHtml,
 } from "../src/lib/javtrailers";
 
@@ -96,5 +97,32 @@ describe("buildTrailerUrlFromContentId", () => {
 	it("returns empty string for too-short contentId", () => {
 		expect(buildTrailerUrlFromContentId("ab")).toBe("");
 		expect(buildTrailerUrlFromContentId("")).toBe("");
+	});
+});
+
+describe("parseDetailPageFallback", () => {
+	// 截取自详情页真实 HTML：og:image 的背封图（pb_e）先于封面（pf_o1）出现，
+	// NUXT 数据含 sample MP4；兜底取第一张 mgstage 图即可
+	it("extracts the first mgstage image and sample trailer URLs", () => {
+		const html =
+			'<meta property="og:image" content="https://image.mgstage.com/images/prestige/abf/387/pb_e_abf-387.jpg">' +
+			'<div id="thumbnailContainer"><img src="https://image.mgstage.com/images/prestige/abf/387/pf_o1_abf-387.jpg" alt="img"></div>' +
+			'<script type="application/json" id="__NUXT_DATA__">["Reactive",1,{"video":5},"https://image.mgstage.com/images/prestige/abf/387/cap_t1_0_abf-387.jpg","https://sample.mgstage.com/sample/prestige/abf/387/abf-387_20260902T162004.mp4"]</script>';
+		expect(parseDetailPageFallback(html)).toEqual({
+			coverUrl: "https://image.mgstage.com/images/prestige/abf/387/pb_e_abf-387.jpg",
+			trailerUrl:
+				"https://sample.mgstage.com/sample/prestige/abf/387/abf-387_20260902T162004.mp4",
+		});
+	});
+
+	it("returns nulls when the page has no fallback media", () => {
+		expect(parseDetailPageFallback("<html>no media here</html>")).toEqual({
+			coverUrl: null,
+			trailerUrl: null,
+		});
+		expect(parseDetailPageFallback("")).toEqual({
+			coverUrl: null,
+			trailerUrl: null,
+		});
 	});
 });

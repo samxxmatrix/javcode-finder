@@ -1,13 +1,49 @@
 /**
- * 番号收藏的数据层：本地存储、云端 JSON 序列化、WebDAV 请求构造。
+ * 番号收藏的数据层：本地 localStorage、云端 JSON 序列化、WebDAV 请求构造。
  * 全部为纯函数，便于测试；网络请求在 background 执行。
  */
 
-/** browser.storage.local 中收藏列表的 key */
+/** localStorage 中收藏列表的 key（与设置同源存储，保证所有扩展页面可读） */
 export const FAVORITES_STORAGE_KEY = "favorites";
 
 /** 云端收藏文件名 */
 export const FAVORITES_FILE_NAME = "favorites.json";
+
+/**
+ * 解析本地存储的收藏 JSON（纯 string[] 数组）。
+ * null、非法 JSON、非数组一律返回空列表。
+ */
+export function parseStoredFavorites(raw: string | null): string[] {
+	if (!raw) return [];
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		return Array.isArray(parsed)
+			? parsed.filter((c): c is string => typeof c === "string")
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+/** 从 localStorage 读取收藏；存储不可用返回空列表 */
+export function loadFavorites(storage: Storage | null): string[] {
+	if (!storage) return [];
+	return parseStoredFavorites(storage.getItem(FAVORITES_STORAGE_KEY));
+}
+
+/**
+ * 保存收藏到 localStorage。
+ * 失败（存储不可用/配额）返回 false，调用方仅保留内存状态。
+ */
+export function saveFavorites(storage: Storage | null, codes: string[]): boolean {
+	if (!storage) return false;
+	try {
+		storage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(codes));
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /**
  * 切换收藏状态：已存在则移除，不存在则追加。

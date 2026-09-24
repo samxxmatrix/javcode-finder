@@ -3,6 +3,7 @@ import {
 	buildCoverUrlFromContentId,
 	buildTrailerUrlFromContentId,
 } from "../../../src/lib/javtrailers";
+import type { DetailPageFallback } from "../../../src/lib/javtrailers";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { getSettings } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
@@ -36,6 +37,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	onToggleFavorite,
 }) => {
 	const [coverError, setCoverError] = useState(false);
+	// 主媒体 404 时从详情页兜底的备用媒体（null = 未拉取；对象 = 已拉取，字段可为 null）
+	const [fallbackMedia, setFallbackMedia] = useState<DetailPageFallback | null>(null);
+	// 当前封面 src：空 = 用主封面；加载失败后切换为备用封面
+	const [coverSrc, setCoverSrc] = useState("");
+	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
+	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
 	// 标题译文（中文/繁中界面下通过谷歌翻译获取；失败或英文界面保持 null）
 	const [translatedTitle, setTranslatedTitle] = useState<string | null>(null);
@@ -63,6 +70,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		title: null,
 		resolving: true,
 	});
+	// 重新加载计数：点击标题行番号时递增，触发重新解析
+	const [reloadKey, setReloadKey] = useState(0);
 	const videoRef = useRef<HTMLVideoElement | null>(null);
 	const hlsRef = useRef<{ destroy(): void } | null>(null);
 	const rootRef = useRef<HTMLElement | null>(null);
@@ -104,7 +113,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return () => {
 			disposed = true;
 		};
-	}, [code]);
+	}, [code, reloadKey]);
 
 	// 封面/预告片/详情页 URL 一律以解析出的 Content ID 为准（无兜底猜测）
 	const coverUrl = resolution.contentId
@@ -114,9 +123,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		? buildTrailerUrlFromContentId(resolution.contentId)
 		: "";
 
-	// 解析到 Content ID 后封面 URL 变化，重置加载失败状态以重新尝试
+	// 解析到 Content ID 后封面 URL 变化，重置失败状态与封面 src 以重新尝试
 	useEffect(() => {
 		setCoverError(false);
+		setCoverSrc("");
+		setCoverLoading(false);
 	}, [coverUrl]);
 
 	// 中文/繁中界面下翻译标题；英文界面不翻译。失败保持 null（回退原文）
@@ -173,6 +184,59 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	}, []);
 
+	// 拉取详情页备用媒体；每个番号只拉一次（结果含 null 也缓存，不重复请求）
+	const requestFallback = async (): Promise<DetailPageFallback> => {
+		if (fallbackMedia) return fallbackMedia;
+		let result: DetailPageFallback = { coverUrl: null, trailerUrl: null };
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:resolve-fallback",
+				contentId: resolution.contentId,
+			})) as DetailPageFallback | undefined;
+			if (res) result = res;
+		} catch {
+			// 拉取失败保持空兜底
+		}
+		setFallbackMedia(result);
+		return result;
+	};
+
+	// 封面加载失败：立即隐藏 broken 占位，尝试详情页备用封面；仍失败才判定无封面
+	const handleCoverError = () => {
+		if (coverSrc) {
+			// 备用封面也失败
+			setCoverLoading(false);
+			setCoverError(true);
+			return;
+		}
+		setCoverLoading(true);
+		void (async () => {
+			const fb = await requestFallback();
+			if (fb.coverUrl) {
+				// 备用图加载完成后由 onLoad 恢复显示
+				setCoverSrc(fb.coverUrl);
+			} else {
+				setCoverLoading(false);
+				setCoverError(true);
+			}
+		})();
+	};
+
+	// HLS 404 后的兜底：用详情页的 sample MP4 直连播放
+	const playFallbackTrailer = async () => {
+		const fb = await requestFallback();
+		const video = videoRef.current;
+		if (!fb.trailerUrl || !video) {
+			setStatus("not_found");
+			return;
+		}
+		hlsRef.current?.destroy();
+		hlsRef.current = null;
+		video.src = fb.trailerUrl;
+		setStatus("playing");
+		void video.play().catch(() => setStatus("failed"));
+	};
+
 	const handlePlay = async () => {
 		const video = videoRef.current;
 		if (!video || status === "loading" || status === "playing") return;
@@ -196,8 +260,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				});
 				hls.on(Hls.Events.ERROR, (_event, data) => {
 					if (!data.fatal) return;
-					// 404 说明该番号无预告片；其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）按加载失败处理
-					setStatus(data.response?.code === 404 ? "not_found" : "failed");
+					// 404 说明该番号无 HLS 预告片；尝试详情页备用 MP4 兜底
+					if (data.response?.code === 404) {
+						void playFallbackTrailer();
+						return;
+					}
+					// 其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）按加载失败处理
+					setStatus("failed");
 					hlsRef.current?.destroy();
 					hlsRef.current = null;
 				});
@@ -212,6 +281,18 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		} catch {
 			setStatus("failed");
 		}
+	};
+
+	// 点击标题行番号：重置全部加载状态后重新解析预览
+	const handleReload = () => {
+		hlsRef.current?.destroy();
+		hlsRef.current = null;
+		setStatus("idle");
+		setCoverError(false);
+		setTranslatedTitle(null);
+		setTitleReady(false);
+		setResolution({ contentId: null, title: null, resolving: true });
+		setReloadKey((k) => k + 1);
 	};
 
 	const handleClose = () => {
@@ -229,7 +310,21 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			<header className="trailer-preview__header">
 				<h3 className="trailer-preview__title">
 					{t.previewTitle}{" "}
-					<span className="trailer-preview__code">{code}</span>
+					<span
+						className="trailer-preview__code"
+						onClick={handleReload}
+						title={t.reloadPreview}
+						role="button"
+						tabIndex={0}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								handleReload();
+							}
+						}}
+					>
+						{code}
+					</span>
 					<button
 						type="button"
 						className="trailer-preview__fav"
@@ -274,13 +369,20 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						</div>
 					) : (
 						<div className="trailer-preview__cover-layer">
+							{coverLoading && (
+								<span className="trailer-preview__loading" aria-hidden="true">
+									<span className="spinner" />
+								</span>
+							)}
 							<img
-								src={coverUrl}
+								src={coverSrc || coverUrl}
 								alt={`${code} cover`}
 								className="trailer-preview__cover"
-								loading="lazy"
 								referrerPolicy="no-referrer"
-								onError={() => setCoverError(true)}
+								onLoad={() => setCoverLoading(false)}
+								onError={handleCoverError}
+								// 不用 loading="lazy"：隐藏（display:none）期间懒加载不触发下载，onLoad 永不回调会死锁
+								style={coverLoading ? { display: "none" } : undefined}
 							/>
 							{status === "loading" ? (
 								// 点击播放后隐藏按钮，仅显示加载中的 spinner

@@ -23,10 +23,7 @@ export interface LocaleMessages {
 	settingsSaved: string;
 	backToScanner: string;
 	previewUrlLabel: string;
-	locate: string;
-	locateSuccess: string;
-	locateNotFound: string;
-	locateTitle: string;
+	reloadPreview: string;
 	languageLabel: string;
 	languageAuto: string;
 	excludedSitesLabel: string;
@@ -91,10 +88,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsSaved: "设置已保存！",
     backToScanner: "返回扫描",
     previewUrlLabel: "示例效果预览 (以 ABP-123 为例)：",
-    locate: "定位",
-    locateSuccess: "已定位",
-    locateNotFound: "未找到",
-    locateTitle: "在网页中定位此番号",
+    reloadPreview: "重新加载预览",
     languageLabel: "界面语言",
     languageAuto: "跟随系统",
     excludedSitesLabel: "排除站点黑名单",
@@ -121,7 +115,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "云盘同步（WebDAV）",
-    webdavUrlPlaceholder: "云盘地址，如 https://dav.jianguoyun.com/dav/javcodefinder/",
+    webdavUrlPlaceholder: "云盘地址，如 https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "用户名（邮箱）",
     webdavPassPlaceholder: "密码",
     webdavVerifying: "验证中…",
@@ -159,10 +153,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsSaved: "設定已儲存！",
     backToScanner: "返回掃描",
     previewUrlLabel: "範例效果預覽 (以 ABP-123 為例)：",
-    locate: "定位",
-    locateSuccess: "已定位",
-    locateNotFound: "未找到",
-    locateTitle: "在網頁中定位此番號",
+    reloadPreview: "重新載入預覽",
     languageLabel: "介面語言",
     languageAuto: "跟隨系統",
     excludedSitesLabel: "排除站點黑名單",
@@ -190,7 +181,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "雲端同步（WebDAV）",
-    webdavUrlPlaceholder: "雲端地址，如 https://dav.jianguoyun.com/dav/javcodefinder/",
+    webdavUrlPlaceholder: "雲端地址，如 https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "使用者名稱（信箱）",
     webdavPassPlaceholder: "密碼",
     webdavVerifying: "驗證中…",
@@ -229,10 +220,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsSaved: "Settings saved!",
     backToScanner: "Back to Scanner",
     previewUrlLabel: "Preview URL (e.g. ABP-123):",
-    locate: "Locate",
-    locateSuccess: "Located",
-    locateNotFound: "Not found",
-    locateTitle: "Locate this code on current page",
+    reloadPreview: "Reload preview",
     languageLabel: "Language",
     languageAuto: "Follow Browser",
     excludedSitesLabel: "Excluded Sites",
@@ -261,8 +249,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "Add to favorites",
     removeFavorite: "Remove from favorites",
     cloudSyncLabel: "Cloud Sync (WebDAV)",
-    webdavUrlPlaceholder:
-      "WebDAV URL, e.g. https://dav.jianguoyun.com/dav/javcodefinder/",
+    webdavUrlPlaceholder:"WebDAV URL, e.g. https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "Username (email)",
     webdavPassPlaceholder: "Password",
     webdavVerifying: "Verifying...",

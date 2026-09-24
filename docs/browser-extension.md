@@ -19,7 +19,7 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 ### 扫描（Scan）
 
 - 仅在用户主动触发后，通过 `browser.scripting.executeScript` 在 top-level document 注入自包含函数 `extractCandidatesInTab`。
-- 提取规则：默认正则 `\b[A-Za-z]{3,6}[-—–\s]+\d{3,6}\b`（可在设置中自定义），2 MiB 扫描上限，最多 500 个去重候选。
+- 提取规则：默认正则 `\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\s]+\d{3,6}\b`（可在设置中自定义），2 MiB 扫描上限，最多 500 个去重候选。
 - 候选过滤：拒绝 URL、协议前缀、常见域名后缀、文件扩展名等。
 - 不支持页面：`chrome://`、`chrome-extension://`、`edge://`、`about:`、浏览器商店页、`addons.mozilla.org`。
 

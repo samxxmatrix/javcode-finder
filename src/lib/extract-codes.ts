@@ -4,7 +4,7 @@ export const MAX_SCAN_CHARS = 2 * 1024 * 1024; // 2 MiB
 export const MAX_CANDIDATES = 500;
 export const MAX_CANDIDATE_LENGTH = 64;
 
-export const DEFAULT_CODE_REGEX = "\\b[A-Za-z]{3,6}[-—–\\s]+\\d{3,6}\\b";
+export const DEFAULT_CODE_REGEX = "\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b";
 export const CODE_REGEX = new RegExp(DEFAULT_CODE_REGEX, "gi");
 
 export function isValidCodeCandidate(rawCandidate: string): boolean {
@@ -116,7 +116,7 @@ export function extractCandidatesInTab(
 			truncated = true;
 		}
 
-		const DEFAULT_PATTERN = "\\b[A-Za-z]{3,6}[-—–\\s]+\\d{3,6}\\b";
+		const DEFAULT_PATTERN = "\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b";
 		let codeRegex: RegExp;
 		if (typeof customRegexPattern === "string" && customRegexPattern.trim()) {
 			try {

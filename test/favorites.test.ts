@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildBasicAuth,
 	classifyWebdavVerify,
+	FAVORITES_STORAGE_KEY,
 	isFavorite,
 	joinWebdavUrl,
+	loadFavorites,
 	parseFavorites,
+	parseStoredFavorites,
+	saveFavorites,
 	serializeFavorites,
 	toggleFavorite,
 } from "../src/lib/favorites";
@@ -103,5 +107,55 @@ describe("classifyWebdavVerify", () => {
 	it("maps anything else (including network errors) to failed", () => {
 		expect(classifyWebdavVerify(0)).toBe("failed");
 		expect(classifyWebdavVerify(500)).toBe("failed");
+	});
+});
+
+describe("local storage favorites", () => {
+	let storageMock: Record<string, string> = {};
+
+	beforeEach(() => {
+		storageMock = {};
+		vi.stubGlobal("localStorage", {
+			getItem: vi.fn((key: string) => storageMock[key] ?? null),
+			setItem: vi.fn((key: string, val: string) => {
+				storageMock[key] = val;
+			}),
+		});
+	});
+
+	it("saves and loads favorites through localStorage", () => {
+		expect(saveFavorites(localStorage, ["ABC-001", "XYZ-002"])).toBe(true);
+		expect(storageMock[FAVORITES_STORAGE_KEY]).toBe(
+			JSON.stringify(["ABC-001", "XYZ-002"]),
+		);
+		expect(loadFavorites(localStorage)).toEqual(["ABC-001", "XYZ-002"]);
+	});
+
+	it("returns empty list when localStorage has nothing", () => {
+		expect(loadFavorites(localStorage)).toEqual([]);
+	});
+
+	it("returns empty list when storage is unavailable", () => {
+		expect(loadFavorites(null)).toEqual([]);
+		expect(saveFavorites(null, ["ABC-001"])).toBe(false);
+	});
+
+	it("tolerates malformed JSON in storage", () => {
+		storageMock[FAVORITES_STORAGE_KEY] = "not-json{{";
+		expect(loadFavorites(localStorage)).toEqual([]);
+	});
+});
+
+describe("parseStoredFavorites", () => {
+	it("parses a stored array", () => {
+		expect(parseStoredFavorites(JSON.stringify(["ABC-001"]))).toEqual([
+			"ABC-001",
+		]);
+	});
+
+	it("rejects null and non-array payloads", () => {
+		expect(parseStoredFavorites(null)).toEqual([]);
+		expect(parseStoredFavorites(JSON.stringify({ codes: ["ABC-001"] }))).toEqual([]);
+		expect(parseStoredFavorites("garbage")).toEqual([]);
 	});
 });

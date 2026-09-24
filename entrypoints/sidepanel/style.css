@@ -423,37 +423,17 @@ button:focus-visible {
 	color: var(--accent-gold);
 }
 
-.unmatched-item__link--locate {
-	cursor: pointer;
-	gap: 4px;
-	background-color: rgba(245, 158, 11, 0.08);
-	color: var(--accent-gold);
-	border-color: rgba(245, 158, 11, 0.28);
+/* 番号定位结果边框：绿=成功、红=失败，3 秒后状态清除恢复选中样式 */
+.unmatched-item__code--locate-success {
+	outline: 2px solid #34d399;
+	color: #34d399;
 }
 
-.unmatched-item__link--locate:hover {
-	background-color: var(--accent-gold);
-	color: #000000;
-	border-color: var(--accent-gold);
+.unmatched-item__code--locate-fail {
+	outline: 2px solid #f87171;
+	color: #f87171;
 }
 
-.unmatched-item__link--locate-success {
-	background-color: rgba(16, 185, 129, 0.2) !important;
-	color: #34d399 !important;
-	border-color: rgba(16, 185, 129, 0.5) !important;
-}
-
-.unmatched-item__link--locate-fail {
-	background-color: rgba(239, 68, 68, 0.2) !important;
-	color: #f87171 !important;
-	border-color: rgba(239, 68, 68, 0.5) !important;
-}
-
-.icon-locate {
-	width: 13px;
-	height: 13px;
-	flex-shrink: 0;
-}
 
 .settings-view {
 	display: flex;
@@ -793,6 +773,16 @@ button:focus-visible {
 	color: var(--accent-gold-text);
 	font-family: var(--font-mono);
 	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+	padding: 1px 4px;
+	border-radius: 4px;
+	transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+/* 点击番号重新加载预览 */
+.trailer-preview__code:hover {
+	color: var(--accent-gold);
+	background-color: rgba(245, 158, 11, 0.12);
 }
 
 .trailer-preview__close {

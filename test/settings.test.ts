@@ -234,7 +234,7 @@ describe("settings", () => {
 
 	describe("regex validation and custom regex settings", () => {
 		it("validates regex patterns", () => {
-			expect(isValidRegex("\\b[A-Za-z]{3,6}[-—–\\s]+\\d{3,6}\\b")).toBe(true);
+			expect(isValidRegex("\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b")).toBe(true);
 			expect(isValidRegex("[A-Z]+-\\d+")).toBe(true);
 			expect(isValidRegex("[unclosed-group")).toBe(false);
 			expect(isValidRegex("")).toBe(false);

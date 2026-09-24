@@ -2,7 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { extractCandidatesInTab } from "../../src/lib/extract-codes";
 import {
 	FAVORITES_STORAGE_KEY,
+	loadFavorites,
 	parseFavorites,
+	parseStoredFavorites,
+	saveFavorites,
 	serializeFavorites,
 	toggleFavorite,
 } from "../../src/lib/favorites";
@@ -11,6 +14,7 @@ import {
 	DEFAULT_CODE_REGEX,
 	getEffectiveLocale,
 	getSettings,
+	getStorage,
 	isHostExcluded,
 } from "../../src/lib/settings";
 import type {
@@ -171,7 +175,7 @@ export const App: React.FC = () => {
 			const codes = parseFavorites(res.data);
 			if (codes.length === 0) return;
 			setFavorites(codes);
-			await browser.storage.local.set({ [FAVORITES_STORAGE_KEY]: codes });
+			saveFavorites(getStorage(), codes);
 		} catch (err) {
 			console.warn("[JavCode Finder] 云端拉取失败:", err);
 		}
@@ -199,7 +203,8 @@ export const App: React.FC = () => {
 	const handleToggleFavorite = (code: string) => {
 		const next = toggleFavorite(favorites, code);
 		setFavorites(next);
-		void browser.storage.local.set({ [FAVORITES_STORAGE_KEY]: next });
+		// 本地写入失败仅保留内存状态；云端推送照常执行
+		saveFavorites(getStorage(), next);
 		if (cloudPushTimerRef.current) clearTimeout(cloudPushTimerRef.current);
 		cloudPushTimerRef.current = setTimeout(() => {
 			void pushToCloud(next);
@@ -208,37 +213,21 @@ export const App: React.FC = () => {
 
 	// 加载本地收藏；本地为空且已配置云端时尝试拉取（换设备/换浏览器场景）
 	useEffect(() => {
-		void (async () => {
-			try {
-				const stored = await browser.storage.local.get(FAVORITES_STORAGE_KEY);
-				const localCodes: unknown = stored[FAVORITES_STORAGE_KEY];
-				const codes = Array.isArray(localCodes)
-					? localCodes.filter((c): c is string => typeof c === "string")
-					: [];
-				setFavorites(codes);
-				if (codes.length === 0) {
-					await pullFromCloud();
-				}
-			} catch {
-				// 存储读取失败保持空列表
-			}
-		})();
-
-		// 其他面板的收藏变化 → 只更新 UI，不重复推送云端
-		const handleFavoritesChanged = (
-			changes: Record<string, { newValue?: unknown }>,
-		) => {
-			const change = changes[FAVORITES_STORAGE_KEY];
-			if (change && Array.isArray(change.newValue)) {
-				setFavorites(change.newValue);
-			}
-		};
-		if (typeof browser !== "undefined" && browser.storage?.onChanged) {
-			browser.storage.onChanged.addListener(handleFavoritesChanged);
-			return () => {
-				browser.storage.onChanged.removeListener(handleFavoritesChanged);
-			};
+		const codes = loadFavorites(getStorage());
+		setFavorites(codes);
+		if (codes.length === 0) {
+			void pullFromCloud();
 		}
+
+		// 其他面板写入收藏时同步 UI（storage 事件只在其他页面触发，天然不会重复推送云端）
+		const handleStorageEvent = (e: StorageEvent) => {
+			if (e.key !== FAVORITES_STORAGE_KEY) return;
+			setFavorites(parseStoredFavorites(e.newValue));
+		};
+		window.addEventListener("storage", handleStorageEvent);
+		return () => {
+			window.removeEventListener("storage", handleStorageEvent);
+		};
 	}, []);
 
 	useEffect(() => {

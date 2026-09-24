@@ -1,4 +1,4 @@
-import { parseSearchPageHtml } from "../src/lib/javtrailers";
+import { parseDetailPageFallback, parseSearchPageHtml } from "../src/lib/javtrailers";
 import {
 	buildBasicAuth,
 	joinWebdavUrl,
@@ -108,6 +108,7 @@ export default defineBackground(() => {
 					webdavUser?: string;
 					webdavPass?: string;
 					body?: string;
+					contentId?: string;
 				};
 
 				// 标题翻译：DeepL API。无 key 或失败返回空译文（调用方回退原文）
@@ -260,6 +261,32 @@ export default defineBackground(() => {
 							sendResponse({ ok: res.ok, status: res.status });
 						} catch {
 							sendResponse({ ok: false, status: 0 });
+						}
+					})();
+					return true;
+				}
+
+				// 详情页兜底：主媒体服务 404 时，从详情页提取 mgstage 封面与 sample MP4
+				if (msg?.type === "jt:resolve-fallback") {
+					const contentId = (msg.contentId || "").trim();
+					void (async () => {
+						if (!contentId) {
+							sendResponse({ coverUrl: null, trailerUrl: null });
+							return;
+						}
+						try {
+							const res = await fetch(
+								`https://javtrailers.com/video/${encodeURIComponent(contentId)}`,
+								{ signal: AbortSignal.timeout(5000) },
+							);
+							if (!res.ok) {
+								sendResponse({ coverUrl: null, trailerUrl: null });
+								return;
+							}
+							const html = await res.text();
+							sendResponse(parseDetailPageFallback(html));
+						} catch {
+							sendResponse({ coverUrl: null, trailerUrl: null });
 						}
 					})();
 					return true;

@@ -1,7 +1,7 @@
 import { detectLocale } from "./locales";
 import type { SupportedLocale } from "./types";
 
-export const DEFAULT_CODE_REGEX = "\\b[A-Za-z]{3,6}[-—–\\s]+\\d{3,6}\\b";
+export const DEFAULT_CODE_REGEX = "\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b";
 
 // supjav 官方搜索模板按语言区分：中文/繁中走 /zh/ 前缀，英文无前缀
 export const SUPJAV_ZH_TEMPLATE = "https://supjav.com/zh/?s={code}";
@@ -96,7 +96,7 @@ export function isValidRegex(pattern: string): boolean {
 	}
 }
 
-function getStorage(): Storage | null {
+export function getStorage(): Storage | null {
 	try {
 		if (typeof localStorage !== "undefined") {
 			return localStorage;

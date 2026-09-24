@@ -213,20 +213,11 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 			}
 		}
 
-		// Smoothly fade out and unwrap the badge after 2.6s
+		// 2.6s 后停止脉冲与阴影，保留金底黑字的静态标记；
+		// 标记持续到下次定位时被统一清理
 		setTimeout(() => {
-			mark.style.transition = "opacity 0.4s ease";
-			mark.style.opacity = "0";
-			setTimeout(() => {
-				const parent = mark.parentNode;
-				if (parent) {
-					while (mark.firstChild) {
-						parent.insertBefore(mark.firstChild, mark);
-					}
-					parent.removeChild(mark);
-					parent.normalize();
-				}
-			}, 400);
+			mark.style.animation = "none";
+			mark.style.boxShadow = "none";
 		}, 2600);
 
 		return {

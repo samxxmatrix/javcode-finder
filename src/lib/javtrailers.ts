@@ -80,3 +80,24 @@ export function buildTrailerUrlFromContentId(contentId: string): string {
 	const prefix = contentId.slice(0, 3);
 	return `https://media.javtrailers.com/hlsvideo/freepv/${contentId[0]}/${prefix}/${contentId}/playlist.m3u8`;
 }
+
+export interface DetailPageFallback {
+	coverUrl: string | null;
+	trailerUrl: string | null;
+}
+
+/**
+ * 解析详情页 HTML，提取备用媒体（主媒体服务 404 时兜底）：
+ * - 封面：第一张 mgstage 图片（og:image 的包装图）
+ * - 预告片：mgstage sample MP4 直链（NUXT 数据中的 trailer 字段）
+ * 提取不到时对应字段为 null。
+ */
+export function parseDetailPageFallback(html: string): DetailPageFallback {
+	if (!html) return { coverUrl: null, trailerUrl: null };
+	const cover =
+		html.match(/https:\/\/image\.mgstage\.com[^"\s\\]+\.(?:jpg|webp|png)/i)?.[0] ??
+		null;
+	const trailer =
+		html.match(/https:\/\/sample\.mgstage\.com[^"\\]+\.mp4/i)?.[0] ?? null;
+	return { coverUrl: cover, trailerUrl: trailer };
+}
