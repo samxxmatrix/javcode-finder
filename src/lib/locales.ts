@@ -45,11 +45,10 @@ export interface LocaleMessages {
 	previewTitle: string;
 	playTrailer: string;
 	previewVolumeLabel: string;
-	trailerUnavailable: string;
-	trailerLoadFailed: string;
 	previewUnavailable: string;
 	closePreview: string;
-	openOnJavtrailers: string;
+	retryTranslate: string;
+	deeplApiKeyLabel: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -100,11 +99,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     previewTitle: "预告片",
     playTrailer: "播放预告片",
     previewVolumeLabel: "预览视频音量",
-    trailerUnavailable: "该番号暂无预告片",
-    trailerLoadFailed: "预告片加载失败",
-    previewUnavailable: "未获取到预告片",
+    previewUnavailable: "该番号暂无预告片",
     closePreview: "关闭预览",
-    openOnJavtrailers: "在 JavTrailers 打开",
+    retryTranslate: "重新翻译",
+    deeplApiKeyLabel: "DeepL API Key",
   },
 
   "zh-hant": {
@@ -155,11 +153,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     previewTitle: "預告片預覽",
     playTrailer: "播放預告片",
     previewVolumeLabel: "預覽影片音量",
-    trailerUnavailable: "該番號暫無預告片",
-    trailerLoadFailed: "預告片載入失敗",
     previewUnavailable: "未獲取到預告片",
     closePreview: "關閉預覽",
-    openOnJavtrailers: "在 JavTrailers 開啟",
+    retryTranslate: "重新翻譯",
+    deeplApiKeyLabel: "DeepL API Key",
   },
 
   en: {
@@ -212,11 +209,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     previewTitle: "Trailer Preview",
     playTrailer: "Play Trailer",
     previewVolumeLabel: "Preview volume",
-    trailerUnavailable: "No trailer available for this code",
-    trailerLoadFailed: "Failed to load trailer",
     previewUnavailable: "Trailer unavailable",
     closePreview: "Close preview",
-    openOnJavtrailers: "Open on JavTrailers",
+    retryTranslate: "Retry translation",
+    deeplApiKeyLabel: "DeepL API Key",
   },
 };
 

@@ -18,6 +18,8 @@ export interface ExtensionSettings {
 	// 跳转按钮显示名称（空 = 使用默认名称）
 	supjavName: string;
 	javdbName: string;
+	// DeepL API key（空 = 未配置，标题翻译不可用）
+	deeplApiKey: string;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	previewVolume: 100,
 	supjavName: "Supjav",
 	javdbName: "JavDB",
+	deeplApiKey: "",
 };
 
 export function normalizeDomain(input: string): string {
@@ -161,6 +164,8 @@ export function getSettings(): ExtensionSettings {
 				typeof parsed.javdbName === "string" && parsed.javdbName.trim()
 					? parsed.javdbName.trim()
 					: DEFAULT_SETTINGS.javdbName,
+			deeplApiKey:
+				typeof parsed.deeplApiKey === "string" ? parsed.deeplApiKey.trim() : "",
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -217,6 +222,10 @@ export function saveSettings(
 				settings.javdbName !== undefined
 					? settings.javdbName.trim()
 					: current.javdbName,
+			deeplApiKey:
+				settings.deeplApiKey !== undefined
+					? settings.deeplApiKey.trim()
+					: current.deeplApiKey,
 		};
 		const storage = getStorage();
 		if (storage) {

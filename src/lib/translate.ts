@@ -1,32 +1,36 @@
 /**
- * 谷歌翻译非官方公开端点（client=gtx）的 URL 构造与响应解析。
- * 该端点无官方 SLA，失败时调用方回退原文。
+ * 标题翻译的数据层：DeepL API（Free 计划端点 api-free.deepl.com）。
+ * URL/请求构造与响应解析均为纯函数，便于测试。
  */
 
 export type TranslateTarget = "zh-CN" | "zh-TW";
 
+/** DeepL Free 计划端点 */
+export const DEEPL_API_URL = "https://api-free.deepl.com/v2/translate";
+
 /**
- * 构造翻译请求 URL。tl 按界面语言区分：简体 → zh-CN，繁体 → zh-TW。
+ * DeepL 请求体（application/x-www-form-urlencoded）。
+ * 目标语言：简体 ZH、繁体 ZH-HANT。
  */
-export function buildTranslateUrl(text: string, target: TranslateTarget): string {
-	return (
-		"https://translate.googleapis.com/translate_a/single" +
-		`?client=gtx&sl=auto&tl=${target}&dt=t&q=${encodeURIComponent(text)}`
-	);
+export function buildDeepLBody(
+	text: string,
+	target: TranslateTarget,
+): URLSearchParams {
+	const body = new URLSearchParams();
+	body.set("text", text);
+	body.set("target_lang", target === "zh-TW" ? "ZH-HANT" : "ZH");
+	return body;
 }
 
 /**
- * 解析 translate_a/single 响应：拼接所有译文片段。
- * 响应结构：[[["译文片段","原文",...], ...], ...]
- * 解析失败返回空字符串（调用方回退原文）。
+ * 解析 DeepL 响应：{ translations: [{ text }] }
+ * 失败返回空字符串（调用方回退原文）。
  */
-export function parseTranslateResponse(data: unknown): string {
+export function parseDeepLResponse(data: unknown): string {
 	try {
-		const segments = (data as unknown[])?.[0];
-		if (!Array.isArray(segments)) return "";
-		return segments
-			.map((seg) => (Array.isArray(seg) ? String(seg[0] ?? "") : ""))
-			.join("");
+		const translations = (data as { translations?: Array<{ text?: string }> })
+			?.translations;
+		return translations?.[0]?.text ?? "";
 	} catch {
 		return "";
 	}

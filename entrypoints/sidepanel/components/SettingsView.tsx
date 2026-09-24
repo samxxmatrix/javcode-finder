@@ -43,6 +43,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [javbus, setJavbus] = useState("");
 	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
 	const [javdbName, setJavdbName] = useState(DEFAULT_SETTINGS.javdbName);
+	const [deeplApiKey, setDeeplApiKey] = useState("");
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -62,6 +63,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setJavbus(current.javbusTemplate);
 		setSupjavName(current.supjavName || DEFAULT_SETTINGS.supjavName);
 		setJavdbName(current.javdbName || DEFAULT_SETTINGS.javdbName);
+		setDeeplApiKey(current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
@@ -120,6 +122,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			previewVolume,
 			supjavName,
 			javdbName,
+			deeplApiKey,
 		});
 		saveLocale(localeOption);
 		onLocaleChange?.(getEffectiveLocale(localeOption));
@@ -147,6 +150,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setJavbus(DEFAULT_SETTINGS.javbusTemplate);
 		setSupjavName(DEFAULT_SETTINGS.supjavName);
 		setJavdbName(DEFAULT_SETTINGS.javdbName);
+		setDeeplApiKey("");
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
@@ -239,6 +243,22 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							{previewVolume}%
 						</span>
 					</div>
+				</div>
+
+				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="deepl-key">
+						{t.deeplApiKeyLabel}
+					</label>
+					<input
+						id="deepl-key"
+						type="text"
+						className="settings-field__input settings-field__input--code"
+						value={deeplApiKey}
+						onChange={(e) => setDeeplApiKey(e.target.value)}
+						placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
+						spellCheck={false}
+						autoComplete="off"
+					/>
 				</div>
 
 				<div className="settings-field">

@@ -1,37 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { buildTranslateUrl, parseTranslateResponse } from "../src/lib/translate";
+import {
+	buildDeepLBody,
+	parseDeepLResponse,
+} from "../src/lib/translate";
 
-describe("buildTranslateUrl", () => {
-	it("builds URL with zh-CN target for simplified Chinese", () => {
-		expect(buildTranslateUrl("Hello world", "zh-CN")).toBe(
-			"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=Hello%20world",
-		);
+describe("buildDeepLBody", () => {
+	it("uses ZH target for simplified Chinese", () => {
+		const body = buildDeepLBody("Hello world", "zh-CN");
+		expect(body.get("text")).toBe("Hello world");
+		expect(body.get("target_lang")).toBe("ZH");
 	});
 
-	it("builds URL with zh-TW target for traditional Chinese", () => {
-		expect(buildTranslateUrl("Hello world", "zh-TW")).toBe(
-			"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-TW&dt=t&q=Hello%20world",
-		);
+	it("uses ZH-HANT target for traditional Chinese", () => {
+		const body = buildDeepLBody("Hello world", "zh-TW");
+		expect(body.get("target_lang")).toBe("ZH-HANT");
 	});
 });
 
-describe("parseTranslateResponse", () => {
-	it("joins translated segments", () => {
+describe("parseDeepLResponse", () => {
+	it("extracts the translated text", () => {
 		expect(
-			parseTranslateResponse([
-				[
-					["你好，", "Hello,", null, null, 10],
-					["世界", "world", null, null, 10],
+			parseDeepLResponse({
+				translations: [
+					{
+						detected_source_language: "EN",
+						text: "你好世界",
+					},
 				],
-				null,
-				"en",
-			]),
-		).toBe("你好，世界");
+			}),
+		).toBe("你好世界");
 	});
 
 	it("returns empty string for malformed responses", () => {
-		expect(parseTranslateResponse(null)).toBe("");
-		expect(parseTranslateResponse({})).toBe("");
-		expect(parseTranslateResponse([null, null])).toBe("");
+		expect(parseDeepLResponse(null)).toBe("");
+		expect(parseDeepLResponse({})).toBe("");
+		expect(parseDeepLResponse({ translations: [] })).toBe("");
 	});
 });

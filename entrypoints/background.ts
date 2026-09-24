@@ -1,7 +1,8 @@
 import { parseSearchPageHtml } from "../src/lib/javtrailers";
 import {
-	buildTranslateUrl,
-	parseTranslateResponse,
+	buildDeepLBody,
+	DEEPL_API_URL,
+	parseDeepLResponse,
 	type TranslateTarget,
 } from "../src/lib/translate";
 
@@ -83,27 +84,45 @@ export default defineBackground(() => {
 					code?: string;
 					text?: string;
 					target?: TranslateTarget;
+					deeplKey?: string;
 				};
 
-				// 标题翻译：谷歌翻译公开端点，失败返回空译文（调用方回退原文）
+				// 标题翻译：DeepL API。无 key 或失败返回空译文（调用方回退原文）
 				if (msg?.type === "jt:translate" && msg.text) {
 					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
+					const key = (msg.deeplKey || "").trim();
 					void (async () => {
+						if (!key) {
+							sendResponse({ translated: "", error: "no-key" });
+							return;
+						}
 						try {
-							const res = await fetch(
-								buildTranslateUrl(msg.text!, target),
-								{ signal: AbortSignal.timeout(5000) },
-							);
+							const res = await fetch(DEEPL_API_URL, {
+								method: "POST",
+								headers: {
+									Authorization: `DeepL-Auth-Key ${key}`,
+									"Content-Type": "application/x-www-form-urlencoded",
+								},
+								body: buildDeepLBody(msg.text!, target),
+								signal: AbortSignal.timeout(5000),
+							});
 							if (!res.ok) {
-								sendResponse({ translated: "" });
+								sendResponse({
+									translated: "",
+									error: `HTTP ${res.status}`,
+								});
 								return;
 							}
 							const data = await res.json();
 							sendResponse({
-								translated: parseTranslateResponse(data),
+								translated: parseDeepLResponse(data),
 							});
-						} catch {
-							sendResponse({ translated: "" });
+						} catch (error) {
+							sendResponse({
+								translated: "",
+								error:
+									error instanceof Error ? error.message : String(error),
+							});
 						}
 					})();
 					return true;
