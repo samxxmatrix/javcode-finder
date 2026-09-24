@@ -13,6 +13,7 @@ import {
 	parseGoogleResponse,
 	type TranslateTarget,
 } from "../src/lib/translate";
+import { clearCodeMarksForTab } from "../src/lib/mark-codes";
 
 export default defineBackground(() => {
 	// 给 media.javtrailers.com 响应注入 CORS 头，使扩展面板内的 hls.js 能跨域拉取 HLS 预告片流。
@@ -426,6 +427,8 @@ export default defineBackground(() => {
 					openTabs.add(tabId);
 					port.onDisconnect.addListener(() => {
 						openTabs.delete(tabId);
+						// 面板关闭后页面上的番号圆点标记随之清理
+						void clearCodeMarksForTab(tabId);
 						// Ensure this tab does not retain enabled state once closed
 						if (sidePanel?.setOptions) {
 							sidePanel

@@ -10,6 +10,7 @@ import {
 	toggleFavorite,
 } from "../../src/lib/favorites";
 import { messages } from "../../src/lib/locales";
+import { markCodesForTab } from "../../src/lib/mark-codes";
 import {
 	DEFAULT_CODE_REGEX,
 	getEffectiveLocale,
@@ -52,10 +53,10 @@ export const App: React.FC = () => {
 	// 云端推送防抖计时器（合并连续收藏操作，降低请求频率）
 	const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	// 提取当前绑定/激活标签页的番号候选
+	// 提取当前绑定/激活标签页的番号候选；tabId 供后续在同一标签页上标记圆点
 	const extractFromActiveTab = async (
 		settings: ReturnType<typeof getSettings>,
-	): Promise<ExtractionResult & { excluded?: boolean }> => {
+	): Promise<ExtractionResult & { excluded?: boolean; tabId?: number }> => {
 		let activeTab: { id?: number; url?: string } | undefined;
 		if (boundTabId) {
 			try {
@@ -84,7 +85,12 @@ export const App: React.FC = () => {
 
 		const url = activeTab.url || "";
 		if (isHostExcluded(url, settings.excludedHosts)) {
-			return { candidates: [], truncated: false, excluded: true };
+			return {
+				candidates: [],
+				truncated: false,
+				excluded: true,
+				tabId: activeTab.id,
+			};
 		}
 
 		// Check for restricted URLs if available
@@ -98,7 +104,12 @@ export const App: React.FC = () => {
 			lowerUrl.startsWith("chromewebstore.google.com") ||
 			lowerUrl.startsWith("addons.mozilla.org")
 		) {
-			return { candidates: [], truncated: false, unsupported: true };
+			return {
+				candidates: [],
+				truncated: false,
+				unsupported: true,
+				tabId: activeTab.id,
+			};
 		}
 
 		try {
@@ -111,13 +122,21 @@ export const App: React.FC = () => {
 			const firstResult =
 				results && results.length > 0 ? results[0]?.result : undefined;
 			if (!firstResult) {
-				return { candidates: [], truncated: false };
+				return { candidates: [], truncated: false, tabId: activeTab.id };
 			}
 
-			return firstResult as ExtractionResult;
+			return {
+				...(firstResult as ExtractionResult),
+				tabId: activeTab.id,
+			};
 		} catch (err) {
 			console.warn("ExecuteScript failed on tab:", activeTab.id, err);
-			return { candidates: [], truncated: false, unsupported: true };
+			return {
+				candidates: [],
+				truncated: false,
+				unsupported: true,
+				tabId: activeTab.id,
+			};
 		}
 	};
 
@@ -132,6 +151,14 @@ export const App: React.FC = () => {
 
 		try {
 			const extraction = await extractFromActiveTab(settings);
+
+			// 扫描后同步页面圆点标记：有候选则标记，无候选/排除/不支持时仅清理旧标记
+			if (extraction.tabId !== undefined) {
+				void markCodesForTab(
+					extraction.tabId,
+					extraction.candidates.length > 0 ? extraction.candidates : [],
+				);
+			}
 
 			if (extraction.excluded) {
 				setStatus("excluded_site");
@@ -229,6 +256,32 @@ export const App: React.FC = () => {
 			window.removeEventListener("storage", handleStorageEvent);
 		};
 	}, []);
+
+	// 页面圆点点击消息：面板开着且消息来自绑定标签页时打开该番号预览
+	useEffect(() => {
+		const listener = (message: unknown, sender: unknown) => {
+			const msg = message as { type?: string; code?: string } | undefined;
+			const s = sender as
+				| { tab?: { id?: number; active?: boolean } }
+				| undefined;
+			if (msg?.type !== "jt:code-clicked" || !msg.code) return;
+			// 绑定模式下只响应绑定标签页；未绑定（兜底路径）时只响应当前活动标签页
+			const tabMatches = boundTabId
+				? s?.tab?.id === boundTabId
+				: s?.tab?.active === true;
+			if (!tabMatches) return;
+			setPreviewCode(msg.code);
+		};
+
+		if (typeof browser !== "undefined" && browser.runtime?.onMessage) {
+			browser.runtime.onMessage.addListener(listener);
+		}
+		return () => {
+			if (typeof browser !== "undefined" && browser.runtime?.onMessage) {
+				browser.runtime.onMessage.removeListener(listener);
+			}
+		};
+	}, [boundTabId]);
 
 	useEffect(() => {
 		// Keep port open to notify background of sidepanel lifecycle for this tab
