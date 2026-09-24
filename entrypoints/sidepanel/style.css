@@ -673,6 +673,7 @@ button:focus-visible {
 
 .excluded-hosts-add-btn {
 	flex-shrink: 0;
+	margin-top: 0;
 	padding: 7px 14px;
 	min-height: 32px;
 	font-size: 12.5px;

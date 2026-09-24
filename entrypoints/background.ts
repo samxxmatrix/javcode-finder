@@ -2,7 +2,9 @@ import { parseSearchPageHtml } from "../src/lib/javtrailers";
 import {
 	buildDeepLBody,
 	DEEPL_API_URL,
+	DEEPL_USAGE_URL,
 	parseDeepLResponse,
+	parseDeepLUsage,
 	type TranslateTarget,
 } from "../src/lib/translate";
 
@@ -123,6 +125,33 @@ export default defineBackground(() => {
 								error:
 									error instanceof Error ? error.message : String(error),
 							});
+						}
+					})();
+					return true;
+				}
+
+				if (msg?.type === "jt:usage") {
+					const key = (msg.deeplKey || "").trim();
+					void (async () => {
+						// 无 key 或请求失败返回 count: null（界面显示 "--"）
+						if (!key) {
+							sendResponse({ count: null });
+							return;
+						}
+						try {
+							const res = await fetch(DEEPL_USAGE_URL, {
+								method: "GET",
+								headers: { Authorization: `DeepL-Auth-Key ${key}` },
+								signal: AbortSignal.timeout(5000),
+							});
+							if (!res.ok) {
+								sendResponse({ count: null });
+								return;
+							}
+							const data = await res.json();
+							sendResponse({ count: parseDeepLUsage(data) });
+						} catch {
+							sendResponse({ count: null });
 						}
 					})();
 					return true;

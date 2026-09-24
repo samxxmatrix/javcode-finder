@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildDeepLBody,
+	formatUsage,
 	parseDeepLResponse,
+	parseDeepLUsage,
 } from "../src/lib/translate";
 
 describe("buildDeepLBody", () => {
@@ -35,5 +37,32 @@ describe("parseDeepLResponse", () => {
 		expect(parseDeepLResponse(null)).toBe("");
 		expect(parseDeepLResponse({})).toBe("");
 		expect(parseDeepLResponse({ translations: [] })).toBe("");
+	});
+});
+
+describe("parseDeepLUsage", () => {
+	it("extracts the character count", () => {
+		expect(
+			parseDeepLUsage({ character_count: 4239, character_limit: 1000000 }),
+		).toBe(4239);
+	});
+
+	it("returns null for malformed responses", () => {
+		expect(parseDeepLUsage(null)).toBeNull();
+		expect(parseDeepLUsage({})).toBeNull();
+		expect(parseDeepLUsage({ character_count: "4239" })).toBeNull();
+		expect(parseDeepLUsage({ character_count: -1 })).toBeNull();
+	});
+});
+
+describe("formatUsage", () => {
+	it("formats the count in ten-thousands against a fixed 1M limit", () => {
+		expect(formatUsage(4239)).toBe("0.4239/100万");
+		expect(formatUsage(0)).toBe("0.0000/100万");
+		expect(formatUsage(1000000)).toBe("100.0000/100万");
+	});
+
+	it("returns -- for missing counts", () => {
+		expect(formatUsage(null)).toBe("--");
 	});
 });

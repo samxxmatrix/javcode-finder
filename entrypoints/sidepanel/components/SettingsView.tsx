@@ -23,6 +23,7 @@ import {
 	type LocaleOption,
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
+import { formatUsage } from "../../../src/lib/translate";
 
 interface SettingsViewProps {
 	locale: SupportedLocale;
@@ -44,6 +45,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
 	const [javdbName, setJavdbName] = useState(DEFAULT_SETTINGS.javdbName);
 	const [deeplApiKey, setDeeplApiKey] = useState("");
+	// DeepL 用量显示（"--" = 未查询/无 key/失败）
+	const [deeplUsage, setDeeplUsage] = useState("--");
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -56,6 +59,24 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const defaultSupjavTemplate =
 		locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
 
+	// 查询 DeepL 用量并刷新显示；无 key 或失败时显示 "--"
+	const refreshDeeplUsage = async (key: string) => {
+		const trimmed = (key || "").trim();
+		if (!trimmed) {
+			setDeeplUsage("--");
+			return;
+		}
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:usage",
+				deeplKey: trimmed,
+			})) as { count?: number | null } | undefined;
+			setDeeplUsage(formatUsage(res?.count ?? null));
+		} catch {
+			setDeeplUsage("--");
+		}
+	};
+
 	useEffect(() => {
 		const current = getSettings();
 		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
@@ -64,6 +85,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setSupjavName(current.supjavName || DEFAULT_SETTINGS.supjavName);
 		setJavdbName(current.javdbName || DEFAULT_SETTINGS.javdbName);
 		setDeeplApiKey(current.deeplApiKey);
+		// 打开设置页时展示已保存 key 的用量（无 key 时保持 "--"）
+		void refreshDeeplUsage(current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
@@ -124,6 +147,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			javdbName,
 			deeplApiKey,
 		});
+		// 保存后立即用新 key 刷新用量
+		void refreshDeeplUsage(deeplApiKey);
 		saveLocale(localeOption);
 		onLocaleChange?.(getEffectiveLocale(localeOption));
 		setSavedMessage(true);
@@ -246,9 +271,12 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				</div>
 
 				<div className="settings-field">
-					<label className="settings-field__label" htmlFor="deepl-key">
-						{t.deeplApiKeyLabel}
-					</label>
+					<div className="settings-field__header-row">
+						<label className="settings-field__label" htmlFor="deepl-key">
+							{t.deeplApiKeyLabel}
+						</label>
+						<span className="settings-field__hint">{deeplUsage}</span>
+					</div>
 					<input
 						id="deepl-key"
 						type="text"
