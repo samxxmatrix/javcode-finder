@@ -171,10 +171,20 @@ button:focus-visible {
 }
 
 .popup-main {
-	padding: 14px 16px;
 	flex: 1;
+	padding: 0px 14px 10px 14px;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
+}
+
+.popup-results {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
 }
 
 .popup-state {
@@ -309,11 +319,17 @@ button:focus-visible {
 
 .unmatched-section {
 	border-top: 1px solid var(--border-subtle);
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
 }
 
+
 .unmatched-section__header {
-	margin-bottom: 10px;
+	padding: 8px 12px;
 }
+
 
 .unmatched-section__title {
 	font-size: 14px;
@@ -327,7 +343,7 @@ button:focus-visible {
 .unmatched-section__count {
 	font-size: 14px;
 	font-weight: 700;
-	color: var(--text-muted);
+	color: var(--accent-gold);
 	font-variant-numeric: tabular-nums;
 }
 
@@ -336,6 +352,10 @@ button:focus-visible {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding-right: 2px;
 }
 
 .unmatched-item {
@@ -346,7 +366,7 @@ button:focus-visible {
 	background-color: var(--bg-surface);
 	border: 1px solid var(--border-subtle);
 	border-radius: 6px;
-	gap: 8px;
+	gap: 6px;
 }
 
 .unmatched-item__code {
