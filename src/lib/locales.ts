@@ -49,6 +49,21 @@ export interface LocaleMessages {
 	closePreview: string;
 	retryTranslate: string;
 	deeplApiKeyLabel: string;
+	addFavorite: string;
+	removeFavorite: string;
+	cloudSyncLabel: string;
+	webdavUrlPlaceholder: string;
+	webdavUserPlaceholder: string;
+	webdavPassPlaceholder: string;
+	webdavVerifying: string;
+	webdavConnected: string;
+	webdavIncomplete: string;
+	webdavAuthError: string;
+	webdavNotFound: string;
+	webdavRateLimited: string;
+	webdavConnectError: string;
+	showPassword: string;
+	hidePassword: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -103,6 +118,21 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     closePreview: "关闭预览",
     retryTranslate: "重新翻译",
     deeplApiKeyLabel: "DeepL API Key",
+    addFavorite: "加入收藏",
+    removeFavorite: "取消收藏",
+    cloudSyncLabel: "云盘同步（WebDAV）",
+    webdavUrlPlaceholder: "云盘地址，如 https://dav.jianguoyun.com/dav/javcodefinder/",
+    webdavUserPlaceholder: "用户名（邮箱）",
+    webdavPassPlaceholder: "密码",
+    webdavVerifying: "验证中…",
+    webdavConnected: "已连接",
+    webdavIncomplete: "请补全云盘地址、用户名和密码",
+    webdavAuthError: "用户名或密码错误",
+    webdavNotFound: "目录不存在，检查云盘地址",
+    webdavRateLimited: "请求过于频繁，请稍后重试",
+    webdavConnectError: "连接失败，检查地址与网络",
+    showPassword: "显示密码",
+    hidePassword: "隐藏密码",
   },
 
   "zh-hant": {
@@ -157,6 +187,21 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     closePreview: "關閉預覽",
     retryTranslate: "重新翻譯",
     deeplApiKeyLabel: "DeepL API Key",
+    addFavorite: "加入收藏",
+    removeFavorite: "取消收藏",
+    cloudSyncLabel: "雲端同步（WebDAV）",
+    webdavUrlPlaceholder: "雲端地址，如 https://dav.jianguoyun.com/dav/javcodefinder/",
+    webdavUserPlaceholder: "使用者名稱（信箱）",
+    webdavPassPlaceholder: "密碼",
+    webdavVerifying: "驗證中…",
+    webdavConnected: "已連線",
+    webdavIncomplete: "請補全雲端地址、使用者名稱與密碼",
+    webdavAuthError: "使用者名稱或密碼錯誤",
+    webdavNotFound: "目錄不存在，請檢查雲端地址",
+    webdavRateLimited: "請求過於頻繁，請稍後重試",
+    webdavConnectError: "連線失敗，請檢查地址與網路",
+    showPassword: "顯示密碼",
+    hidePassword: "隱藏密碼",
   },
 
   en: {
@@ -213,6 +258,22 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     closePreview: "Close preview",
     retryTranslate: "Retry translation",
     deeplApiKeyLabel: "DeepL API Key",
+    addFavorite: "Add to favorites",
+    removeFavorite: "Remove from favorites",
+    cloudSyncLabel: "Cloud Sync (WebDAV)",
+    webdavUrlPlaceholder:
+      "WebDAV URL, e.g. https://dav.jianguoyun.com/dav/javcodefinder/",
+    webdavUserPlaceholder: "Username (email)",
+    webdavPassPlaceholder: "Password",
+    webdavVerifying: "Verifying...",
+    webdavConnected: "Connected",
+    webdavIncomplete: "Fill in the URL, username and password",
+    webdavAuthError: "Invalid username or password",
+    webdavNotFound: "Directory not found, check the URL",
+    webdavRateLimited: "Too many requests, try again later",
+    webdavConnectError: "Connection failed, check the URL and network",
+    showPassword: "Show password",
+    hidePassword: "Hide password",
   },
 };
 

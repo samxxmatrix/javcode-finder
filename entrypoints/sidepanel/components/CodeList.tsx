@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { isFavorite } from "../../../src/lib/favorites";
 import { locateCodeInActiveTab } from "../../../src/lib/locate-code";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { normalizeCode } from "../../../src/lib/normalize-code";
@@ -9,6 +10,7 @@ import {
 	resolveSupjavUrl,
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
+import { FavoriteIcon } from "./FavoriteIcon";
 
 interface CodeListProps {
 	candidates: string[];
@@ -16,6 +18,8 @@ interface CodeListProps {
 	locale: SupportedLocale;
 	selectedCode: string | null;
 	onPreview: (code: string) => void;
+	favorites: string[];
+	onToggleFavorite: (code: string) => void;
 }
 
 export const CodeList: React.FC<CodeListProps> = ({
@@ -24,6 +28,8 @@ export const CodeList: React.FC<CodeListProps> = ({
 	locale,
 	selectedCode,
 	onPreview,
+	favorites,
+	onToggleFavorite,
 }) => {
 	if (candidates.length === 0) return null;
 
@@ -120,6 +126,18 @@ export const CodeList: React.FC<CodeListProps> = ({
 							>
 								{code}
 							</span>
+							{/* 已收藏的番号紧挨右侧显示图标，点击取消收藏后消失 */}
+							{isFavorite(favorites, code) && (
+								<button
+									type="button"
+									className="unmatched-item__fav"
+									onClick={() => onToggleFavorite(code)}
+									title={t.removeFavorite}
+									aria-label={`${t.removeFavorite}: ${code}`}
+								>
+									<FavoriteIcon active />
+								</button>
+							)}
 							<div className="unmatched-item__links">
 								<button
 									type="button"

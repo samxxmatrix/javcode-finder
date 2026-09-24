@@ -1,5 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { extractCandidatesInTab } from "../../src/lib/extract-codes";
+import {
+	FAVORITES_STORAGE_KEY,
+	parseFavorites,
+	serializeFavorites,
+	toggleFavorite,
+} from "../../src/lib/favorites";
 import { messages } from "../../src/lib/locales";
 import {
 	DEFAULT_CODE_REGEX,
@@ -37,6 +43,10 @@ export const App: React.FC = () => {
 	const [previewCode, setPreviewCode] = useState<string | null>(null);
 	// 顶部图标按钮调用设置页的保存/重置
 	const settingsRef = useRef<SettingsViewHandle>(null);
+	// 收藏的番号列表（本地 storage 为准，云端为镜像）
+	const [favorites, setFavorites] = useState<string[]>([]);
+	// 云端推送防抖计时器（合并连续收藏操作，降低请求频率）
+	const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	// 提取当前绑定/激活标签页的番号候选
 	const extractFromActiveTab = async (
@@ -146,6 +156,91 @@ export const App: React.FC = () => {
 		await runScan();
 	};
 
+	// 从云端拉取收藏并覆盖本地（仅本地为空时调用，避免覆盖较新的本地数据）
+	const pullFromCloud = async (): Promise<void> => {
+		const s = getSettings();
+		if (!s.webdavUrl.trim() || !s.webdavUser.trim()) return;
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:webdav-get",
+				webdavUrl: s.webdavUrl,
+				webdavUser: s.webdavUser,
+				webdavPass: s.webdavPass,
+			})) as { found?: boolean; data?: unknown } | undefined;
+			if (!res?.found) return;
+			const codes = parseFavorites(res.data);
+			if (codes.length === 0) return;
+			setFavorites(codes);
+			await browser.storage.local.set({ [FAVORITES_STORAGE_KEY]: codes });
+		} catch (err) {
+			console.warn("[JavCode Finder] 云端拉取失败:", err);
+		}
+	};
+
+	// 推送收藏到云端（整体覆盖；失败静默，下一次成功推送自动补偿）
+	const pushToCloud = async (codes: string[]): Promise<void> => {
+		const s = getSettings();
+		if (!s.webdavUrl.trim() || !s.webdavUser.trim()) return;
+		try {
+			await browser.runtime.sendMessage({
+				type: "jt:webdav-put",
+				webdavUrl: s.webdavUrl,
+				webdavUser: s.webdavUser,
+				webdavPass: s.webdavPass,
+				body: serializeFavorites(codes),
+			});
+		} catch (err) {
+			console.warn("[JavCode Finder] 云端推送失败:", err);
+		}
+	};
+
+	// 切换收藏：更新本地并防抖 2s 推送云端。
+	// 云端 PUT 只由用户操作发起的这个面板执行，其他面板仅通过 onChanged 同步 UI。
+	const handleToggleFavorite = (code: string) => {
+		const next = toggleFavorite(favorites, code);
+		setFavorites(next);
+		void browser.storage.local.set({ [FAVORITES_STORAGE_KEY]: next });
+		if (cloudPushTimerRef.current) clearTimeout(cloudPushTimerRef.current);
+		cloudPushTimerRef.current = setTimeout(() => {
+			void pushToCloud(next);
+		}, 2000);
+	};
+
+	// 加载本地收藏；本地为空且已配置云端时尝试拉取（换设备/换浏览器场景）
+	useEffect(() => {
+		void (async () => {
+			try {
+				const stored = await browser.storage.local.get(FAVORITES_STORAGE_KEY);
+				const localCodes: unknown = stored[FAVORITES_STORAGE_KEY];
+				const codes = Array.isArray(localCodes)
+					? localCodes.filter((c): c is string => typeof c === "string")
+					: [];
+				setFavorites(codes);
+				if (codes.length === 0) {
+					await pullFromCloud();
+				}
+			} catch {
+				// 存储读取失败保持空列表
+			}
+		})();
+
+		// 其他面板的收藏变化 → 只更新 UI，不重复推送云端
+		const handleFavoritesChanged = (
+			changes: Record<string, { newValue?: unknown }>,
+		) => {
+			const change = changes[FAVORITES_STORAGE_KEY];
+			if (change && Array.isArray(change.newValue)) {
+				setFavorites(change.newValue);
+			}
+		};
+		if (typeof browser !== "undefined" && browser.storage?.onChanged) {
+			browser.storage.onChanged.addListener(handleFavoritesChanged);
+			return () => {
+				browser.storage.onChanged.removeListener(handleFavoritesChanged);
+			};
+		}
+	}, []);
+
 	useEffect(() => {
 		// Keep port open to notify background of sidepanel lifecycle for this tab
 		let port: ReturnType<typeof browser.runtime.connect> | undefined;
@@ -218,10 +313,14 @@ export const App: React.FC = () => {
 								type="button"
 								className="popup-header__icon-btn"
 								onClick={() => {
-									// 保存成功（正则校验通过）后自动回到识别页面
-									if (settingsRef.current?.save()) {
-										setShowSettings(false);
-										runScan();
+									// 保存成功（正则校验通过、云端验证通过）后自动回到识别页面
+									if (settingsRef.current) {
+										void settingsRef.current.save().then((ok) => {
+											if (ok) {
+												setShowSettings(false);
+												runScan();
+											}
+										});
 									}
 								}}
 								title={t.saveSettings}
@@ -338,6 +437,8 @@ export const App: React.FC = () => {
 						locale={locale}
 						t={t}
 						onClose={() => setPreviewCode(null)}
+						isFavorite={favorites.includes(previewCode)}
+						onToggleFavorite={() => handleToggleFavorite(previewCode)}
 					/>
 				)}
 				{showSettings ? (
@@ -350,6 +451,14 @@ export const App: React.FC = () => {
 							runScan();
 						}}
 						onLocaleChange={(newLocale) => setLocale(newLocale)}
+						onWebdavConnected={() => {
+							// 云端开通：本地空 → 拉取云端；本地有 → 立即推送备份
+							if (favorites.length === 0) {
+								void pullFromCloud();
+							} else {
+								void pushToCloud(favorites);
+							}
+						}}
 					/>
 
 				) : (
@@ -434,6 +543,8 @@ export const App: React.FC = () => {
 									locale={locale}
 									selectedCode={previewCode}
 									onPreview={setPreviewCode}
+									favorites={favorites}
+									onToggleFavorite={handleToggleFavorite}
 								/>
 							</div>
 						)}

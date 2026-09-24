@@ -383,6 +383,7 @@ button:focus-visible {
 .unmatched-item__links {
 	display: flex;
 	gap: 8px;
+	margin-left: auto;
 }
 
 .unmatched-item__link {
@@ -944,4 +945,96 @@ button:focus-visible {
 	height: 12px;
 	border-width: 2px;
 	margin: 0;
+}
+
+/* 番号收藏图标：未收藏半透明，已收藏金色实心 */
+.favorite-icon {
+	opacity: 0.4;
+	transition: opacity 0.15s ease;
+}
+
+.favorite-icon--active {
+	opacity: 1;
+}
+
+/* 预告片标题行内的收藏按钮（紧跟番号） */
+.trailer-preview__fav {
+	background: none;
+	border: none;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	vertical-align: middle;
+	padding: 1px 3px;
+	margin-left: 6px;
+	border-radius: 4px;
+	line-height: 1;
+}
+
+.trailer-preview__fav:hover {
+	background: var(--bg-surface-hover);
+}
+
+/* 番号列表内的收藏按钮（紧跟番号） */
+.unmatched-item__fav {
+	background: none;
+	border: none;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	padding: 2px;
+	border-radius: 4px;
+	line-height: 1;
+	flex-shrink: 0;
+}
+
+.unmatched-item__fav:hover {
+	background: var(--bg-surface-hover);
+}
+
+/* 云盘密码输入行：输入框 + 显示/隐藏按钮 */
+.webdav-pass-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.webdav-pass-row .settings-field__input {
+	flex: 1;
+}
+
+.webdav-pass-toggle {
+	background: var(--bg-surface-hover);
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 7px 10px;
+	flex-shrink: 0;
+	transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.webdav-pass-toggle:hover {
+	border-color: var(--accent-gold);
+	color: var(--accent-gold);
+}
+
+/* 云端验证状态配色 */
+.webdav-status--ok {
+	color: #22c55e;
+}
+
+.webdav-status--verifying,
+.webdav-status--incomplete {
+	color: var(--text-muted);
+}
+
+.webdav-status--auth,
+.webdav-status--not_found,
+.webdav-status--rate_limited,
+.webdav-status--failed {
+	color: var(--accent-red);
 }

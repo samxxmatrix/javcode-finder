@@ -23,6 +23,7 @@ import {
 	type LocaleOption,
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
+import { classifyWebdavVerify, type WebdavVerifyResult } from "../../../src/lib/favorites";
 import { formatUsage } from "../../../src/lib/translate";
 
 interface SettingsViewProps {
@@ -30,16 +31,18 @@ interface SettingsViewProps {
 	t: LocaleMessages;
 	onBack: () => void;
 	onLocaleChange?: (locale: SupportedLocale) => void;
+	// 云端验证通过（即"开通云端同步"）后回调，由 App 执行首次同步
+	onWebdavConnected?: () => void;
 }
 
-// 暴露给顶部图标按钮的保存/重置操作；save 返回是否保存成功（校验失败时为 false）
+// 暴露给顶部图标按钮的保存/重置操作；save 返回是否保存成功（校验或云端验证失败时为 false）
 export interface SettingsViewHandle {
-	save: () => boolean;
+	save: () => Promise<boolean>;
 	reset: () => void;
 }
 
 export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
-	function SettingsView({ locale, t, onBack, onLocaleChange }, ref) {
+	function SettingsView({ locale, t, onBack, onLocaleChange, onWebdavConnected }, ref) {
 	const [supjav, setSupjav] = useState("");
 	const [javbus, setJavbus] = useState("");
 	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
@@ -47,6 +50,14 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [deeplApiKey, setDeeplApiKey] = useState("");
 	// DeepL 用量显示（"--/100万" = 未查询/无 key/失败）
 	const [deeplUsage, setDeeplUsage] = useState("--/100万");
+	const [webdavUrl, setWebdavUrl] = useState("");
+	const [webdavUser, setWebdavUser] = useState("");
+	const [webdavPass, setWebdavPass] = useState("");
+	const [showPass, setShowPass] = useState(false);
+	// 云端验证状态：idle 未动过 / verifying 验证中 / incomplete 配置不全 / 其余为验证结果分类
+	const [webdavStatus, setWebdavStatus] = useState<
+		"idle" | "verifying" | "incomplete" | WebdavVerifyResult
+	>("idle");
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -85,6 +96,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setSupjavName(current.supjavName || DEFAULT_SETTINGS.supjavName);
 		setJavdbName(current.javdbName || DEFAULT_SETTINGS.javdbName);
 		setDeeplApiKey(current.deeplApiKey);
+		setWebdavUrl(current.webdavUrl);
+		setWebdavUser(current.webdavUser);
+		setWebdavPass(current.webdavPass);
 		// 打开设置页时展示已保存 key 的用量（无 key 时保持 "--"）
 		void refreshDeeplUsage(current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
@@ -131,10 +145,52 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setRegexError(null);
 	};
 
-	// 保存当前配置（表单提交与顶部图标按钮共用）；返回是否保存成功
-	const saveCurrent = (): boolean => {
+	// 云端验证：PROPFIND Depth:0，结果分类交给 classifyWebdavVerify
+	const verifyWebdav = async (
+		url: string,
+		user: string,
+		pass: string,
+	): Promise<WebdavVerifyResult> => {
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:webdav-verify",
+				webdavUrl: url,
+				webdavUser: user,
+				webdavPass: pass,
+			})) as { status?: number } | undefined;
+			return classifyWebdavVerify(res?.status ?? 0);
+		} catch {
+			return "failed";
+		}
+	};
+
+	// 云端验证状态 → 界面文案（idle 不显示）
+	const webdavStatusText: Record<
+		"idle" | "verifying" | "incomplete" | WebdavVerifyResult,
+		string
+	> = {
+		idle: "",
+		verifying: t.webdavVerifying,
+		incomplete: t.webdavIncomplete,
+		ok: t.webdavConnected,
+		auth: t.webdavAuthError,
+		not_found: t.webdavNotFound,
+		rate_limited: t.webdavRateLimited,
+		failed: t.webdavConnectError,
+	};
+
+	// 保存当前配置（表单提交与顶部图标按钮共用）；返回是否保存成功。
+	// 云端三项全空 = 关闭云端同步；全填则验证通过才返回 true（失败停留设置页显示原因）。
+	const saveCurrent = async (): Promise<boolean> => {
 		if (customRegex.trim() && !isValidRegex(customRegex)) {
 			setRegexError(t.regexSyntaxError);
+			return false;
+		}
+		// 云端三项必须全空或全填
+		const urlTrimmed = webdavUrl.trim();
+		const userTrimmed = webdavUser.trim();
+		if ((urlTrimmed || userTrimmed || webdavPass) && !(urlTrimmed && userTrimmed)) {
+			setWebdavStatus("incomplete");
 			return false;
 		}
 		saveSettings({
@@ -146,6 +202,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			supjavName,
 			javdbName,
 			deeplApiKey,
+			webdavUrl,
+			webdavUser,
+			webdavPass,
 		});
 		// 保存后立即用新 key 刷新用量
 		void refreshDeeplUsage(deeplApiKey);
@@ -155,12 +214,22 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setTimeout(() => {
 			setSavedMessage(false);
 		}, 2000);
+		// 云端配置：验证连接，成功才"开通"（触发首次同步）
+		if (urlTrimmed && userTrimmed) {
+			setWebdavStatus("verifying");
+			const result = await verifyWebdav(urlTrimmed, userTrimmed, webdavPass);
+			setWebdavStatus(result);
+			if (result !== "ok") return false;
+			onWebdavConnected?.();
+		} else {
+			setWebdavStatus("idle");
+		}
 		return true;
 	};
 
 	const handleSave = (e: React.FormEvent) => {
 		e.preventDefault();
-		saveCurrent();
+		void saveCurrent();
 	};
 
 	useImperativeHandle(ref, () => ({
@@ -176,6 +245,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setSupjavName(DEFAULT_SETTINGS.supjavName);
 		setJavdbName(DEFAULT_SETTINGS.javdbName);
 		setDeeplApiKey("");
+		setWebdavUrl("");
+		setWebdavUser("");
+		setWebdavPass("");
+		setShowPass(false);
+		setWebdavStatus("idle");
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
@@ -287,6 +361,74 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						spellCheck={false}
 						autoComplete="off"
 					/>
+				</div>
+
+				<div className="settings-field">
+					<div className="settings-field__header-row">
+						<label className="settings-field__label" htmlFor="webdav-url">
+							{t.cloudSyncLabel}
+						</label>
+						{webdavStatus !== "idle" && (
+							<span
+								className={`settings-field__hint webdav-status webdav-status--${webdavStatus}`}
+							>
+								{webdavStatusText[webdavStatus]}
+							</span>
+						)}
+					</div>
+					<input
+						id="webdav-url"
+						type="text"
+						className="settings-field__input settings-field__input--code"
+						value={webdavUrl}
+						onChange={(e) => setWebdavUrl(e.target.value)}
+						placeholder={t.webdavUrlPlaceholder}
+						spellCheck={false}
+						autoComplete="off"
+					/>
+					<input
+						id="webdav-user"
+						type="text"
+						className="settings-field__input"
+						value={webdavUser}
+						onChange={(e) => setWebdavUser(e.target.value)}
+						placeholder={t.webdavUserPlaceholder}
+						spellCheck={false}
+						autoComplete="off"
+					/>
+					<div className="webdav-pass-row">
+						<input
+							id="webdav-pass"
+							type={showPass ? "text" : "password"}
+							className="settings-field__input"
+							value={webdavPass}
+							onChange={(e) => setWebdavPass(e.target.value)}
+							placeholder={t.webdavPassPlaceholder}
+							autoComplete="off"
+						/>
+						<button
+							type="button"
+							className="webdav-pass-toggle"
+							onClick={() => setShowPass(!showPass)}
+							title={showPass ? t.hidePassword : t.showPassword}
+							aria-label={showPass ? t.hidePassword : t.showPassword}
+						>
+							<svg
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								width="15"
+								height="15"
+								aria-hidden="true"
+							>
+								<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+								<circle cx="12" cy="12" r="3" />
+							</svg>
+						</button>
+					</div>
 				</div>
 
 				<div className="settings-field">

@@ -6,12 +6,15 @@ import {
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { getSettings } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
+import { FavoriteIcon } from "./FavoriteIcon";
 
 interface TrailerPreviewProps {
 	code: string;
 	locale: SupportedLocale;
 	t: LocaleMessages;
 	onClose: () => void;
+	isFavorite: boolean;
+	onToggleFavorite: () => void;
 }
 
 interface Resolution {
@@ -29,6 +32,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	locale,
 	t,
 	onClose,
+	isFavorite,
+	onToggleFavorite,
 }) => {
 	const [coverError, setCoverError] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
@@ -225,6 +230,15 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				<h3 className="trailer-preview__title">
 					{t.previewTitle}{" "}
 					<span className="trailer-preview__code">{code}</span>
+					<button
+						type="button"
+						className="trailer-preview__fav"
+						onClick={onToggleFavorite}
+						title={isFavorite ? t.removeFavorite : t.addFavorite}
+						aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
+					>
+						<FavoriteIcon active={isFavorite} />
+					</button>
 				</h3>
 				<button
 					type="button"

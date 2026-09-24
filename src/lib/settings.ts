@@ -20,6 +20,10 @@ export interface ExtensionSettings {
 	javdbName: string;
 	// DeepL API key（空 = 未配置，标题翻译不可用）
 	deeplApiKey: string;
+	// WebDAV 云端配置（三项全空 = 未开通云端同步）
+	webdavUrl: string;
+	webdavUser: string;
+	webdavPass: string;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -41,6 +45,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	supjavName: "Supjav",
 	javdbName: "JavDB",
 	deeplApiKey: "",
+	webdavUrl: "",
+	webdavUser: "",
+	webdavPass: "",
 };
 
 export function normalizeDomain(input: string): string {
@@ -166,6 +173,12 @@ export function getSettings(): ExtensionSettings {
 					: DEFAULT_SETTINGS.javdbName,
 			deeplApiKey:
 				typeof parsed.deeplApiKey === "string" ? parsed.deeplApiKey.trim() : "",
+			webdavUrl:
+				typeof parsed.webdavUrl === "string" ? parsed.webdavUrl.trim() : "",
+			webdavUser:
+				typeof parsed.webdavUser === "string" ? parsed.webdavUser.trim() : "",
+			// 密码不做 trim：保持用户输入原样
+			webdavPass: typeof parsed.webdavPass === "string" ? parsed.webdavPass : "",
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -226,6 +239,19 @@ export function saveSettings(
 				settings.deeplApiKey !== undefined
 					? settings.deeplApiKey.trim()
 					: current.deeplApiKey,
+			// 云端三项传入空字符串表示"关闭云端同步"，与未传字段区分处理
+			webdavUrl:
+				settings.webdavUrl !== undefined
+					? settings.webdavUrl.trim()
+					: current.webdavUrl,
+			webdavUser:
+				settings.webdavUser !== undefined
+					? settings.webdavUser.trim()
+					: current.webdavUser,
+			webdavPass:
+				settings.webdavPass !== undefined
+					? settings.webdavPass
+					: current.webdavPass,
 		};
 		const storage = getStorage();
 		if (storage) {

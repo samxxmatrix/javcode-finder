@@ -70,6 +70,24 @@ describe("settings", () => {
 		expect(getSettings().javdbName).toBe(DEFAULT_SETTINGS.javdbName);
 	});
 
+	it("saves and restores WebDAV cloud settings", () => {
+		saveSettings({
+			webdavUrl: "https://dav.jianguoyun.com/dav/javcodefinder/",
+			webdavUser: "user@example.com",
+			webdavPass: "secret",
+		});
+		const saved = getSettings();
+		expect(saved.webdavUrl).toBe("https://dav.jianguoyun.com/dav/javcodefinder/");
+		expect(saved.webdavUser).toBe("user@example.com");
+		expect(saved.webdavPass).toBe("secret");
+
+		// 清空 → 回默认空（关闭云端同步）
+		saveSettings({ webdavUrl: "", webdavUser: "", webdavPass: "" });
+		expect(getSettings().webdavUrl).toBe("");
+		expect(getSettings().webdavUser).toBe("");
+		expect(getSettings().webdavPass).toBe("");
+	});
+
 	it("resets to default settings", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.org/{code}",

@@ -1,5 +1,9 @@
 import { parseSearchPageHtml } from "../src/lib/javtrailers";
 import {
+	buildBasicAuth,
+	joinWebdavUrl,
+} from "../src/lib/favorites";
+import {
 	buildDeepLBody,
 	DEEPL_API_URL,
 	DEEPL_USAGE_URL,
@@ -71,6 +75,19 @@ export default defineBackground(() => {
 
 	setupTrailerCors();
 
+	// 从消息中提取 WebDAV 配置；地址或用户名为空返回 null（未配置云端）
+	const getWebdav = (msg: {
+		webdavUrl?: string;
+		webdavUser?: string;
+		webdavPass?: string;
+	}): { url: string; auth: string } | null => {
+		const url = (msg.webdavUrl || "").trim();
+		const user = (msg.webdavUser || "").trim();
+		if (!url || !user) return null;
+		const pass = typeof msg.webdavPass === "string" ? msg.webdavPass : "";
+		return { url, auth: buildBasicAuth(user, pass) };
+	};
+
 	// 解析 javtrailers 搜索页第一张卡片，返回确认匹配的详情页 URL 与 Content ID。
 	// 面板页面直接 fetch 该站会被 CORS 拦截，而 background 持有 host_permissions 不受限。
 	// 用原生回调模式（sendResponse + return true），避免 polyfill Promise 响应在部分环境不生效。
@@ -87,6 +104,10 @@ export default defineBackground(() => {
 					text?: string;
 					target?: TranslateTarget;
 					deeplKey?: string;
+					webdavUrl?: string;
+					webdavUser?: string;
+					webdavPass?: string;
+					body?: string;
 				};
 
 				// 标题翻译：DeepL API。无 key 或失败返回空译文（调用方回退原文）
@@ -152,6 +173,93 @@ export default defineBackground(() => {
 							sendResponse({ count: parseDeepLUsage(data) });
 						} catch {
 							sendResponse({ count: null });
+						}
+					})();
+					return true;
+				}
+
+				// WebDAV 云端：验证连接（PROPFIND Depth:0，只查目录本身，1 次请求）。
+				// status 0 = 网络错误；其余状态由界面按 207/401/404/403/429 分类。
+				if (msg?.type === "jt:webdav-verify") {
+					const wd = getWebdav(msg);
+					void (async () => {
+						if (!wd) {
+							sendResponse({ ok: false, status: 0 });
+							return;
+						}
+						try {
+							const res = await fetch(wd.url, {
+								method: "PROPFIND",
+								headers: {
+									Authorization: wd.auth,
+									Depth: "0",
+								},
+								signal: AbortSignal.timeout(5000),
+							});
+							sendResponse({ ok: res.status === 207, status: res.status });
+						} catch {
+							sendResponse({ ok: false, status: 0 });
+						}
+					})();
+					return true;
+				}
+
+				// WebDAV 云端：拉取收藏文件。404 = 云端无数据。
+				if (msg?.type === "jt:webdav-get") {
+					const wd = getWebdav(msg);
+					void (async () => {
+						if (!wd) {
+							sendResponse({ found: false });
+							return;
+						}
+						try {
+							const res = await fetch(joinWebdavUrl(wd.url), {
+								method: "GET",
+								headers: { Authorization: wd.auth },
+								signal: AbortSignal.timeout(5000),
+							});
+							if (res.status === 404) {
+								sendResponse({ found: false });
+								return;
+							}
+							if (!res.ok) {
+								sendResponse({ found: false, error: `HTTP ${res.status}` });
+								return;
+							}
+							const data = await res.json();
+							sendResponse({ found: true, data });
+						} catch (error) {
+							sendResponse({
+								found: false,
+								error:
+									error instanceof Error ? error.message : String(error),
+							});
+						}
+					})();
+					return true;
+				}
+
+				// WebDAV 云端：整体覆盖收藏文件。失败返回 ok: false，界面静默处理。
+				if (msg?.type === "jt:webdav-put") {
+					const wd = getWebdav(msg);
+					void (async () => {
+						if (!wd) {
+							sendResponse({ ok: false, status: 0 });
+							return;
+						}
+						try {
+							const res = await fetch(joinWebdavUrl(wd.url), {
+								method: "PUT",
+								headers: {
+									Authorization: wd.auth,
+									"Content-Type": "application/json",
+								},
+								body: typeof msg.body === "string" ? msg.body : "",
+								signal: AbortSignal.timeout(5000),
+							});
+							sendResponse({ ok: res.ok, status: res.status });
+						} catch {
+							sendResponse({ ok: false, status: 0 });
 						}
 					})();
 					return true;
