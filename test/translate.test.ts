@@ -62,7 +62,7 @@ describe("formatUsage", () => {
 		expect(formatUsage(1000000)).toBe("100.0000/100万");
 	});
 
-	it("returns -- for missing counts", () => {
-		expect(formatUsage(null)).toBe("--");
+	it("returns --/100万 for missing counts", () => {
+		expect(formatUsage(null)).toBe("--/100万");
 	});
 });

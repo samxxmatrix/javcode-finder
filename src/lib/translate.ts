@@ -57,9 +57,9 @@ export function parseDeepLUsage(data: unknown): number | null {
 
 /**
  * 格式化用量为 "x.xxxx/100万"：字符数换算成万（÷10000）保留 4 位小数。
- * count 为 null 或非有限数时返回 "--"。
+ * count 为 null 或非有限数时返回 "--/100万"。
  */
 export function formatUsage(count: number | null): string {
-	if (count === null || !Number.isFinite(count)) return "--";
+	if (count === null || !Number.isFinite(count)) return "--/100万";
 	return `${(count / 10000).toFixed(4)}/100万`;
 }

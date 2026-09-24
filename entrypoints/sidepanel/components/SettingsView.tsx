@@ -45,8 +45,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
 	const [javdbName, setJavdbName] = useState(DEFAULT_SETTINGS.javdbName);
 	const [deeplApiKey, setDeeplApiKey] = useState("");
-	// DeepL 用量显示（"--" = 未查询/无 key/失败）
-	const [deeplUsage, setDeeplUsage] = useState("--");
+	// DeepL 用量显示（"--/100万" = 未查询/无 key/失败）
+	const [deeplUsage, setDeeplUsage] = useState("--/100万");
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -59,11 +59,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const defaultSupjavTemplate =
 		locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
 
-	// 查询 DeepL 用量并刷新显示；无 key 或失败时显示 "--"
+	// 查询 DeepL 用量并刷新显示；无 key 或失败时显示 "--/100万"
 	const refreshDeeplUsage = async (key: string) => {
 		const trimmed = (key || "").trim();
 		if (!trimmed) {
-			setDeeplUsage("--");
+			setDeeplUsage("--/100万");
 			return;
 		}
 		try {
@@ -73,7 +73,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			})) as { count?: number | null } | undefined;
 			setDeeplUsage(formatUsage(res?.count ?? null));
 		} catch {
-			setDeeplUsage("--");
+			setDeeplUsage("--/100万");
 		}
 	};
 
