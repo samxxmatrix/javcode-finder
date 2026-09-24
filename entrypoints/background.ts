@@ -5,10 +5,12 @@ import {
 } from "../src/lib/favorites";
 import {
 	buildDeepLBody,
+	buildGoogleUrl,
 	DEEPL_API_URL,
 	DEEPL_USAGE_URL,
 	parseDeepLResponse,
 	parseDeepLUsage,
+	parseGoogleResponse,
 	type TranslateTarget,
 } from "../src/lib/translate";
 
@@ -111,35 +113,56 @@ export default defineBackground(() => {
 					contentId?: string;
 				};
 
-				// 标题翻译：DeepL API。无 key 或失败返回空译文（调用方回退原文）
+				// 标题翻译：优先 DeepL API；无 key、失败或空译文时无感降级谷歌 gtx。
+				// 两者都失败返回空译文（调用方回退原文）。
 				if (msg?.type === "jt:translate" && msg.text) {
 					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
 					const key = (msg.deeplKey || "").trim();
 					void (async () => {
-						if (!key) {
-							sendResponse({ translated: "", error: "no-key" });
-							return;
+						// 一级：DeepL（仅在有 key 时尝试）
+						if (key) {
+							try {
+								const res = await fetch(DEEPL_API_URL, {
+									method: "POST",
+									headers: {
+										Authorization: `DeepL-Auth-Key ${key}`,
+										"Content-Type": "application/x-www-form-urlencoded",
+									},
+									body: buildDeepLBody(msg.text!, target),
+									signal: AbortSignal.timeout(5000),
+								});
+								if (res.ok) {
+									const data = await res.json();
+									const translated = parseDeepLResponse(data);
+									if (translated) {
+										sendResponse({ translated });
+										return;
+									}
+								}
+								// 非 200 或空译文 → 降级谷歌
+							} catch {
+								// 网络异常 → 降级谷歌
+							}
 						}
+						// 二级：谷歌 gtx 公开端点（限流 429 时同样失败，回退原文）
 						try {
-							const res = await fetch(DEEPL_API_URL, {
-								method: "POST",
-								headers: {
-									Authorization: `DeepL-Auth-Key ${key}`,
-									"Content-Type": "application/x-www-form-urlencoded",
-								},
-								body: buildDeepLBody(msg.text!, target),
+							const res = await fetch(buildGoogleUrl(msg.text!, target), {
 								signal: AbortSignal.timeout(5000),
 							});
 							if (!res.ok) {
 								sendResponse({
 									translated: "",
-									error: `HTTP ${res.status}`,
+									// 403/429 = 谷歌限流：界面提示人工验证（打开验证页后重试）
+									error:
+										res.status === 403 || res.status === 429
+											? "google-verify"
+											: `HTTP ${res.status}`,
 								});
 								return;
 							}
 							const data = await res.json();
 							sendResponse({
-								translated: parseDeepLResponse(data),
+								translated: parseGoogleResponse(data),
 							});
 						} catch (error) {
 							sendResponse({

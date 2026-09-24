@@ -45,6 +45,8 @@ export interface LocaleMessages {
 	previewUnavailable: string;
 	closePreview: string;
 	retryTranslate: string;
+	googleVerifyHint: string;
+	openVerifyPage: string;
 	deeplApiKeyLabel: string;
 	addFavorite: string;
 	removeFavorite: string;
@@ -111,6 +113,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     previewUnavailable: "该番号暂无预告片",
     closePreview: "关闭预览",
     retryTranslate: "重新翻译",
+    googleVerifyHint: "谷歌翻译需要人工验证",
+    openVerifyPage: "打开验证页面",
     deeplApiKeyLabel: "DeepL API Key",
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
@@ -177,6 +181,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     previewUnavailable: "未獲取到預告片",
     closePreview: "關閉預覽",
     retryTranslate: "重新翻譯",
+    googleVerifyHint: "谷歌翻譯需要人工驗證",
+    openVerifyPage: "開啟驗證頁面",
     deeplApiKeyLabel: "DeepL API Key",
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
@@ -245,6 +251,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     previewUnavailable: "Trailer unavailable",
     closePreview: "Close preview",
     retryTranslate: "Retry translation",
+    googleVerifyHint: "Google Translate needs human verification",
+    openVerifyPage: "Open verification page",
     deeplApiKeyLabel: "DeepL API Key",
     addFavorite: "Add to favorites",
     removeFavorite: "Remove from favorites",

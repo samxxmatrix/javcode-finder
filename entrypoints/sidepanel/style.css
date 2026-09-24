@@ -1028,3 +1028,32 @@ button:focus-visible {
 .webdav-status--failed {
 	color: var(--accent-red);
 }
+
+/* 谷歌翻译人工验证提示行 */
+.trailer-preview__verify {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-top: 8px;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.trailer-preview__verify-btn {
+	background: none;
+	border: 1px solid var(--border-strong);
+	border-radius: 4px;
+	color: var(--accent-gold);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	padding: 3px 10px;
+	flex-shrink: 0;
+	transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.trailer-preview__verify-btn:hover {
+	border-color: var(--accent-gold);
+	background-color: rgba(245, 158, 11, 0.08);
+}

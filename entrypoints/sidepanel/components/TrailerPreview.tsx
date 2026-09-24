@@ -4,6 +4,7 @@ import {
 	buildTrailerUrlFromContentId,
 } from "../../../src/lib/javtrailers";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
+import { buildGoogleUrl } from "../../../src/lib/translate";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { getSettings } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
@@ -50,9 +51,15 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [titleReady, setTitleReady] = useState(false);
 	// 手动重试翻译进行中
 	const [retrying, setRetrying] = useState(false);
+	// 谷歌限流需要人工验证（打开验证页完成 reCAPTCHA 后自动重试）
+	const [needsVerify, setNeedsVerify] = useState(false);
+	// 验证弹窗的窗口 id（关闭时触发自动重试）
+	const verifyWinIdRef = useRef<number | null>(null);
 
-	// 请求翻译并返回译文（空字符串 = 失败）；DeepL key 从设置读取随消息携带
-	const requestTranslate = async (title: string): Promise<string> => {
+	// 请求翻译并返回译文与错误码（translated 空 = 失败）；DeepL key 从设置读取随消息携带
+	const requestTranslate = async (
+		title: string,
+	): Promise<{ translated: string; error?: string }> => {
 		const res = (await browser.runtime.sendMessage({
 			type: "jt:translate",
 			text: title,
@@ -62,7 +69,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		if (!res?.translated) {
 			console.warn("[JavCode Finder] 翻译失败:", res?.error || "empty");
 		}
-		return res?.translated || "";
+		return { translated: res?.translated || "", error: res?.error };
 	};
 	// 通过 background 解析到的 Content ID（javtrailers 完整格式，含前缀与补零）
 	const [resolution, setResolution] = useState<Resolution>({
@@ -141,10 +148,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		let disposed = false;
 		void (async () => {
 			try {
-				const translated = await requestTranslate(resolution.title!);
+				const result = await requestTranslate(resolution.title!);
 				if (!disposed) {
-					if (translated) {
-						setTranslatedTitle(translated);
+					if (result.translated) {
+						setTranslatedTitle(result.translated);
+						setNeedsVerify(false);
+					} else if (result.error === "google-verify") {
+						setNeedsVerify(true);
 					}
 					setTitleReady(true);
 				}
@@ -160,14 +170,17 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	}, [resolution.title, locale]);
 
-	// 翻译失败后手动重试
+	// 翻译失败后手动重试（验证窗口关闭后也自动调用）
 	const handleRetryTranslate = async () => {
 		if (!resolution.title || retrying) return;
 		setRetrying(true);
 		try {
-			const translated = await requestTranslate(resolution.title);
-			if (translated) {
-				setTranslatedTitle(translated);
+			const result = await requestTranslate(resolution.title);
+			if (result.translated) {
+				setTranslatedTitle(result.translated);
+				setNeedsVerify(false);
+			} else if (result.error === "google-verify") {
+				setNeedsVerify(true);
 			}
 		} catch {
 			// 保持失败状态，图标仍在可再次点击
@@ -175,6 +188,36 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			setRetrying(false);
 		}
 	};
+
+	// 打开谷歌验证小窗口：直接加载带标题文本的 gtx 完整 URL——
+	// 该 URL 在浏览器中会触发谷歌的验证页（translate.google.com 首页则不会）
+	const openVerifyWindow = async (text: string) => {
+		try {
+			const win = await browser.windows.create({
+				url: buildGoogleUrl(text, locale === "zh-hant" ? "zh-TW" : "zh-CN"),
+				type: "popup",
+				width: 420,
+				height: 640,
+			});
+			verifyWinIdRef.current = win?.id ?? null;
+		} catch {
+		// 创建窗口失败：用户仍可点手动重试
+		}
+	};
+
+	// 验证窗口关闭视为验证完成，自动重试一次翻译
+	useEffect(() => {
+		if (typeof browser === "undefined" || !browser.windows?.onRemoved) return;
+		const handleRemoved = (windowId: number) => {
+			if (verifyWinIdRef.current !== windowId) return;
+			verifyWinIdRef.current = null;
+			void handleRetryTranslate();
+		};
+		browser.windows.onRemoved.addListener(handleRemoved);
+		return () => {
+			browser.windows.onRemoved.removeListener(handleRemoved);
+		};
+	}, []);
 
 	// 卸载或切换番号时销毁 hls 实例，停止后台拉流
 	useEffect(() => {
@@ -446,6 +489,19 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						)}
 					</p>
+					{/* 谷歌限流时显示人工验证提示 */}
+					{needsVerify && (
+						<div className="trailer-preview__verify">
+							<span>{t.googleVerifyHint}</span>
+							<button
+								type="button"
+								className="trailer-preview__verify-btn"
+								onClick={() => openVerifyWindow(resolution.title || "")}
+							>
+								{t.openVerifyPage}
+							</button>
+						</div>
+					)}
 				</div>
 			)}
 

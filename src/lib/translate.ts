@@ -11,6 +11,43 @@ export const DEEPL_API_URL = "https://api-free.deepl.com/v2/translate";
 /** DeepL 用量查询端点（仅 GET，与翻译接口同主机） */
 export const DEEPL_USAGE_URL = "https://api-free.deepl.com/v2/usage";
 
+/** 谷歌翻译无 key 公开端点（client=gtx） */
+export const GOOGLE_TRANSLATE_URL =
+	"https://translate.googleapis.com/translate_a/single";
+
+/**
+ * 构造谷歌翻译 gtx 请求 URL。
+ * 目标语言：简体 zh-CN、繁体 zh-TW（与 DeepL 的 ZH/ZH-HANT 映射不同）。
+ */
+export function buildGoogleUrl(text: string, target: TranslateTarget): string {
+	const params = new URLSearchParams();
+	params.set("client", "gtx");
+	params.set("sl", "auto");
+	params.set("tl", target);
+	params.set("dt", "t");
+	params.set("q", text);
+	return `${GOOGLE_TRANSLATE_URL}?${params.toString()}`;
+}
+
+/**
+ * 解析谷歌翻译响应：[[["译文", ...], ...], null, "en", ...]。
+ * 拼接所有分段译文；失败返回空字符串（调用方回退原文）。
+ */
+export function parseGoogleResponse(data: unknown): string {
+	try {
+		const root = data as unknown[];
+		const segments = root?.[0];
+		if (!Array.isArray(segments)) return "";
+		return segments
+			.map((seg) =>
+				Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : "",
+			)
+			.join("");
+	} catch {
+		return "";
+	}
+}
+
 /**
  * DeepL 请求体（application/x-www-form-urlencoded）。
  * 目标语言：简体 ZH、繁体 ZH-HANT。

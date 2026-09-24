@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildDeepLBody,
+	buildGoogleUrl,
 	formatUsage,
 	parseDeepLResponse,
 	parseDeepLUsage,
+	parseGoogleResponse,
 } from "../src/lib/translate";
 
 describe("buildDeepLBody", () => {
@@ -64,5 +66,39 @@ describe("formatUsage", () => {
 
 	it("returns --/100万 for missing counts", () => {
 		expect(formatUsage(null)).toBe("--/100万");
+	});
+});
+
+describe("buildGoogleUrl", () => {
+	it("builds the gtx URL with target language and text", () => {
+		const url = buildGoogleUrl("Hello world", "zh-CN");
+		expect(url).toContain("client=gtx");
+		expect(url).toContain("sl=auto");
+		expect(url).toContain("tl=zh-CN");
+		expect(url).toContain("dt=t");
+		expect(url).toContain("Hello+world");
+	});
+
+	it("uses zh-TW for traditional Chinese", () => {
+		expect(buildGoogleUrl("Hello", "zh-TW")).toContain("tl=zh-TW");
+	});
+});
+
+describe("parseGoogleResponse", () => {
+	it("joins translated segments", () => {
+		// translate_a/single 的真实响应：首层数组的 [0] 是分段译文数组
+		expect(
+			parseGoogleResponse([
+				[["你好", "Hello", null, null, 10]],
+				null,
+				"en",
+			]),
+		).toBe("你好");
+	});
+
+	it("returns empty string for malformed responses", () => {
+		expect(parseGoogleResponse(null)).toBe("");
+		expect(parseGoogleResponse({})).toBe("");
+		expect(parseGoogleResponse(["nope"])).toBe("");
 	});
 });
