@@ -57,10 +57,11 @@ GET https://dmm.0045.kdns.fr/BDSM-091?key=YOUR_API_KEY
 
 字段	类型	说明
 code	String	查询的番号（大写）
-cid	String	DMM 商品 ID
+cid	String	DMM 商品 ID（数字版优先）
+channel	String	通道：digital（数字配信）或 mono（通贩 DVD）
 title	String	长标题（作品介绍文，可能较长）
 short_title	String	短标题（商品名）
-cover_url	String	封面大图（pl.jpg 规格）
+cover_url	String	封面大图；数字版为 awsimgsrc.dmm.co.jp，mono 为 pics.dmm.co.jp
 preview_url	String	预告片 mp4 地址；该片无预告片时为 null
 detail_url	String	DMM 详情页地址
 cached	Boolean	本次是否命中缓存
@@ -75,28 +76,42 @@ GET https://dmm.0045.kdns.fr/cid/BDSM-091?key=YOUR_API_KEY
 
 {
   "code": "BDSM-091",
-  "cid": "h_1096bdsm091",
+  "cid": "h_1096bdsm00091",
+  "channel": "digital",
   "cached": false
 }
 
-只做搜索页抓取 + 番号匹配，不抓详情页，比完整查询快约一半。
+只做数字版 GraphQL 搜索（无匹配时回退 mono 搜索页），不抓详情页，比完整查询快。
 
 缓存优先复用完整查询的结果（同一番号完整查过则直接命中），否则用独立的 CID 缓存（Redis key 前缀 CID:）。
 
 6. 番号匹配规则
 
-接口先搜索 DMM，再按规则挑选结果，防止抓错片：
+查询优先级：数字版（FANZA 動画配信）优先，没有才查 mono 通贩。
+
+数字版走 FANZA GraphQL API 两步查询：
+1. legacySearchPPV 按补零番号搜索拿 id（如 IPX-118 → ipx00118）
+2. ppvContent(id) 拿详情（标题/长文/封面/预告片）
+mono 走 DMM 搜索页 + 详情页 HTML 抓取。
+
+拿到候选列表后按规则挑选，防止抓错片：
 
 优先级	规则	示例
-1	CID 与番号精确一致（去分隔符、小写）	IPX-118 → ipx118
-2	CID 包含番号	BDSM-091 → h_1096bdsm091
-3	都不匹配	返回 404
+1	归一化后精确一致	IPX-118 → ipx00118
+2	尾部精确匹配（标准版优先，特典后缀 a/b 排后）	HODV-22112 → 41hodv22112（跳过 41hodv22112a/b）；BDSM-091 → h_1096bdsm00091
+3	包含番号	厂商前缀型 cid
+4	都不匹配	返回 404
+
+归一化：小写、去分隔符、数字段去前导零（ipx00118 ≡ ipx118）。
 
 实测挡住的场景：
 
-搜索 IPX-118 时 DMM 把合集版 7ipx118 排在第一位，接口仍正确返回 ipx118
+搜索 IPX-118 时 DMM 把合集版 7ipx118 排在第一位，接口仍正确返回标准版
 
 搜索不存在的 QQQ-000 时 DMM 模糊搜索会返回一堆 IQQQ 系列，接口正确返回 404
+
+50 个番号抽样实测：DMM 生态内数字版覆盖率约 95%，覆盖不到自动回退 mono；
+素人系（SIRO/259LUXU/300NTK/200GANA）与 FC2 不在 DMM 生态内，双通道均查不到。
 
 7. 缓存
 

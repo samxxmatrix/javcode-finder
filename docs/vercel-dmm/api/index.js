@@ -16,6 +16,18 @@ const COMMON_HEADERS = {
   'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
 };
 
+// 通道的详情页 URL 格式；搜索入口各自不同：
+// digital 走 GraphQL API（api.video.dmm.co.jp，无 geo 拦截），mono 走 HTML 搜索页
+const CHANNELS = {
+  digital: {
+    detail: (cid) => `https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=${cid}/`,
+  },
+  mono: {
+    search: (code) => `https://www.dmm.co.jp/mono/-/search/=/searchstr=${encodeURIComponent(code)}/`,
+    detail: (cid) => `https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=${cid}/`,
+  },
+};
+
 // 错误码字典定义（与 Worker 版保持一致）
 const ERRORS = {
   MISSING_CODE: { status: 400, code: 40001, error: 'MISSING_CODE', message: 'Please provide a valid code, e.g. /BDSM-091 or /?code=BDSM-091' },
@@ -82,23 +94,32 @@ export default async function handler(req, res) {
     }
 
     // ----------------------------------------------------
-    // 5. 年龄确认 → 搜索页拿 CID
+    // 5. 搜索番号：数字版 GraphQL 优先，无匹配回退 mono
     // ----------------------------------------------------
-    const searchResult = await fetchSearchPage(code);
-    const cid = pickCid(searchResult.html, code);
-    if (!cid) {
+    const found = await searchCid(code);
+    if (!found) {
       return sendError(res, ERRORS.ITEM_NOT_FOUND, `Item not found for code: ${code}`);
     }
+    const { cid, cookieJar, channel, digitalData } = found;
 
     // ----------------------------------------------------
-    // 6. 抓取 DMM 详情页解析数据
+    // 6. 取详情：数字版用 GraphQL 详情数据，mono 抓详情页 HTML
     // ----------------------------------------------------
-    const detailHtml = await fetchDetailPage(cid, searchResult.cookieJar);
-    if (!detailHtml) {
-      return sendError(res, ERRORS.ITEM_NOT_FOUND, `Detail page not found for code: ${code}`);
+    let detail;
+    if (channel === 'digital') {
+      detail = {
+        title: digitalData.title,
+        shortTitle: digitalData.shortTitle,
+        coverUrl: digitalData.coverUrl,
+        previewUrl: digitalData.previewUrl,
+      };
+    } else {
+      const detailHtml = await fetchDetailPage(cid, cookieJar, channel);
+      if (!detailHtml) {
+        return sendError(res, ERRORS.ITEM_NOT_FOUND, `Detail page not found for code: ${code}`);
+      }
+      detail = extractDetail(detailHtml, cid);
     }
-
-    const detail = extractDetail(detailHtml, cid);
 
     // ----------------------------------------------------
     // 7. 构造数据 & 写入缓存（永久保存：番号数据静态，容量管够；写入失败不影响响应）
@@ -106,11 +127,12 @@ export default async function handler(req, res) {
     const resultData = {
       code: cacheKey,
       cid: cid,
+      channel: channel,
       title: detail.title,
       short_title: detail.shortTitle,
       cover_url: detail.coverUrl,
       preview_url: detail.previewUrl,
-      detail_url: `https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=${cid}/`
+      detail_url: CHANNELS[channel].detail(cid)
     };
 
     try {
@@ -135,51 +157,200 @@ async function handleCidOnly(res, req, code) {
   if (req.query.refresh !== '1') {
     const cached = (await getCached(cacheKey)) || (await getCached(`CID:${cacheKey}`));
     if (cached) {
-      return sendJson(res, 200, { code: cacheKey, cid: cached.cid, cached: true });
+      return sendJson(res, 200, { code: cacheKey, cid: cached.cid, channel: cached.channel, cached: true });
     }
   }
 
-  const { html } = await fetchSearchPage(code);
-  const cid = pickCid(html, code);
-  if (!cid) {
+  const found = await searchCid(code);
+  if (!found) {
     return sendError(res, ERRORS.ITEM_NOT_FOUND, `Item not found for code: ${code}`);
   }
 
-  const result = { code: cacheKey, cid };
+  const result = { code: cacheKey, cid: found.cid, channel: found.channel };
   await setCached(`CID:${cacheKey}`, result);
   sendJson(res, 200, { ...result, cached: false });
 }
 
 /**
- * 调试模式：逐步抓取并记录中间状态，排查 DMM 对 IP 的拦截
+ * 搜索番号：数字版 GraphQL 优先，无匹配回退 mono HTML 搜索
+ * @returns {Promise<{ cid: string, cookieJar: Record<string, string>, channel: string, digitalData: Object | null } | null>}
+ */
+async function searchCid(code) {
+  // 1. 数字版：GraphQL API（无 geo 拦截、无需 cookie），失败静默回退
+  const digitalData = await searchDigital(code);
+  if (digitalData) {
+    return { cid: digitalData.cid, cookieJar: {}, channel: 'digital', digitalData };
+  }
+
+  // 2. mono 通贩 HTML 搜索兜底
+  const cookieJar = {};
+  try {
+    const html = await fetchSearchPage(code, 'mono', cookieJar);
+    const cid = pickCid(html, code);
+    if (cid) {
+      return { cid, cookieJar, channel: 'mono', digitalData: null };
+    }
+  } catch (err) {
+    // mono 通道失败（被拦/网络问题），按未找到处理
+  }
+  return null;
+}
+
+/**
+ * 数字版搜索：FANZA GraphQL API（api.video.dmm.co.jp）
+ * 两步：legacySearchPPV 按补零番号搜 id → ppvContent(id) 拿完整详情
+ * 实测可用字段：id/title/description（长文）/packageImage.largeUrl/sample2DMovie.highestMovieUrl（预告片）
+ * @returns {Promise<{ cid: string, title: string | null, shortTitle: string | null, coverUrl: string | null, previewUrl: string | null } | null>}
+ */
+async function searchDigital(code) {
+  try {
+    // 1. 搜索：queryWord 必须 5 位补零格式（实测原番号格式搜不到老片）
+    const queryWord = toDigitalQueryWord(code);
+    const searchQuery = `{ legacySearchPPV(limit: 10, offset: 0, sort: SALES_RANK_SCORE, floor: AV, queryWord: "${queryWord}") { result { contents { id } } } }`;
+    const searchRes = await fetch('https://api.video.dmm.co.jp/graphql', {
+      method: 'POST',
+      headers: { ...COMMON_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: searchQuery })
+    });
+    if (!searchRes.ok) {
+      return null;
+    }
+    const searchJson = await searchRes.json();
+    const ids = (searchJson?.data?.legacySearchPPV?.result?.contents || [])
+      .map(c => c.id)
+      .filter(Boolean);
+    const hitId = pickCidFromList(ids, code);
+    if (!hitId) {
+      return null;
+    }
+
+    // 2. 详情：SampleMovieUrl 操作按 id 查询（字段实测全可用）
+    const detailQuery = `query SampleMovieUrl($id: ID!) { ppvContent(id: $id) { id title description packageImage { largeUrl } sample2DMovie { highestMovieUrl hlsMovieUrl } } }`;
+    const detailRes = await fetch('https://api.video.dmm.co.jp/graphql', {
+      method: 'POST',
+      headers: { ...COMMON_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: detailQuery, variables: { id: hitId } })
+    });
+    if (!detailRes.ok) {
+      return null;
+    }
+    const detailJson = await detailRes.json();
+    const ppv = detailJson?.data?.ppvContent;
+    if (!ppv || !ppv.id) {
+      return null;
+    }
+    return {
+      cid: ppv.id,
+      title: ppv.description ? decodeHtmlEntities(ppv.description) : null,
+      shortTitle: ppv.title ? decodeHtmlEntities(ppv.title) : null,
+      coverUrl: ppv.packageImage?.largeUrl || null,
+      previewUrl: ppv.sample2DMovie?.highestMovieUrl || null,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * 调试模式：探测各通道/候选 URL 的抓取状态，排查 DMM 对 IP 的拦截或路径格式错误
  * @param {string} code - 番号
  */
 async function debugProbe(code) {
   const cookieJar = {};
-  const searchUrl = `https://www.dmm.co.jp/mono/-/search/=/searchstr=${encodeURIComponent(code)}/`;
-  const result = { search_url: searchUrl };
+  const result = { probes: [] };
 
+  // age_check 先初始化 cookie（无 cookie 会被年龄确认页拦截）
   try {
-    const ageUrl = `https://www.dmm.co.jp/age_check/=/declared=yes/?rurl=${encodeURIComponent(searchUrl)}`;
+    const ageUrl = `https://www.dmm.co.jp/age_check/=/declared=yes/?rurl=${encodeURIComponent('https://www.dmm.co.jp/mono/')}`;
     const ageRes = await fetch(ageUrl, { headers: COMMON_HEADERS, redirect: 'manual' });
-    result.age_status = ageRes.status;
     collectCookies(ageRes, cookieJar);
   } catch (err) {
-    result.age_error = err.message;
+    // 忽略
   }
 
+  // digital 通道的搜索路径格式未确定，列出候选逐一探测
+  // （video.dmm.co.jp/av/list 是从 digital 拦截页 rurl 解码得到的官方入口）
+  const candidates = [
+    ['digital', `https://video.dmm.co.jp/av/list/?key=${encodeURIComponent(code)}`],
+    ['digital', `https://www.dmm.co.jp/digital/videoa/-/list/search/=/searchstr=${encodeURIComponent(code)}/`],
+    ['digital', `https://www.dmm.co.jp/digital/videoa/-/list/=/searchstr=${encodeURIComponent(code)}/`],
+    ['mono', `https://www.dmm.co.jp/mono/-/search/=/searchstr=${encodeURIComponent(code)}/`],
+  ];
+
+  for (const [channel, searchUrl] of candidates) {
+    const info = { channel, search_url: searchUrl };
+    try {
+      const res = await fetch(searchUrl, { headers: withCookies(COMMON_HEADERS, cookieJar) });
+      info.status = res.status;
+      if (res.ok) {
+        collectCookies(res, cookieJar);
+        const html = await res.text();
+        info.html_size = html.length;
+        info.title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || null;
+        info.cids = [...html.matchAll(/\/detail\/=\/cid=([a-zA-Z0-9_]+)\//g)].map(m => m[1]);
+        info.pick = pickCid(html, code);
+        // 拦截页时带上关键片段，用于分析拦截类型和放行方式
+        if (html.length < 50000) {
+          const links = [...html.matchAll(/href="([^"]*age_check[^"]*)"/gi)].map(m => m[1]);
+          info.age_links = [...new Set(links)];
+          const forms = [...html.matchAll(/<form[^>]*action="([^"]*)"[^>]*>/gi)].map(m => m[1]);
+          info.forms = [...new Set(forms)];
+        }
+      }
+    } catch (err) {
+      info.error = err.message;
+    }
+    result.probes.push(info);
+  }
+  result.cookie_keys = Object.keys(cookieJar);
+
+  // GraphQL 数字版搜索探测（api.video.dmm.co.jp，无 geo 拦截），并试抓数字版详情页的预告片
   try {
-    const searchRes = await fetch(searchUrl, { headers: withCookies(COMMON_HEADERS, cookieJar) });
-    result.search_status = searchRes.status;
-    collectCookies(searchRes, cookieJar);
-    const html = await searchRes.text();
-    result.html_size = html.length;
-    result.title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || null;
-    result.html_head = html.slice(0, 300);
-    result.cookie_keys = Object.keys(cookieJar);
-    result.cid = pickCid(html, code);
+    const gqlBody = JSON.stringify({
+      query: `{ legacySearchPPV(limit: 10, offset: 0, sort: SALES_RANK_SCORE, floor: AV, queryWord: "${code}") { result { contents { id title } } } }`
+    });
+    const gqlRes = await fetch('https://api.video.dmm.co.jp/graphql', {
+      method: 'POST',
+      headers: { ...COMMON_HEADERS, 'Content-Type': 'application/json' },
+      body: gqlBody
+    });
+    result.graphql_status = gqlRes.status;
+    const gqlJson = await gqlRes.json();
+    const ids = (gqlJson?.data?.legacySearchPPV?.result?.contents || []).map(c => c.id);
+    result.graphql_ids = ids;
+    if (ids.length > 0) {
+      const detailUrl = `https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=${ids[0]}/`;
+      try {
+        const dRes = await fetch(detailUrl, { headers: withCookies(COMMON_HEADERS, cookieJar) });
+        const dHtml = await dRes.text();
+        const mp4 = dHtml.match(/https:\/\/[^\s"'<>]*?dmm\.co\.jp[^\s"'<>]*?\.mp4/i);
+        result.digital_detail = { url: detailUrl, status: dRes.status, size: dHtml.length, mp4: mp4 ? mp4[0] : null };
+      } catch (err) {
+        result.digital_detail = { url: detailUrl, error: err.message };
+      }
+
+      // 新版详情页探测（video.dmm.co.jp SPA，Next.js，可能带 SSR 数据）
+      const contentUrl = `https://video.dmm.co.jp/av/content/?id=${ids[0]}`;
+      try {
+        const cRes = await fetch(contentUrl, { headers: withCookies(COMMON_HEADERS, cookieJar) });
+        const cHtml = await cRes.text();
+        const cTitle = (cHtml.match(/<title>([^<]*)<\/title>/i) || [])[1] || null;
+        const cMp4 = cHtml.match(/https:\/\/[^\s"'<>]*?\.mp4/i);
+        result.content_page = {
+          url: contentUrl,
+          status: cRes.status,
+          size: cHtml.length,
+          title: cTitle,
+          has_next_data: cHtml.includes('__NEXT_DATA__'),
+          has_og: cHtml.includes('og:title'),
+          mp4: cMp4 ? cMp4[0] : null,
+        };
+      } catch (err) {
+        result.content_page = { url: contentUrl, error: err.message };
+      }
+    }
   } catch (err) {
-    result.search_error = err.message;
+    result.graphql_error = err.message;
   }
 
   // 自身出口探测：判断 DMM 视角下的请求来源（ip + 位置）
@@ -197,28 +368,31 @@ async function debugProbe(code) {
 }
 
 /**
- * 请求搜索页：先走 age_check 端点拿 cookie，再抓搜索页
+ * 请求搜索页：先走 age_check 端点拿 cookie（一次），再抓指定通道的搜索页
  * 实测：只带 age_check_done=1 会被年龄确认页拦截，搜索页响应会再下发 ckcy + dmm_service
  * @param {string} code - 番号
- * @returns {Promise<{ html: string, cookieJar: Record<string, string> }>}
+ * @param {string} channel - 通道名（digital / mono）
+ * @param {Record<string, string>} cookieJar - 跨通道共享的 cookie
+ * @returns {Promise<string>} 搜索页 HTML；被拦截/网络失败时抛错
  */
-async function fetchSearchPage(code) {
-  const cookieJar = {};
-  const searchUrl = `https://www.dmm.co.jp/mono/-/search/=/searchstr=${encodeURIComponent(code)}/`;
+async function fetchSearchPage(code, channel, cookieJar) {
+  const searchUrl = CHANNELS[channel].search(code);
 
-  // age_check 端点 302 并下发 age_check_done；部分 IP 不弹年龄确认，失败不致命
-  try {
-    const ageUrl = `https://www.dmm.co.jp/age_check/=/declared=yes/?rurl=${encodeURIComponent(searchUrl)}`;
-    // redirect:'manual'：fetch 只暴露最终响应头，必须手动收集 302 的 Set-Cookie
-    const ageRes = await fetch(ageUrl, { headers: COMMON_HEADERS, redirect: 'manual' });
-    collectCookies(ageRes, cookieJar);
-  } catch (err) {
-    // 忽略，继续无 cookie 抓搜索页
+  // age_check 端点 302 并下发 age_check_done；jar 里已有则跳过（幂等）
+  if (!cookieJar.age_check_done) {
+    try {
+      const ageUrl = `https://www.dmm.co.jp/age_check/=/declared=yes/?rurl=${encodeURIComponent(searchUrl)}`;
+      // redirect:'manual'：fetch 只暴露最终响应头，必须手动收集 302 的 Set-Cookie
+      const ageRes = await fetch(ageUrl, { headers: COMMON_HEADERS, redirect: 'manual' });
+      collectCookies(ageRes, cookieJar);
+    } catch (err) {
+      // 忽略，继续无 cookie 抓搜索页
+    }
   }
 
   const searchRes = await fetch(searchUrl, { headers: withCookies(COMMON_HEADERS, cookieJar) });
   if (!searchRes.ok) {
-    throw new Error(`DMM search request failed: HTTP ${searchRes.status}`);
+    throw new Error(`DMM ${channel} search failed: HTTP ${searchRes.status}`);
   }
   collectCookies(searchRes, cookieJar);
 
@@ -227,15 +401,16 @@ async function fetchSearchPage(code) {
   if (html.includes('年齢認証')) {
     throw new Error('Blocked by DMM age check page');
   }
-  return { html, cookieJar };
+  return html;
 }
 
 /**
  * 请求详情页；不存在/已下架的 cid 会被直接断连，一律按未找到处理
+ * @param {string} channel - 通道名（digital / mono），决定详情页 URL 格式
  * @returns {Promise<string | null>} 详情页 HTML，失败返回 null
  */
-async function fetchDetailPage(cid, cookieJar) {
-  const detailUrl = `https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=${cid}/`;
+async function fetchDetailPage(cid, cookieJar, channel) {
+  const detailUrl = CHANNELS[channel].detail(cid);
   try {
     const res = await fetch(detailUrl, { headers: withCookies(COMMON_HEADERS, cookieJar) });
     if (!res.ok) {
@@ -253,24 +428,49 @@ async function fetchDetailPage(cid, cookieJar) {
 }
 
 /**
- * 从搜索页 HTML 挑选目标 cid
- * 实测：搜索排序不可靠（搜 IPX-118 时合集 7ipx118 排第一）、
- * 模糊搜索会带出无关番号（搜 QQQ-000 返回一堆 iqqq 系列），
- * 所以按规则过滤：精确匹配 → cid 含番号 → 放弃
- * @param {string} html - 搜索页 HTML
+ * 归一化番号/cid 用于比较：小写、去分隔符、数字段去前导零
+ * ipx00118 → ipx118；h_1096bdsm00091 → h1096bdsm91；BDSM-091 → bdsm91
+ * （DMM 数字版 id 数字段习惯 5 位补零，与番号直接比较会失配）
+ */
+function normalizeCode(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/(^|[^0-9])0+(?=[0-9])/g, '$1');
+}
+
+/**
+ * 番号转数字版搜索词：数字段补前导零到 5 位（实测 GraphQL 只认补零格式）
+ * IPX-118 → ipx00118；BDSM-091 → bdsm00091；HODV-22112 → hodv22112
+ */
+function toDigitalQueryWord(code) {
+  const normalized = code.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalized.replace(/(\d+)$/, d => d.padStart(5, '0'));
+}
+
+/**
+ * 从候选 cid 列表挑选目标
+ * 实测：搜索排序不可靠（合集 7ipx118 排第一）、模糊搜索带出无关番号（QQQ-000 → iqqq 系列）、
+ * 特典版排在标准版前（41hodv22112a 在 41hodv22112 前），
+ * 所以按规则过滤：精确 → 尾部（标准版）→ 含番号 → 放弃
+ * @param {string[]} cids - 候选 cid 列表（页面顺序）
  * @param {string} code - 番号
  * @returns {string | null}
  */
-function pickCid(html, code) {
-  const cids = [...html.matchAll(/\/mono\/dvd\/-\/detail\/=\/cid=([a-zA-Z0-9_]+)\//g)].map(m => m[1]);
+function pickCidFromList(cids, code) {
   if (cids.length === 0) {
     return null;
   }
-
-  const normalized = code.replace(/[^a-z0-9]/gi, '').toLowerCase();
-  return cids.find(c => c.toLowerCase() === normalized)
-    || cids.find(c => c.toLowerCase().includes(normalized))
+  const norm = normalizeCode(code);
+  return cids.find(c => normalizeCode(c) === norm)
+    || cids.find(c => normalizeCode(c).endsWith(norm))
+    || cids.find(c => normalizeCode(c).includes(norm))
     || null;
+}
+
+/**
+ * 从搜索页 HTML 提取候选 cid 列表并挑选目标
+ */
+function pickCid(html, code) {
+  const cids = [...html.matchAll(/\/detail\/=\/cid=([a-zA-Z0-9_]+)\//g)].map(m => m[1]);
+  return pickCidFromList(cids, code);
 }
 
 /**
