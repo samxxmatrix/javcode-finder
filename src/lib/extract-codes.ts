@@ -1,11 +1,9 @@
+import { DEFAULT_CODE_REGEX } from "./settings";
 import type { ExtractionResult } from "./types";
 
 export const MAX_SCAN_CHARS = 2 * 1024 * 1024; // 2 MiB
 export const MAX_CANDIDATES = 500;
 export const MAX_CANDIDATE_LENGTH = 64;
-
-export const DEFAULT_CODE_REGEX = "\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b";
-export const CODE_REGEX = new RegExp(DEFAULT_CODE_REGEX, "gi");
 
 export function isValidCodeCandidate(rawCandidate: string): boolean {
 	const trimmed = rawCandidate.trim();
@@ -98,9 +96,11 @@ export function extractCandidatesFromText(
 /**
  * Self-contained function executed in host page top-level document via scripting.executeScript.
  * Must not reference external closure variables.
+ *
+ * 正则模式必传：默认值由调用方（面板）从设置读取后作为参数传入。
  */
 export function extractCandidatesInTab(
-	customRegexPattern?: string,
+	customRegexPattern: string,
 ): ExtractionResult {
 	try {
 		const bodyText = document.body ? document.body.innerText : "";
@@ -116,16 +116,11 @@ export function extractCandidatesInTab(
 			truncated = true;
 		}
 
-		const DEFAULT_PATTERN = "\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b";
 		let codeRegex: RegExp;
-		if (typeof customRegexPattern === "string" && customRegexPattern.trim()) {
-			try {
-				codeRegex = new RegExp(customRegexPattern.trim(), "gi");
-			} catch {
-				codeRegex = new RegExp(DEFAULT_PATTERN, "gi");
-			}
-		} else {
-			codeRegex = new RegExp(DEFAULT_PATTERN, "gi");
+		try {
+			codeRegex = new RegExp(customRegexPattern.trim(), "gi");
+		} catch {
+			return { candidates: [], truncated: false, unsupported: true };
 		}
 
 		const isValid = (str: string): boolean => {

@@ -1,7 +1,8 @@
 import { detectLocale } from "./locales";
 import type { SupportedLocale } from "./types";
 
-export const DEFAULT_CODE_REGEX = "\\b[A-Za-z][A-Za-z0-9]{2,5}[-—–\\s]+\\d{3,6}\\b";
+// String.raw 保持反斜杠字面：正则所见即所得（普通字符串中 \b 是退格符、\d 会丢反斜杠）
+export const DEFAULT_CODE_REGEX = String.raw`\b(?!(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[A-Z]+)?[- —–－\u00A0]+\d{4}\b)(?!\d{4}[- —–－\u00A0]\d{2}[- —–－\u00A0]\d{2}\b)(?<!\d)(?!FC2(?:[- —–－\u00A0]|$))[A-Z][A-Z0-9]{1,5}[- —–－\u00A0]+\d{3,6}(?![A-Z0-9])`;
 
 // supjav 官方搜索模板按语言区分：中文/繁中走 /zh/ 前缀，英文无前缀
 export const SUPJAV_ZH_TEMPLATE = "https://supjav.com/zh/?s={code}";
@@ -18,12 +19,21 @@ export interface ExtensionSettings {
 	// 跳转按钮显示名称（空 = 使用默认名称）
 	supjavName: string;
 	javdbName: string;
-	// DeepL API key（空 = 未配置，标题翻译不可用）
+	// 第三个自定义平台：无默认配置，名称与模板均空 = 面板不显示该按钮
+	customName: string;
+	customTemplate: string;
+	// DeepL 自建 Worker 翻译（Bearer key 即为 CLIENT_API_KEY）
 	deeplApiKey: string;
-	// WebDAV 云端配置（三项全空 = 未开通云端同步）
+	// Worker 地址（空 = 未配置，直接用谷歌翻译）
+	translateApiUrl: string;
+	// 启用开关：关闭时跳过 Worker，直接用谷歌翻译
+	translateEnabled: boolean;
+	// WebDAV 云端配置（三项全空 = 未配置云端）
 	webdavUrl: string;
 	webdavUser: string;
 	webdavPass: string;
+	// 云盘同步开关：关闭时不存取云端（收藏仅本地）
+	webdavEnabled: boolean;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -44,10 +54,15 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	previewVolume: 100,
 	supjavName: "Supjav",
 	javdbName: "JavDB",
+	customName: "",
+	customTemplate: "",
 	deeplApiKey: "",
+	translateApiUrl: "",
+	translateEnabled: false,
 	webdavUrl: "",
 	webdavUser: "",
 	webdavPass: "",
+	webdavEnabled: false,
 };
 
 export function normalizeDomain(input: string): string {
@@ -171,14 +186,32 @@ export function getSettings(): ExtensionSettings {
 				typeof parsed.javdbName === "string" && parsed.javdbName.trim()
 					? parsed.javdbName.trim()
 					: DEFAULT_SETTINGS.javdbName,
+			customName:
+				typeof parsed.customName === "string" ? parsed.customName.trim() : "",
+			customTemplate:
+				typeof parsed.customTemplate === "string"
+					? parsed.customTemplate.trim()
+					: "",
 			deeplApiKey:
 				typeof parsed.deeplApiKey === "string" ? parsed.deeplApiKey.trim() : "",
+			translateApiUrl:
+				typeof parsed.translateApiUrl === "string"
+					? parsed.translateApiUrl.trim()
+					: "",
+			translateEnabled:
+				typeof parsed.translateEnabled === "boolean"
+					? parsed.translateEnabled
+					: DEFAULT_SETTINGS.translateEnabled,
 			webdavUrl:
 				typeof parsed.webdavUrl === "string" ? parsed.webdavUrl.trim() : "",
 			webdavUser:
 				typeof parsed.webdavUser === "string" ? parsed.webdavUser.trim() : "",
 			// 密码不做 trim：保持用户输入原样
 			webdavPass: typeof parsed.webdavPass === "string" ? parsed.webdavPass : "",
+			webdavEnabled:
+				typeof parsed.webdavEnabled === "boolean"
+					? parsed.webdavEnabled
+					: DEFAULT_SETTINGS.webdavEnabled,
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -235,10 +268,26 @@ export function saveSettings(
 				settings.javdbName !== undefined
 					? settings.javdbName.trim()
 					: current.javdbName,
+			customName:
+				settings.customName !== undefined
+					? settings.customName.trim()
+					: current.customName,
+			customTemplate:
+				settings.customTemplate !== undefined
+					? settings.customTemplate.trim()
+					: current.customTemplate,
 			deeplApiKey:
 				settings.deeplApiKey !== undefined
 					? settings.deeplApiKey.trim()
 					: current.deeplApiKey,
+			translateApiUrl:
+				settings.translateApiUrl !== undefined
+					? settings.translateApiUrl.trim()
+					: current.translateApiUrl,
+			translateEnabled:
+				settings.translateEnabled !== undefined
+					? settings.translateEnabled
+					: current.translateEnabled,
 			// 云端三项传入空字符串表示"关闭云端同步"，与未传字段区分处理
 			webdavUrl:
 				settings.webdavUrl !== undefined
@@ -252,6 +301,10 @@ export function saveSettings(
 				settings.webdavPass !== undefined
 					? settings.webdavPass
 					: current.webdavPass,
+			webdavEnabled:
+				settings.webdavEnabled !== undefined
+					? settings.webdavEnabled
+					: current.webdavEnabled,
 		};
 		const storage = getStorage();
 		if (storage) {

@@ -33,10 +33,14 @@ export function clearCodeMarksInTab(): void {
  * Self-contained function executed in host page top-level document via scripting.executeScript.
  * Must not reference external closure variables.
  *
- * 在每个已识别番号的页面匹配文本末尾插入金色实心小圆点；
- * 点击圆点只发消息 jt:code-clicked 给面板打开预告片预览（不做定位）。
+ * 在每个已识别番号的页面匹配文本末尾插入金色实心小圆点；命中收藏（favoriteCodes）的
+ * 番号替换为金色书签图标。点击只发消息 jt:code-clicked 给面板打开预告片预览（不做定位）。
  */
-export function markCodesInTab(codes: string[], perCodeLimit = 30): void {
+export function markCodesInTab(
+	codes: string[],
+	perCodeLimit = 30,
+	favoriteCodes?: string[],
+): void {
 	try {
 		// 先清理旧标记（逻辑内联：注入函数不能引用模块级函数或常量）
 		// 圆点直接移除；金底黑字标记展开回普通文本后移除
@@ -128,40 +132,50 @@ export function markCodesInTab(codes: string[], perCodeLimit = 30): void {
 			return true;
 		};
 
-		// 圆点样式全部内联 + !important：目标页面 CSS（含其 !important 规则）无法覆盖。
-		// 尺寸用 em 单位，随番号字号缩放；透明 border 撑大点击区（同样随字号），
-		// border-radius 直接裁剪背景为圆形（不用 background-clip，会被裁成方块）
-		// matchedLen：该圆点对应匹配文本的长度，点击时用于定位番号文本起点
-		const buildDot = (code: string, matchedLen: number): HTMLElement => {
+		// 收藏集合（大写比较，与面板收藏去重口径一致）
+		const favSet = new Set<string>();
+		if (favoriteCodes) {
+			for (const f of favoriteCodes) {
+				const key = String(f).trim().toUpperCase();
+				if (key) favSet.add(key);
+			}
+		}
+
+		// 标记统一用 SVG（普通番号金色实心圆、收藏番号金色书签），容器样式与
+		// hover 行为完全一致：尺寸随字号（em），hover 用 drop-shadow 沿图形轮廓发光，
+		// 避免 background/box-shadow 在 SVG 图标上产生色块等异常。
+		// matchedLen：该标记对应匹配文本的长度，点击时用于定位番号文本起点
+		const buildDot = (
+			code: string,
+			matchedLen: number,
+			isFav: boolean,
+		): HTMLElement => {
 			const dot = document.createElement("span");
-			dot.className = "javcode-dot";
+			dot.className = isFav ? "javcode-dot javcode-dot--fav" : "javcode-dot";
 			dot.title = code;
 			dot.style.cssText = [
 				"display:inline-block !important",
-				"width:0.4em !important",
-				"height:0.4em !important",
-				"border:0.3em solid transparent !important",
-				"border-radius:50% !important",
-				"background-color:#f59e0b !important",
-				"margin-left:0.2em !important",
+				"padding:0.3em !important",
+				"margin-right:0.2em !important",
 				"vertical-align:middle !important",
 				"line-height:0 !important",
 				"cursor:pointer !important",
-				"box-sizing:content-box !important",
-				"transition:background-color 0.12s ease,box-shadow 0.12s ease !important",
 			].join(";");
-			// hover 用 JS 控制：不依赖注入 style 标签的 :hover 规则；移出恢复金色
+			dot.innerHTML = isFav
+				? // 金色书签：与面板收藏图标同款 path
+					'<svg viewBox="0 0 1024 1024" width="1em" height="1em"><path d="M832.8 63.9H191.2c-17.8 0-32.3 14.5-32.3 32.3V878c0 23.3 23.9 38.9 45.3 29.6L489.8 782l331.4 128.4c21.2 8.2 44-7.4 44-30.1V96.2c-0.1-17.9-14.5-32.3-32.4-32.3z" fill="#f59e0b"/></svg>'
+				: // 金色实心圆：尺寸与书签一致（1em）
+					'<svg viewBox="0 0 16 16" width="1em" height="1em"><circle cx="8" cy="8" r="8" fill="#f59e0b"/></svg>';
+			// hover 用 JS 控制：drop-shadow 沿 SVG 轮廓发光，圆点与书签行为统一
 			dot.addEventListener("mouseenter", () => {
-				dot.style.setProperty("background-color", "#fbbf24", "important");
 				dot.style.setProperty(
-					"box-shadow",
-					"0 0 6px rgba(245,158,11,0.9)",
+					"filter",
+					"drop-shadow(0 0 0.15em rgba(245,158,11,0.9))",
 					"important",
 				);
 			});
 			dot.addEventListener("mouseleave", () => {
-				dot.style.setProperty("background-color", "#f59e0b", "important");
-				dot.style.setProperty("box-shadow", "none", "important");
+				dot.style.setProperty("filter", "none", "important");
 			});
 			dot.addEventListener("click", (event) => {
 				// 圆点常落在链接文本内，阻止冒泡防跳转
@@ -182,15 +196,14 @@ export function markCodesInTab(codes: string[], perCodeLimit = 30): void {
 				});
 
 				// 不做滚动定位，就地高亮该处番号为金底黑字（与定位标记同款静态样式）。
-				// splitText 保证 dot 的前一个兄弟节点是以番号结尾的文本节点，
-				// 番号 = 该节点末尾 matchedLen 个字符；已高亮（兄弟变为 mark 元素）则跳过。
-				const prev = dot.previousSibling;
-				if (prev && prev.nodeType === 3) {
+				// splitText 保证 dot 的后一个兄弟节点是以番号开头的文本节点，
+				// 番号 = 该节点开头 matchedLen 个字符；已高亮（兄弟变为 mark 元素）则跳过。
+				const next = dot.nextSibling;
+				if (next && next.nodeType === 3) {
 					try {
-						const start = Math.max(0, (prev.nodeValue ?? "").length - matchedLen);
 						const range = document.createRange();
-						range.setStart(prev, start);
-						range.setEnd(prev, prev.nodeValue?.length ?? 0);
+						range.setStart(next, 0);
+						range.setEnd(next, matchedLen);
 						const mark = document.createElement("mark");
 						mark.className = "javcode-locate-badge";
 						mark.style.cssText = [
@@ -256,6 +269,16 @@ export function markCodesInTab(codes: string[], perCodeLimit = 30): void {
 		let currentNode: Node | null = walker.nextNode();
 
 		while (currentNode) {
+			// 跳过紧随标识之后的番号文本节点：它已被标记，再匹配会重复插入
+			const prevEl = currentNode.previousSibling as HTMLElement | null;
+			if (
+				prevEl &&
+				typeof prevEl.className === "string" &&
+				prevEl.className.includes("javcode-dot")
+			) {
+				currentNode = walker.nextNode();
+				continue;
+			}
 			const text = currentNode.nodeValue || "";
 			if (text.trim()) {
 				// 收集该文本节点内所有匹配（code、结束位置、实际匹配文本长度），再统一插入
@@ -286,13 +309,25 @@ export function markCodesInTab(codes: string[], perCodeLimit = 30): void {
 					}
 				}
 
-				// 从后往前 splitText 插入，保证前面的匹配索引不受影响
+				// 从后往前 splitText 插入，保证前面的匹配索引不受影响。
+				// 标识放在番号之前（侧面板挤压页面宽度时行尾标识可能被挤出可视区）；
+				// 番号单独切出独立节点，避免 TreeWalker 重复匹配同一处
 				found.sort((a, b) => b.end - a.end);
 				for (const f of found) {
-					// TreeWalker 收集的是文本节点，splitText 仅在 Text 上存在
-					const after = (currentNode as Text).splitText(f.end);
-					const dot = buildDot(f.code, f.matchedLen);
-					currentNode.parentNode?.insertBefore(dot, after);
+					// TreeWalker 收集的是文本节点，splitText 仅在 Text 上存在。
+					// splitText 返回后半段、原节点保留前半段：
+					// 第一次在匹配起点截断，后半段以番号开头；
+					// 第二次按匹配长度截断，原对象精确为番号文本，返回值是番号后剩余
+					const start = f.end - f.matchedLen;
+					const codeNode = (currentNode as Text).splitText(start);
+					codeNode.splitText(f.matchedLen);
+					const dot = buildDot(
+						f.code,
+						f.matchedLen,
+						favSet.has(f.code.toUpperCase()),
+					);
+					// 最终结构：原节点 | dot | 番号节点 | 番号后剩余
+					currentNode.parentNode?.insertBefore(dot, codeNode);
 				}
 			}
 			currentNode = walker.nextNode();
@@ -309,12 +344,13 @@ export async function markCodesForTab(
 	tabId: number,
 	codes: string[],
 	perCodeLimit = 30,
+	favoriteCodes?: string[],
 ): Promise<void> {
 	try {
 		await browser.scripting.executeScript({
 			target: { tabId },
 			func: markCodesInTab,
-			args: [codes, perCodeLimit],
+			args: [codes, perCodeLimit, favoriteCodes],
 		});
 	} catch (err) {
 		console.warn("Failed to mark codes in tab:", tabId, err);

@@ -7,6 +7,7 @@ interface MockTextNode {
 	parentNode: any;
 	splitText: ReturnType<typeof vi.fn>;
 	nodeType: number;
+	previousSibling?: any;
 }
 
 describe("markCodesInTab", () => {
@@ -47,16 +48,15 @@ describe("markCodesInTab", () => {
 		};
 
 		// 浏览器中 splitText(offset) 会把当前节点截断为 [0, offset)，
-		// 返回 [offset, end) 的新节点，新节点紧跟原节点之后；
-		// prevNode 指向截断前的原节点，供 dot 找到其前一个文本兄弟
+		// 返回 [offset, end) 的新节点，新节点紧跟原节点之后（previousSibling 指向原节点）
 		const splitText = vi.fn(function (this: MockTextNode, offset: number) {
-			const after: MockTextNode & { prevNode?: MockTextNode } = {
+			const after: MockTextNode = {
 				nodeValue: this.nodeValue.slice(offset),
 				parentElement: this.parentElement,
 				parentNode: this.parentNode,
 				splitText,
 				nodeType: 3,
-				prevNode: this,
+				previousSibling: this,
 			};
 			this.nodeValue = this.nodeValue.slice(0, offset);
 			// 新节点插入到原节点之后（保持页面遍历顺序）
@@ -73,14 +73,19 @@ describe("markCodesInTab", () => {
 				getClientRects: () => (item.isVisible !== false ? [{}] : []),
 				insertBefore: (child: any, ref: any) => {
 					child.parentNode = el;
-					// dot 的前一个兄弟 = 截断前含番号结尾的原文本节点
-					child.previousSibling = ref?.prevNode ?? ref;
+					// 模拟真实 DOM：dot 与 ref 互为兄弟（dot 在前，番号节点在后）
+					child.nextSibling = ref;
+					ref.previousSibling = child;
 					insertedDots.push({ child, ref });
 					return child;
 				},
 				removeChild: (child: any) => {
 					removedDots.push(child);
 					createdSpans.splice(createdSpans.indexOf(child), 1);
+					// 模拟真实 DOM：移除节点后，其后兄弟的 previousSibling 自动更新
+					if (child.nextSibling?.previousSibling === child) {
+						child.nextSibling.previousSibling = child.previousSibling;
+					}
 					return child;
 				},
 				normalize: vi.fn(),
@@ -118,6 +123,7 @@ describe("markCodesInTab", () => {
 					) as any,
 					title: "",
 					parentNode: null,
+					innerHTML: "",
 					appendChild: vi.fn(),
 					addEventListener: (type: string, fn: any) => {
 						handlers.push({ type, fn });
@@ -179,8 +185,9 @@ describe("markCodesInTab", () => {
 		// 每个番号一处出现 → 2 个 dot，且每个 dot 都带点击监听
 		expect(insertedDots.length).toBe(2);
 		expect(handlers.filter((h) => h.type === "click").length).toBe(2);
-		// 圆点尺寸用 em 单位，随番号字号缩放
-		expect(createdSpans[0]!.style.cssText).toContain("width:0.4em");
+		// 普通圆点也是 SVG（圆形），与收藏书签统一样式体系
+		expect(createdSpans[0]!.innerHTML).toContain("<svg");
+		expect(createdSpans[0]!.innerHTML).toContain("circle");
 	});
 
 	it("同一番号出现多次时全部标记，直到每番号上限", () => {
@@ -234,8 +241,42 @@ describe("markCodesInTab", () => {
 		expect(mark.className).toBe("javcode-locate-badge");
 		expect(mark.style.cssText).toContain("background:#f59e0b");
 		expect(mark.style.cssText).toContain("color:#000000");
-		// range 起点 = 文本长度 - 番号长度（番号在 dot 前文本节点末尾）
+		// range 起点 0：番号在 dot 后文本节点的开头
 		expect(surroundCalls[0]!.range.setStart).toHaveBeenCalled();
+	});
+
+	it("命中的收藏番号用小圆点替换为收藏书签图标", () => {
+		const { createdSpans } = createMockDom([
+			{ text: "ABP-123 fav" },
+			{ text: "IPX-456 not" },
+		]);
+
+		markCodesInTab(["ABP-123", "IPX-456"], 30, ["ABP-123"]);
+
+		// 命中收藏的番号用书签图标（含 svg），未收藏的仍是普通圆点
+		expect(createdSpans[0]!.className).toContain("javcode-dot--fav");
+		expect(createdSpans[0]!.innerHTML).toContain("<svg");
+		expect(createdSpans[1]!.className).not.toContain("javcode-dot--fav");
+	});
+
+	it("收藏图标的点击行为与小圆点一致：发消息并包裹金底黑字", () => {
+		(globalThis as any).chrome = {
+			runtime: { sendMessage: vi.fn() },
+		};
+		const { handlers, surroundCalls } = createMockDom([
+			{ text: "ABP-123 fav" },
+		]);
+
+		markCodesInTab(["ABP-123"], 30, ["ABP-123"]);
+		handlers.find((h) => h.type === "click")!.fn({
+			preventDefault: vi.fn(),
+			stopPropagation: vi.fn(),
+		});
+
+		expect((globalThis as any).chrome.runtime.sendMessage).toHaveBeenCalledWith(
+			{ type: "jt:code-clicked", code: "ABP-123" },
+		);
+		expect(surroundCalls.length).toBe(1);
 	});
 
 	it("点击另一个番号时清理旧金底黑字，页面只保留当前番号一个标记", () => {
@@ -262,7 +303,7 @@ describe("markCodesInTab", () => {
 		expect(surroundCalls.length).toBe(2);
 	});
 
-	it("hover 变亮、移出恢复金色，不依赖页面样式", () => {
+	it("hover 发光、移出恢复，圆点与收藏图标统一行为", () => {
 		const { handlers, createdSpans } = createMockDom([
 			{ text: "ABP-123 is here" },
 		]);
@@ -273,10 +314,10 @@ describe("markCodesInTab", () => {
 		const enter = handlers.find((h) => h.type === "mouseenter")!.fn;
 		const leave = handlers.find((h) => h.type === "mouseleave")!.fn;
 		enter({});
-		expect(dotStyle["background-color"]).toBe("#fbbf24");
+		expect(dotStyle.filter).toContain("drop-shadow");
 		leave({});
-		// 移出后恢复金色而不是清空（清空会让圆点消失）
-		expect(dotStyle["background-color"]).toBe("#f59e0b");
+		// 移出后恢复无光晕
+		expect(dotStyle.filter).toBe("none");
 	});
 
 	it("FC2 番号宽松匹配（PPV 变体）", () => {

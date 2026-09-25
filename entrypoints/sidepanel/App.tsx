@@ -52,20 +52,23 @@ export const App: React.FC = () => {
 	const [favorites, setFavorites] = useState<string[]>([]);
 	// 云端推送防抖计时器（合并连续收藏操作，降低请求频率）
 	const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// 导航完成后延迟扫描计时器（等待新文档稳定）与空结果补扫计时器
+	const navScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	// 提取当前绑定/激活标签页的番号候选；tabId 供后续在同一标签页上标记圆点
-	const extractFromActiveTab = async (
-		settings: ReturnType<typeof getSettings>,
-	): Promise<ExtractionResult & { excluded?: boolean; tabId?: number }> => {
-		let activeTab: { id?: number; url?: string } | undefined;
+	// 获取面板目标的标签页：优先绑定 tab，否则当前窗口活动 tab
+	const getTargetTab = async (): Promise<
+		{ id?: number; url?: string } | undefined
+	> => {
+		let targetTab: { id?: number; url?: string } | undefined;
 		if (boundTabId) {
 			try {
-				activeTab = await browser.tabs.get(boundTabId);
+				targetTab = await browser.tabs.get(boundTabId);
 			} catch {
 				// Bound tab might have closed or cannot be retrieved
 			}
 		}
-		if (!activeTab) {
+		if (!targetTab) {
 			// Query active tab in the browser window
 			let tabs = await browser.tabs.query({
 				active: true,
@@ -77,8 +80,16 @@ export const App: React.FC = () => {
 					currentWindow: true,
 				});
 			}
-			activeTab = tabs && tabs.length > 0 ? tabs[0] : undefined;
+			targetTab = tabs && tabs.length > 0 ? tabs[0] : undefined;
 		}
+		return targetTab;
+	};
+
+	// 提取目标标签页的番号候选；tabId 供后续在同一标签页上标记圆点
+	const extractFromActiveTab = async (
+		settings: ReturnType<typeof getSettings>,
+	): Promise<ExtractionResult & { excluded?: boolean; tabId?: number }> => {
+		const activeTab = await getTargetTab();
 		if (!activeTab || !activeTab.id) {
 			return { candidates: [], truncated: false, unsupported: true };
 		}
@@ -140,23 +151,41 @@ export const App: React.FC = () => {
 		}
 	};
 
-	const runScan = async () => {
+	const runScan = async (isRescan = false) => {
 		setStatus("loading");
 		setErrorMessage(null);
 		setCandidates([]);
 		setTruncated(false);
 		setPreviewCode(null);
+		// 新一轮扫描作废未执行的延迟/补扫计时器
+		if (navScanTimerRef.current) clearTimeout(navScanTimerRef.current);
+		if (rescanTimerRef.current) clearTimeout(rescanTimerRef.current);
 
 		const settings = getSettings();
 
 		try {
+			// 发起扫描前记录目标 tab 的 URL，扫描完成后若已变化（导航竞态），结果作废重扫
+			const tabBefore = await getTargetTab();
 			const extraction = await extractFromActiveTab(settings);
+			const tabAfter = await getTargetTab();
+			if (
+				tabBefore?.url &&
+				tabAfter?.url &&
+				tabBefore.url !== tabAfter.url
+			) {
+				void runScan();
+				return;
+			}
 
-			// 扫描后同步页面圆点标记：有候选则标记，无候选/排除/不支持时仅清理旧标记
+			// 扫描后同步页面标记：有候选则标记（命中收藏的番号显示书签图标），
+			// 无候选/排除/不支持时仅清理旧标记；收藏读 storage 最新值，不依赖 state
 			if (extraction.tabId !== undefined) {
+				const codes = extraction.candidates;
 				void markCodesForTab(
 					extraction.tabId,
-					extraction.candidates.length > 0 ? extraction.candidates : [],
+					codes.length > 0 ? codes : [],
+					30,
+					codes.length > 0 ? loadFavorites(getStorage()) : [],
 				);
 			}
 
@@ -176,6 +205,14 @@ export const App: React.FC = () => {
 			setStatus(
 				extraction.candidates.length === 0 ? "no_candidates" : "results",
 			);
+
+			// 空结果补扫：客户端渲染/懒加载的页面 DOM 可能未就绪，
+			// 主扫描（非补扫）为空时 1.5s 后补扫一次；补扫后仍空则停止，避免无限循环
+			if (!isRescan && extraction.candidates.length === 0) {
+				rescanTimerRef.current = setTimeout(() => {
+					void runScan(true);
+				}, 1500);
+			}
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
 			setErrorMessage(msg);
@@ -187,9 +224,11 @@ export const App: React.FC = () => {
 		await runScan();
 	};
 
-	// 从云端拉取收藏并覆盖本地（仅本地为空时调用，避免覆盖较新的本地数据）
+	// 从云端拉取收藏并覆盖本地（仅本地为空时调用，避免覆盖较新的本地数据）；
+	// 开关关闭时不存取云端
 	const pullFromCloud = async (): Promise<void> => {
 		const s = getSettings();
+		if (!s.webdavEnabled) return;
 		if (!s.webdavUrl.trim() || !s.webdavUser.trim()) return;
 		try {
 			const res = (await browser.runtime.sendMessage({
@@ -208,9 +247,10 @@ export const App: React.FC = () => {
 		}
 	};
 
-	// 推送收藏到云端（整体覆盖；失败静默，下一次成功推送自动补偿）
+	// 推送收藏到云端（整体覆盖；失败静默，下一次成功推送自动补偿）；开关关闭时不存取云端
 	const pushToCloud = async (codes: string[]): Promise<void> => {
 		const s = getSettings();
+		if (!s.webdavEnabled) return;
 		if (!s.webdavUrl.trim() || !s.webdavUser.trim()) return;
 		try {
 			await browser.runtime.sendMessage({
@@ -315,7 +355,10 @@ export const App: React.FC = () => {
 				(!boundTabId || tabId === boundTabId) &&
 				changeInfo.status === "complete"
 			) {
-				runScan();
+				// 延迟 500ms 扫描：等待导航完全稳定、新文档就绪（避免扫描到旧文档）
+				navScanTimerRef.current = setTimeout(() => {
+					void runScan();
+				}, 500);
 			}
 		};
 
@@ -332,6 +375,8 @@ export const App: React.FC = () => {
 					// Ignore
 				}
 			}
+			if (navScanTimerRef.current) clearTimeout(navScanTimerRef.current);
+			if (rescanTimerRef.current) clearTimeout(rescanTimerRef.current);
 			if (typeof browser !== "undefined" && browser.tabs) {
 				browser.tabs.onActivated?.removeListener(handleTabActivated);
 				browser.tabs.onUpdated?.removeListener(handleTabUpdated);
@@ -537,7 +582,7 @@ export const App: React.FC = () => {
 									type="button"
 									className="popup-btn popup-btn--primary"
 									style={{ marginTop: 16 }}
-									onClick={runScan}
+									onClick={() => void runScan()}
 								>
 									{t.retry}
 								</button>
@@ -570,7 +615,7 @@ export const App: React.FC = () => {
 								<button
 									type="button"
 									className="popup-btn popup-btn--primary"
-									onClick={runScan}
+									onClick={() => void runScan()}
 								>
 									{t.retry}
 								</button>

@@ -53,22 +53,25 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [retrying, setRetrying] = useState(false);
 	// 谷歌限流需要人工验证（打开验证页完成 reCAPTCHA 后自动重试）
 	const [needsVerify, setNeedsVerify] = useState(false);
+	// 翻译错误信息行（详细：状态码+原因）；google-verify 走验证流程不显示
+	const [translateError, setTranslateError] = useState<string | null>(null);
 	// 验证弹窗的窗口 id（关闭时触发自动重试）
 	const verifyWinIdRef = useRef<number | null>(null);
 
-	// 请求翻译并返回译文与错误码（translated 空 = 失败）；DeepL key 从设置读取随消息携带
+	// 请求翻译并返回译文与错误码（translated 空 = 失败）；Worker 配置从设置读取随消息携带。
+	// 全程静默：翻译链路不向控制台输出任何异常
 	const requestTranslate = async (
 		title: string,
 	): Promise<{ translated: string; error?: string }> => {
+		const s = getSettings();
 		const res = (await browser.runtime.sendMessage({
 			type: "jt:translate",
 			text: title,
 			target: locale === "zh-hant" ? "zh-TW" : "zh-CN",
-			deeplKey: getSettings().deeplApiKey,
+			deeplKey: s.deeplApiKey,
+			translateUrl: s.translateApiUrl,
+			translateEnabled: s.translateEnabled,
 		})) as { translated?: string; error?: string } | undefined;
-		if (!res?.translated) {
-			console.warn("[JavCode Finder] 翻译失败:", res?.error || "empty");
-		}
 		return { translated: res?.translated || "", error: res?.error };
 	};
 	// 通过 background 解析到的 Content ID（javtrailers 完整格式，含前缀与补零）
@@ -153,8 +156,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					if (result.translated) {
 						setTranslatedTitle(result.translated);
 						setNeedsVerify(false);
+						setTranslateError(null);
 					} else if (result.error === "google-verify") {
+						// 谷歌限流：走人工验证流程，不显示错误信息行
 						setNeedsVerify(true);
+						setTranslateError(null);
+					} else if (result.error) {
+						setTranslateError(result.error);
 					}
 					setTitleReady(true);
 				}
@@ -179,8 +187,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			if (result.translated) {
 				setTranslatedTitle(result.translated);
 				setNeedsVerify(false);
+				setTranslateError(null);
 			} else if (result.error === "google-verify") {
 				setNeedsVerify(true);
+				setTranslateError(null);
+			} else if (result.error) {
+				setTranslateError(result.error);
 			}
 		} catch {
 			// 保持失败状态，图标仍在可再次点击
@@ -334,6 +346,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setCoverError(false);
 		setTranslatedTitle(null);
 		setTitleReady(false);
+		setTranslateError(null);
 		setResolution({ contentId: null, title: null, resolving: true });
 		setReloadKey((k) => k + 1);
 	};
@@ -499,6 +512,31 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 								onClick={() => openVerifyWindow(resolution.title || "")}
 							>
 								{t.openVerifyPage}
+							</button>
+						</div>
+					)}
+					{/* 翻译错误信息行（详细：状态码+原因），可关闭；验证流程不显示 */}
+					{translateError && (
+						<div className="trailer-preview__translate-error" role="alert">
+							<span className="trailer-preview__translate-error-text">
+								{translateError}
+							</span>
+							<button
+								type="button"
+								className="trailer-preview__translate-error-close"
+								onClick={() => setTranslateError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
 							</button>
 						</div>
 					)}

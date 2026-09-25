@@ -41,23 +41,64 @@ export interface SettingsViewHandle {
 	reset: () => void;
 }
 
+// 输入框内联清除按钮：有内容时显示在框内右侧，点击清空
+const ClearButton: React.FC<{
+	show: boolean;
+	onClick: () => void;
+	title: string;
+}> = ({ show, onClick, title }) => {
+	if (!show) return null;
+	return (
+		<button
+			type="button"
+			className="settings-field__clear"
+			onClick={onClick}
+			title={title}
+			aria-label={title}
+		>
+			<svg
+				viewBox="0 0 20 20"
+				fill="currentColor"
+				width="12"
+				height="12"
+				aria-hidden="true"
+			>
+				<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+			</svg>
+		</button>
+	);
+};
+
 export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	function SettingsView({ locale, t, onBack, onLocaleChange, onWebdavConnected }, ref) {
 	const [supjav, setSupjav] = useState("");
 	const [javbus, setJavbus] = useState("");
 	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
 	const [javdbName, setJavdbName] = useState(DEFAULT_SETTINGS.javdbName);
+	// 自定义平台：无默认配置，空 = 面板不显示按钮
+	const [customName, setCustomName] = useState("");
+	const [customTemplate, setCustomTemplate] = useState("");
 	const [deeplApiKey, setDeeplApiKey] = useState("");
-	// DeepL 用量显示（"--/100万" = 未查询/无 key/失败）
-	const [deeplUsage, setDeeplUsage] = useState("--/100万");
+	// 自建 Worker 翻译：地址与开关（默认关闭 = 纯谷歌模式）
+	const [translateUrl, setTranslateUrl] = useState("");
+	const [translateEnabled, setTranslateEnabled] = useState(false);
+	// Worker 用量：数据与基数均由接口返回；null = 未获取（显示 --/--万）
+	const [translateUsage, setTranslateUsage] = useState<{
+		count: number | null;
+		limit: number | null;
+	}>({ count: null, limit: null });
+	// 开关打开时的验证错误行（可关闭）
+	const [translateVerifyError, setTranslateVerifyError] = useState<
+		string | null
+	>(null);
 	const [webdavUrl, setWebdavUrl] = useState("");
 	const [webdavUser, setWebdavUser] = useState("");
 	const [webdavPass, setWebdavPass] = useState("");
 	const [showPass, setShowPass] = useState(false);
-	// 云端验证状态：idle 未动过 / verifying 验证中 / incomplete 配置不全 / 其余为验证结果分类
-	const [webdavStatus, setWebdavStatus] = useState<
-		"idle" | "verifying" | "incomplete" | WebdavVerifyResult
-	>("idle");
+	// 云盘同步开关（打开才存取云端，打开时验证）
+	const [webdavEnabled, setWebdavEnabled] = useState(false);
+	// 云盘验证错误（错误汇总区显示，可关闭）
+	const [webdavError, setWebdavError] = useState<string | null>(null);
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -70,21 +111,60 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const defaultSupjavTemplate =
 		locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
 
-	// 查询 DeepL 用量并刷新显示；无 key 或失败时显示 "--/100万"
-	const refreshDeeplUsage = async (key: string) => {
-		const trimmed = (key || "").trim();
-		if (!trimmed) {
-			setDeeplUsage("--/100万");
+	// 查询 Worker 用量并刷新显示；地址或 key 缺失/请求失败显示 --/--万
+	const refreshTranslateUsage = async (url: string, key: string) => {
+		if (!url.trim() || !key.trim()) {
+			setTranslateUsage({ count: null, limit: null });
 			return;
 		}
 		try {
 			const res = (await browser.runtime.sendMessage({
 				type: "jt:usage",
-				deeplKey: trimmed,
-			})) as { count?: number | null } | undefined;
-			setDeeplUsage(formatUsage(res?.count ?? null));
+				deeplKey: key,
+				translateUrl: url,
+			})) as { count?: number | null; limit?: number | null } | undefined;
+			setTranslateUsage({
+				count: res?.count ?? null,
+				limit: res?.limit ?? null,
+			});
 		} catch {
-			setDeeplUsage("--/100万");
+			setTranslateUsage({ count: null, limit: null });
+		}
+	};
+
+	// 启用开关：打开时先验证接口 /health，成功再拉用量；
+	// 验证失败回弹关闭并显示可关闭的错误信息行
+	const handleToggleTranslate = async (checked: boolean) => {
+		setTranslateVerifyError(null);
+		if (!checked) {
+			setTranslateEnabled(false);
+			return;
+		}
+		const url = translateUrl.trim();
+		const key = deeplApiKey.trim();
+		if (!url || !key) {
+			setTranslateVerifyError("翻译 API 地址和 Key 均需填写");
+			setTranslateEnabled(false);
+			return;
+		}
+		try {
+			const health = (await browser.runtime.sendMessage({
+				type: "jt:health",
+				deeplKey: key,
+				translateUrl: url,
+			})) as { ok?: boolean; error?: string } | undefined;
+			if (!health?.ok) {
+				setTranslateVerifyError(
+					`接口验证失败：${health?.error || "未知错误"}`,
+				);
+				setTranslateEnabled(false);
+				return;
+			}
+			await refreshTranslateUsage(url, key);
+			setTranslateEnabled(true);
+		} catch {
+			setTranslateVerifyError("接口验证失败：网络错误");
+			setTranslateEnabled(false);
 		}
 	};
 
@@ -95,12 +175,17 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setJavbus(current.javbusTemplate);
 		setSupjavName(current.supjavName || DEFAULT_SETTINGS.supjavName);
 		setJavdbName(current.javdbName || DEFAULT_SETTINGS.javdbName);
+		setCustomName(current.customName);
+		setCustomTemplate(current.customTemplate);
 		setDeeplApiKey(current.deeplApiKey);
+		setTranslateUrl(current.translateApiUrl);
+		setTranslateEnabled(current.translateEnabled);
 		setWebdavUrl(current.webdavUrl);
 		setWebdavUser(current.webdavUser);
 		setWebdavPass(current.webdavPass);
-		// 打开设置页时展示已保存 key 的用量（无 key 时保持 "--"）
-		void refreshDeeplUsage(current.deeplApiKey);
+		setWebdavEnabled(current.webdavEnabled);
+		// 打开设置页时展示已保存配置的用量（未配置时显示 --/--万）
+		void refreshTranslateUsage(current.translateApiUrl, current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
@@ -164,14 +249,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}
 	};
 
-	// 云端验证状态 → 界面文案（idle 不显示）
-	const webdavStatusText: Record<
-		"idle" | "verifying" | "incomplete" | WebdavVerifyResult,
-		string
-	> = {
-		idle: "",
-		verifying: t.webdavVerifying,
-		incomplete: t.webdavIncomplete,
+	// 云端验证错误分类 → 界面文案（错误汇总区显示）
+	const webdavErrorText: Record<WebdavVerifyResult, string> = {
 		ok: t.webdavConnected,
 		auth: t.webdavAuthError,
 		not_found: t.webdavNotFound,
@@ -179,8 +258,32 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		failed: t.webdavConnectError,
 	};
 
+	// 云盘同步开关：打开时验证连接，成功开通（触发首次同步）；失败回弹并显示错误汇总
+	const handleToggleWebdav = async (checked: boolean) => {
+		setWebdavError(null);
+		if (!checked) {
+			setWebdavEnabled(false);
+			return;
+		}
+		const urlTrimmed = webdavUrl.trim();
+		const userTrimmed = webdavUser.trim();
+		if (!urlTrimmed || !userTrimmed) {
+			setWebdavError(t.webdavIncomplete);
+			setWebdavEnabled(false);
+			return;
+		}
+		const result = await verifyWebdav(urlTrimmed, userTrimmed, webdavPass);
+		if (result === "ok") {
+			setWebdavEnabled(true);
+			onWebdavConnected?.();
+		} else {
+			setWebdavError(webdavErrorText[result]);
+			setWebdavEnabled(false);
+		}
+	};
+
 	// 保存当前配置（表单提交与顶部图标按钮共用）；返回是否保存成功。
-	// 云端三项全空 = 关闭云端同步；全填则验证通过才返回 true（失败停留设置页显示原因）。
+	// 云端验证只在开关打开时执行；保存仅持久化配置。
 	const saveCurrent = async (): Promise<boolean> => {
 		if (customRegex.trim() && !isValidRegex(customRegex)) {
 			setRegexError(t.regexSyntaxError);
@@ -190,7 +293,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		const urlTrimmed = webdavUrl.trim();
 		const userTrimmed = webdavUser.trim();
 		if ((urlTrimmed || userTrimmed || webdavPass) && !(urlTrimmed && userTrimmed)) {
-			setWebdavStatus("incomplete");
+			setWebdavError(t.webdavIncomplete);
 			return false;
 		}
 		saveSettings({
@@ -201,29 +304,24 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			previewVolume,
 			supjavName,
 			javdbName,
+			customName,
+			customTemplate,
 			deeplApiKey,
+			translateApiUrl: translateUrl,
+			translateEnabled,
 			webdavUrl,
 			webdavUser,
 			webdavPass,
+			webdavEnabled,
 		});
-		// 保存后立即用新 key 刷新用量
-		void refreshDeeplUsage(deeplApiKey);
+		// 保存后立即用新配置刷新用量
+		void refreshTranslateUsage(translateUrl, deeplApiKey);
 		saveLocale(localeOption);
 		onLocaleChange?.(getEffectiveLocale(localeOption));
 		setSavedMessage(true);
 		setTimeout(() => {
 			setSavedMessage(false);
 		}, 2000);
-		// 云端配置：验证连接，成功才"开通"（触发首次同步）
-		if (urlTrimmed && userTrimmed) {
-			setWebdavStatus("verifying");
-			const result = await verifyWebdav(urlTrimmed, userTrimmed, webdavPass);
-			setWebdavStatus(result);
-			if (result !== "ok") return false;
-			onWebdavConnected?.();
-		} else {
-			setWebdavStatus("idle");
-		}
 		return true;
 	};
 
@@ -244,12 +342,19 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setJavbus(DEFAULT_SETTINGS.javbusTemplate);
 		setSupjavName(DEFAULT_SETTINGS.supjavName);
 		setJavdbName(DEFAULT_SETTINGS.javdbName);
+		setCustomName("");
+		setCustomTemplate("");
 		setDeeplApiKey("");
+		setTranslateUrl("");
+		setTranslateEnabled(false);
+		setTranslateUsage({ count: null, limit: null });
+		setTranslateVerifyError(null);
 		setWebdavUrl("");
 		setWebdavUser("");
 		setWebdavPass("");
 		setShowPass(false);
-		setWebdavStatus("idle");
+		setWebdavEnabled(false);
+		setWebdavError(null);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
@@ -267,6 +372,10 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const sampleCode = "ABP-123";
 	const supjavPreview = resolveSupjavUrl(supjav, sampleCode, locale);
 	const javbusPreview = resolveSearchUrl(javbus, sampleCode);
+	// 自定义平台模板为空时预览显示空（未配置）
+	const customPreview = customTemplate.trim()
+		? resolveSearchUrl(customTemplate, sampleCode)
+		: "";
 
 	return (
 		<div className="settings-view">
@@ -304,6 +413,78 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				</code>
 			</section>
 
+			{/* 所有错误信息统一显示在版本信息下方，均可关闭 */}
+			{(translateVerifyError || regexError || webdavError) && (
+				<div className="settings-errors" role="alert">
+					{translateVerifyError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{translateVerifyError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setTranslateVerifyError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
+					{regexError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{regexError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setRegexError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
+					{webdavError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{webdavError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setWebdavError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
+				</div>
+			)}
+
 			<form className="settings-view__form" onSubmit={handleSave}>
 
 				<div className="settings-field">
@@ -334,7 +515,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							className="settings-field__range"
 							min={0}
 							max={100}
-							step={5}
+							step={1}
 							value={previewVolume}
 							onChange={(e) => setPreviewVolume(Number(e.target.value))}
 						/>
@@ -346,21 +527,71 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 
 				<div className="settings-field">
 					<div className="settings-field__header-row">
+						<label className="settings-field__label" htmlFor="translate-url">
+							{t.translateUrlLabel}
+						</label>
+						{/* 苹果开关：打开时验证接口可用性并获取用量；关闭时直接使用谷歌翻译 */}
+						<label
+							className="settings-field__switch"
+							title={t.translateEnableLabel}
+						>
+							<input
+								type="checkbox"
+								checked={translateEnabled}
+								onChange={(e) => void handleToggleTranslate(e.target.checked)}
+								aria-label={t.translateEnableLabel}
+							/>
+							<span
+								className="settings-field__switch-track"
+								aria-hidden="true"
+							/>
+						</label>
+					</div>
+					<div className="settings-field__input-wrap">
+						<input
+							id="translate-url"
+							type="text"
+							className="settings-field__input settings-field__input--code"
+							value={translateUrl}
+							onChange={(e) => setTranslateUrl(e.target.value)}
+							placeholder="https://example.com/"
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(translateUrl)}
+							onClick={() => setTranslateUrl("")}
+							title={t.clearInput}
+						/>
+					</div>
+				</div>
+
+				<div className="settings-field">
+					<div className="settings-field__header-row">
 						<label className="settings-field__label" htmlFor="deepl-key">
 							{t.deeplApiKeyLabel}
 						</label>
-						<span className="settings-field__hint">{deeplUsage}</span>
+						<span className="settings-field__hint">
+							{formatUsage(translateUsage.count, translateUsage.limit)}
+						</span>
 					</div>
-					<input
-						id="deepl-key"
-						type="text"
-						className="settings-field__input settings-field__input--code"
-						value={deeplApiKey}
-						onChange={(e) => setDeeplApiKey(e.target.value)}
-						placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
-						spellCheck={false}
-						autoComplete="off"
-					/>
+					<div className="settings-field__input-wrap">
+						<input
+							id="deepl-key"
+							type="text"
+							className="settings-field__input settings-field__input--code"
+							value={deeplApiKey}
+							onChange={(e) => setDeeplApiKey(e.target.value)}
+							placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(deeplApiKey)}
+							onClick={() => setDeeplApiKey("")}
+							title={t.clearInput}
+						/>
+					</div>
 				</div>
 
 				<div className="settings-field">
@@ -368,44 +599,74 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						<label className="settings-field__label" htmlFor="webdav-url">
 							{t.cloudSyncLabel}
 						</label>
-						{webdavStatus !== "idle" && (
+						{/* 苹果开关：打开时验证连接；打开才存取云端 */}
+						<label
+							className="settings-field__switch"
+							title={t.cloudSyncLabel}
+						>
+							<input
+								type="checkbox"
+								checked={webdavEnabled}
+								onChange={(e) => void handleToggleWebdav(e.target.checked)}
+								aria-label={t.cloudSyncLabel}
+							/>
 							<span
-								className={`settings-field__hint webdav-status webdav-status--${webdavStatus}`}
-							>
-								{webdavStatusText[webdavStatus]}
-							</span>
-						)}
+								className="settings-field__switch-track"
+								aria-hidden="true"
+							/>
+						</label>
 					</div>
-					<input
-						id="webdav-url"
-						type="text"
-						className="settings-field__input settings-field__input--code"
-						value={webdavUrl}
-						onChange={(e) => setWebdavUrl(e.target.value)}
-						placeholder={t.webdavUrlPlaceholder}
-						spellCheck={false}
-						autoComplete="off"
-					/>
-					<input
-						id="webdav-user"
-						type="text"
-						className="settings-field__input"
-						value={webdavUser}
-						onChange={(e) => setWebdavUser(e.target.value)}
-						placeholder={t.webdavUserPlaceholder}
-						spellCheck={false}
-						autoComplete="off"
-					/>
-					<div className="webdav-pass-row">
+					<div className="settings-field__input-wrap">
 						<input
-							id="webdav-pass"
-							type={showPass ? "text" : "password"}
-							className="settings-field__input"
-							value={webdavPass}
-							onChange={(e) => setWebdavPass(e.target.value)}
-							placeholder={t.webdavPassPlaceholder}
+							id="webdav-url"
+							type="text"
+							className="settings-field__input settings-field__input--code"
+							value={webdavUrl}
+							onChange={(e) => setWebdavUrl(e.target.value)}
+							placeholder={t.webdavUrlPlaceholder}
+							spellCheck={false}
 							autoComplete="off"
 						/>
+						<ClearButton
+							show={Boolean(webdavUrl)}
+							onClick={() => setWebdavUrl("")}
+							title={t.clearInput}
+						/>
+					</div>
+					<div className="settings-field__input-wrap">
+						<input
+							id="webdav-user"
+							type="text"
+							className="settings-field__input"
+							value={webdavUser}
+							onChange={(e) => setWebdavUser(e.target.value)}
+							placeholder={t.webdavUserPlaceholder}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(webdavUser)}
+							onClick={() => setWebdavUser("")}
+							title={t.clearInput}
+						/>
+					</div>
+					<div className="webdav-pass-row">
+						<div className="settings-field__input-wrap">
+							<input
+								id="webdav-pass"
+								type={showPass ? "text" : "password"}
+								className="settings-field__input"
+								value={webdavPass}
+								onChange={(e) => setWebdavPass(e.target.value)}
+								placeholder={t.webdavPassPlaceholder}
+								autoComplete="off"
+							/>
+							<ClearButton
+								show={Boolean(webdavPass)}
+								onClick={() => setWebdavPass("")}
+								title={t.clearInput}
+							/>
+						</div>
 						<button
 							type="button"
 							className="webdav-pass-toggle"
@@ -455,21 +716,28 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						</div>
 					)}
 					<div className="excluded-hosts-add-row">
-						<input
-							type="text"
-							className="settings-field__input excluded-hosts-input"
-							value={newHostInput}
-							onChange={(e) => setNewHostInput(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									e.preventDefault();
-									handleAddHost();
-								}
-							}}
-							placeholder={t.sitePlaceholder}
-							spellCheck={false}
-							autoComplete="off"
-						/>
+						<div className="settings-field__input-wrap">
+							<input
+								type="text"
+								className="settings-field__input excluded-hosts-input"
+								value={newHostInput}
+								onChange={(e) => setNewHostInput(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										handleAddHost();
+									}
+								}}
+								placeholder={t.sitePlaceholder}
+								spellCheck={false}
+								autoComplete="off"
+							/>
+							<ClearButton
+								show={Boolean(newHostInput)}
+								onClick={() => setNewHostInput("")}
+								title={t.clearInput}
+							/>
+						</div>
 						<button
 							type="button"
 							className="popup-btn popup-btn--secondary excluded-hosts-add-btn"
@@ -494,57 +762,73 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						</button>
 					</div>
 					<p className="settings-field__hint">{t.customRegexDesc}</p>
-					<input
-						id="custom-regex"
-						type="text"
-						className={`settings-field__input settings-field__input--code ${
-							regexError ? "settings-field__input--error" : ""
-						}`}
-						value={customRegex}
-						onChange={(e) => handleRegexChange(e.target.value)}
-						placeholder={DEFAULT_CODE_REGEX}
-						spellCheck={false}
-						autoComplete="off"
-					/>
-					{regexError && (
-						<div className="settings-field__error" role="alert">
-							{regexError}
-						</div>
-					)}
+					<div className="settings-field__input-wrap">
+						<input
+							id="custom-regex"
+							type="text"
+							className={`settings-field__input settings-field__input--code ${
+								regexError ? "settings-field__input--error" : ""
+							}`}
+							value={customRegex}
+							onChange={(e) => handleRegexChange(e.target.value)}
+							placeholder={DEFAULT_CODE_REGEX}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(customRegex)}
+							onClick={() => handleRegexChange("")}
+							title={t.clearInput}
+						/>
+					</div>
 				</div>
 
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="supjav-name">
 						{t.platformNameLabel}
 					</label>
-					<input
-						id="supjav-name"
-						type="text"
-						className="settings-field__input"
-						value={supjavName}
-						onChange={(e) => setSupjavName(e.target.value)}
-						placeholder={DEFAULT_SETTINGS.supjavName}
-						spellCheck={false}
-						autoComplete="off"
-					/>
+					<div className="settings-field__input-wrap">
+						<input
+							id="supjav-name"
+							type="text"
+							className="settings-field__input"
+							value={supjavName}
+							onChange={(e) => setSupjavName(e.target.value)}
+							placeholder={DEFAULT_SETTINGS.supjavName}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(supjavName)}
+							onClick={() => setSupjavName("")}
+							title={t.clearInput}
+						/>
+					</div>
 				</div>
 
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="supjav-template">
 						{t.platformUrlLabel(supjavName || DEFAULT_SETTINGS.supjavName)}
 					</label>
-					<input
-						id="supjav-template"
-						type="text"
-						className="settings-field__input"
-						value={supjav}
-						onChange={(e) => setSupjav(e.target.value)}
-						placeholder={
-							locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE
-						}
-						spellCheck={false}
-						autoComplete="off"
-					/>
+					<div className="settings-field__input-wrap">
+						<input
+							id="supjav-template"
+							type="text"
+							className="settings-field__input"
+							value={supjav}
+							onChange={(e) => setSupjav(e.target.value)}
+							placeholder={
+								locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE
+							}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(supjav)}
+							onClick={() => setSupjav("")}
+							title={t.clearInput}
+						/>
+					</div>
 					<div className="settings-field__preview">
 						<span className="settings-field__preview-label">
 							{t.previewUrlLabel}
@@ -559,38 +843,105 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 					<label className="settings-field__label" htmlFor="javdb-name">
 						{t.platformNameLabel}
 					</label>
-					<input
-						id="javdb-name"
-						type="text"
-						className="settings-field__input"
-						value={javdbName}
-						onChange={(e) => setJavdbName(e.target.value)}
-						placeholder={DEFAULT_SETTINGS.javdbName}
-						spellCheck={false}
-						autoComplete="off"
-					/>
+					<div className="settings-field__input-wrap">
+						<input
+							id="javdb-name"
+							type="text"
+							className="settings-field__input"
+							value={javdbName}
+							onChange={(e) => setJavdbName(e.target.value)}
+							placeholder={DEFAULT_SETTINGS.javdbName}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(javdbName)}
+							onClick={() => setJavdbName("")}
+							title={t.clearInput}
+						/>
+					</div>
 				</div>
 
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="javbus-template">
 						{t.platformUrlLabel(javdbName || DEFAULT_SETTINGS.javdbName)}
 					</label>
-					<input
-						id="javbus-template"
-						type="text"
-						className="settings-field__input"
-						value={javbus}
-						onChange={(e) => setJavbus(e.target.value)}
-						placeholder={DEFAULT_SETTINGS.javbusTemplate}
-						spellCheck={false}
-						autoComplete="off"
-					/>
+					<div className="settings-field__input-wrap">
+						<input
+							id="javbus-template"
+							type="text"
+							className="settings-field__input"
+							value={javbus}
+							onChange={(e) => setJavbus(e.target.value)}
+							placeholder={DEFAULT_SETTINGS.javbusTemplate}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(javbus)}
+							onClick={() => setJavbus("")}
+							title={t.clearInput}
+						/>
+					</div>
 					<div className="settings-field__preview">
 						<span className="settings-field__preview-label">
 							{t.previewUrlLabel}
 						</span>
 						<span className="settings-field__preview-url" title={javbusPreview}>
 							{javbusPreview}
+						</span>
+					</div>
+				</div>
+
+				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="custom-name">
+						{t.platformNameLabel}
+					</label>
+					<div className="settings-field__input-wrap">
+						<input
+							id="custom-name"
+							type="text"
+							className="settings-field__input"
+							value={customName}
+							onChange={(e) => setCustomName(e.target.value)}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(customName)}
+							onClick={() => setCustomName("")}
+							title={t.clearInput}
+						/>
+					</div>
+				</div>
+
+				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="custom-template">
+						{t.platformUrlLabel(customName || t.customPlatformName)}
+					</label>
+					<div className="settings-field__input-wrap">
+						<input
+							id="custom-template"
+							type="text"
+							className="settings-field__input"
+							value={customTemplate}
+							onChange={(e) => setCustomTemplate(e.target.value)}
+							placeholder="https://example.com/search?q={code}"
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(customTemplate)}
+							onClick={() => setCustomTemplate("")}
+							title={t.clearInput}
+						/>
+					</div>
+					<div className="settings-field__preview">
+						<span className="settings-field__preview-label">
+							{t.previewUrlLabel}
+						</span>
+						<span className="settings-field__preview-url" title={customPreview}>
+							{customPreview}
 						</span>
 					</div>
 				</div>

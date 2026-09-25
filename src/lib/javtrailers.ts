@@ -89,7 +89,8 @@ export interface DetailPageFallback {
 /**
  * 解析详情页 HTML，提取备用媒体（主媒体服务 404 时兜底）：
  * - 封面：第一张 mgstage 图片（og:image 的包装图）
- * - 预告片：mgstage sample MP4 直链（NUXT 数据中的 trailer 字段）
+ * - 预告片：mgstage sample MP4 直链；无 mgstage 时（如 VR 系列）取
+ *   media.javtrailers.com 的 vrsample MP4（路径形如 /vrsample/s/siv/sivr00513/sivr00513vrlite.mp4）
  * 提取不到时对应字段为 null。
  */
 export function parseDetailPageFallback(html: string): DetailPageFallback {
@@ -98,6 +99,8 @@ export function parseDetailPageFallback(html: string): DetailPageFallback {
 		html.match(/https:\/\/image\.mgstage\.com[^"\s\\]+\.(?:jpg|webp|png)/i)?.[0] ??
 		null;
 	const trailer =
-		html.match(/https:\/\/sample\.mgstage\.com[^"\\]+\.mp4/i)?.[0] ?? null;
+		html.match(/https:\/\/sample\.mgstage\.com[^"\\]+\.mp4/i)?.[0] ??
+		html.match(/https:\/\/media\.javtrailers\.com[^"\\]+\.mp4/i)?.[0] ??
+		null;
 	return { coverUrl: cover, trailerUrl: trailer };
 }

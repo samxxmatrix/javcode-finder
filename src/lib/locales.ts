@@ -18,6 +18,11 @@ export interface LocaleMessages {
 	settingsDesc: string;
 	platformNameLabel: string;
 	platformUrlLabel: (name: string) => string;
+	customPlatformName: string;
+	clearInput: string;
+	closeError: string;
+	translateUrlLabel: string;
+	translateEnableLabel: string;
 	saveSettings: string;
 	resetDefaults: string;
 	settingsSaved: string;
@@ -54,7 +59,6 @@ export interface LocaleMessages {
 	webdavUrlPlaceholder: string;
 	webdavUserPlaceholder: string;
 	webdavPassPlaceholder: string;
-	webdavVerifying: string;
 	webdavConnected: string;
 	webdavIncomplete: string;
 	webdavAuthError: string;
@@ -85,6 +89,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "自定义外部平台跳转规则，支持 {code} 或 {番号} 占位符。设置永久保存在本地。",
     platformNameLabel: "平台名称",
     platformUrlLabel: (name) => `${name} 链接规则`,
+    customPlatformName: "自定义平台",
+    clearInput: "清除内容",
+    closeError: "关闭",
+    translateUrlLabel: "翻译 API 地址",
+    translateEnableLabel: "启用翻译",
     saveSettings: "保存设置",
     resetDefaults: "恢复默认",
     settingsSaved: "设置已保存！",
@@ -115,14 +124,13 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retryTranslate: "重新翻译",
     googleVerifyHint: "谷歌翻译需要人工验证",
     openVerifyPage: "打开验证页面",
-    deeplApiKeyLabel: "DeepL API Key",
+    deeplApiKeyLabel: "翻译 API Key",
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "云盘同步（WebDAV）",
     webdavUrlPlaceholder: "云盘地址，如 https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "用户名（邮箱）",
     webdavPassPlaceholder: "密码",
-    webdavVerifying: "验证中…",
     webdavConnected: "已连接",
     webdavIncomplete: "请补全云盘地址、用户名和密码",
     webdavAuthError: "用户名或密码错误",
@@ -152,6 +160,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "自訂外部平台跳轉規則，支援 {code} 或 {番号} 佔位符。設定永久保存在本地。",
     platformNameLabel: "平台名稱",
     platformUrlLabel: (name) => `${name} 連結規則`,
+    customPlatformName: "自訂平台",
+    clearInput: "清除內容",
+    closeError: "關閉",
+    translateUrlLabel: "翻譯 API 位址",
+    translateEnableLabel: "啟用翻譯",
     saveSettings: "儲存設定",
     resetDefaults: "恢復預設",
     settingsSaved: "設定已儲存！",
@@ -183,14 +196,13 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retryTranslate: "重新翻譯",
     googleVerifyHint: "谷歌翻譯需要人工驗證",
     openVerifyPage: "開啟驗證頁面",
-    deeplApiKeyLabel: "DeepL API Key",
+    deeplApiKeyLabel: "翻譯 API Key",
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "雲端同步（WebDAV）",
     webdavUrlPlaceholder: "雲端地址，如 https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "使用者名稱（信箱）",
     webdavPassPlaceholder: "密碼",
-    webdavVerifying: "驗證中…",
     webdavConnected: "已連線",
     webdavIncomplete: "請補全雲端地址、使用者名稱與密碼",
     webdavAuthError: "使用者名稱或密碼錯誤",
@@ -221,6 +233,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "Customize external navigation rules. Supports {code} placeholder. Saved permanently in local storage.",
     platformNameLabel: "Platform name",
     platformUrlLabel: (name) => `${name} URL Template`,
+    customPlatformName: "Custom Platform",
+    clearInput: "Clear",
+    closeError: "Close",
+    translateUrlLabel: "Translation API URL",
+    translateEnableLabel: "Enable Translation",
     saveSettings: "Save Settings",
     resetDefaults: "Reset Defaults",
     settingsSaved: "Settings saved!",
@@ -253,14 +270,13 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retryTranslate: "Retry translation",
     googleVerifyHint: "Google Translate needs human verification",
     openVerifyPage: "Open verification page",
-    deeplApiKeyLabel: "DeepL API Key",
+    deeplApiKeyLabel: "翻译 API Key",
     addFavorite: "Add to favorites",
     removeFavorite: "Remove from favorites",
     cloudSyncLabel: "Cloud Sync (WebDAV)",
     webdavUrlPlaceholder:"WebDAV URL, e.g. https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "Username (email)",
     webdavPassPlaceholder: "Password",
-    webdavVerifying: "Verifying...",
     webdavConnected: "Connected",
     webdavIncomplete: "Fill in the URL, username and password",
     webdavAuthError: "Invalid username or password",

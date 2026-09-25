@@ -115,6 +115,17 @@ describe("parseDetailPageFallback", () => {
 		});
 	});
 
+	// VR 系列（如 SIVR）详情页无 mgstage 媒体，预览为 media.javtrailers.com 的 vrsample MP4
+	it("extracts media.javtrailers.com mp4 as trailer fallback when mgstage absent", () => {
+		const html =
+			'<video id="trailerVideo" controls><source src="https://media.javtrailers.com/vrsample/s/siv/sivr00513/sivr00513vrlite.mp4" type="video/mp4"></video>';
+		expect(parseDetailPageFallback(html)).toEqual({
+			coverUrl: null,
+			trailerUrl:
+				"https://media.javtrailers.com/vrsample/s/siv/sivr00513/sivr00513vrlite.mp4",
+		});
+	});
+
 	it("returns nulls when the page has no fallback media", () => {
 		expect(parseDetailPageFallback("<html>no media here</html>")).toEqual({
 			coverUrl: null,

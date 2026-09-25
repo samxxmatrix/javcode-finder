@@ -88,6 +88,60 @@ describe("settings", () => {
 		expect(getSettings().webdavPass).toBe("");
 	});
 
+	it("custom platform is empty by default and saved when configured", () => {
+		// 无默认配置：名称与模板默认均为空
+		expect(DEFAULT_SETTINGS.customName).toBe("");
+		expect(DEFAULT_SETTINGS.customTemplate).toBe("");
+		expect(getSettings().customName).toBe("");
+		expect(getSettings().customTemplate).toBe("");
+
+		saveSettings({
+			customName: "MySite",
+			customTemplate: "https://mysite.example.com/search/{code}",
+		});
+		expect(getSettings().customName).toBe("MySite");
+		expect(getSettings().customTemplate).toBe(
+			"https://mysite.example.com/search/{code}",
+		);
+
+		// 清空 → 回默认空（面板隐藏该平台按钮）
+		saveSettings({ customName: "", customTemplate: "" });
+		expect(getSettings().customName).toBe("");
+		expect(getSettings().customTemplate).toBe("");
+	});
+
+	it("translate worker settings default off with empty URL and can be saved", () => {
+		// 默认：开关关闭、地址为空（关闭时直接用谷歌翻译）
+		expect(DEFAULT_SETTINGS.translateEnabled).toBe(false);
+		expect(DEFAULT_SETTINGS.translateApiUrl).toBe("");
+		expect(getSettings().translateEnabled).toBe(false);
+		expect(getSettings().translateApiUrl).toBe("");
+
+		saveSettings({
+			translateEnabled: true,
+			translateApiUrl: "https://deepl.samwu00.de5.net/",
+		});
+		expect(getSettings().translateEnabled).toBe(true);
+		expect(getSettings().translateApiUrl).toBe("https://deepl.samwu00.de5.net/");
+
+		// 清空地址与关闭开关 → 回默认（纯谷歌模式）
+		saveSettings({ translateEnabled: false, translateApiUrl: "" });
+		expect(getSettings().translateEnabled).toBe(false);
+		expect(getSettings().translateApiUrl).toBe("");
+	});
+
+	it("webdav enable switch defaults off and can be saved", () => {
+		// 默认：云盘同步开关关闭（打开才存取）
+		expect(DEFAULT_SETTINGS.webdavEnabled).toBe(false);
+		expect(getSettings().webdavEnabled).toBe(false);
+
+		saveSettings({ webdavEnabled: true });
+		expect(getSettings().webdavEnabled).toBe(true);
+
+		saveSettings({ webdavEnabled: false });
+		expect(getSettings().webdavEnabled).toBe(false);
+	});
+
 	it("resets to default settings", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.org/{code}",

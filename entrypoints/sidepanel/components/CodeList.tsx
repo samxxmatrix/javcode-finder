@@ -37,6 +37,10 @@ export const CodeList: React.FC<CodeListProps> = ({
 	// 按钮显示名称来自配置，空值时回退默认名称
 	const supjavName = settings.supjavName || DEFAULT_SETTINGS.supjavName;
 	const javdbName = settings.javdbName || DEFAULT_SETTINGS.javdbName;
+	// 自定义平台无默认配置：名称与模板均非空才显示按钮
+	const customName = settings.customName.trim();
+	const customTemplate = settings.customTemplate.trim();
+	const showCustom = Boolean(customName && customTemplate);
 	const [locateStates, setLocateStates] = useState<
 		Record<string, { status: "idle" | "success" | "not_found" }>
 	>({});
@@ -153,6 +157,17 @@ export const CodeList: React.FC<CodeListProps> = ({
 								>
 									{javdbName}
 								</a>
+								{showCustom && (
+									<a
+										href={resolveSearchUrl(customTemplate, code)}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="unmatched-item__link unmatched-item__link--custom"
+										title={`Search ${code} on ${customName}`}
+									>
+										{customName}
+									</a>
+								)}
 							</div>
 						</li>
 					);

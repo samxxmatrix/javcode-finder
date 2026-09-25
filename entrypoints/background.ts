@@ -4,13 +4,13 @@ import {
 	joinWebdavUrl,
 } from "../src/lib/favorites";
 import {
-	buildDeepLBody,
 	buildGoogleUrl,
-	DEEPL_API_URL,
-	DEEPL_USAGE_URL,
-	parseDeepLResponse,
-	parseDeepLUsage,
+	buildWorkerTranslateBody,
+	buildWorkerUrl,
 	parseGoogleResponse,
+	parseWorkerHealth,
+	parseWorkerTranslation,
+	parseWorkerUsage,
 	type TranslateTarget,
 } from "../src/lib/translate";
 import { clearCodeMarksForTab } from "../src/lib/mark-codes";
@@ -107,6 +107,8 @@ export default defineBackground(() => {
 					text?: string;
 					target?: TranslateTarget;
 					deeplKey?: string;
+					translateUrl?: string;
+					translateEnabled?: boolean;
 					webdavUrl?: string;
 					webdavUser?: string;
 					webdavPass?: string;
@@ -114,33 +116,35 @@ export default defineBackground(() => {
 					contentId?: string;
 				};
 
-				// 标题翻译：优先 DeepL API；无 key、失败或空译文时无感降级谷歌 gtx。
-				// 两者都失败返回空译文（调用方回退原文）。
+				// 标题翻译：优先自建 Worker（开关开启且地址/Key 齐全）；
+				// 失败或未配置时无感降级谷歌 gtx，两者都失败返回错误信息（调用方回退原文）。
+				// 全程静默：不向控制台输出任何异常。
 				if (msg?.type === "jt:translate" && msg.text) {
 					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
 					const key = (msg.deeplKey || "").trim();
+					const baseUrl = (msg.translateUrl || "").trim();
 					void (async () => {
-						// 一级：DeepL（仅在有 key 时尝试）
-						if (key) {
+						// 一级：自建 Worker（仅开关开启且地址与 Key 齐全时尝试）
+						if (msg.translateEnabled && baseUrl && key) {
 							try {
-								const res = await fetch(DEEPL_API_URL, {
+								const res = await fetch(buildWorkerUrl(baseUrl, "translate"), {
 									method: "POST",
 									headers: {
-										Authorization: `DeepL-Auth-Key ${key}`,
-										"Content-Type": "application/x-www-form-urlencoded",
+										Authorization: `Bearer ${key}`,
+										"Content-Type": "application/json",
 									},
-									body: buildDeepLBody(msg.text!, target),
+									body: buildWorkerTranslateBody(msg.text!, target),
 									signal: AbortSignal.timeout(5000),
 								});
 								if (res.ok) {
 									const data = await res.json();
-									const translated = parseDeepLResponse(data);
+									const translated = parseWorkerTranslation(data);
 									if (translated) {
 										sendResponse({ translated });
 										return;
 									}
 								}
-								// 非 200 或空译文 → 降级谷歌
+								// 非 2xx、success:false 或空译文 → 降级谷歌
 							} catch {
 								// 网络异常 → 降级谷歌
 							}
@@ -157,7 +161,7 @@ export default defineBackground(() => {
 									error:
 										res.status === 403 || res.status === 429
 											? "google-verify"
-											: `HTTP ${res.status}`,
+											: `谷歌翻译错误：HTTP ${res.status}`,
 								});
 								return;
 							}
@@ -168,36 +172,78 @@ export default defineBackground(() => {
 						} catch (error) {
 							sendResponse({
 								translated: "",
-								error:
-									error instanceof Error ? error.message : String(error),
+								error: `谷歌翻译错误：${
+									error instanceof Error ? error.message : String(error)
+								}`,
 							});
 						}
 					})();
 					return true;
 				}
 
-				if (msg?.type === "jt:usage") {
+				// Worker 健康检查：开关打开时的接口可用性验证
+				if (msg?.type === "jt:health") {
 					const key = (msg.deeplKey || "").trim();
+					const baseUrl = (msg.translateUrl || "").trim();
 					void (async () => {
-						// 无 key 或请求失败返回 count: null（界面显示 "--"）
-						if (!key) {
-							sendResponse({ count: null });
+						if (!baseUrl || !key) {
+							sendResponse({ ok: false, error: "翻译 API 地址和 Key 均需填写" });
 							return;
 						}
 						try {
-							const res = await fetch(DEEPL_USAGE_URL, {
-								method: "GET",
-								headers: { Authorization: `DeepL-Auth-Key ${key}` },
+							const res = await fetch(buildWorkerUrl(baseUrl, "health"), {
+								headers: { Authorization: `Bearer ${key}` },
 								signal: AbortSignal.timeout(5000),
 							});
 							if (!res.ok) {
-								sendResponse({ count: null });
+								sendResponse({ ok: false, error: `HTTP ${res.status}` });
 								return;
 							}
 							const data = await res.json();
-							sendResponse({ count: parseDeepLUsage(data) });
+							const healthy = parseWorkerHealth(data);
+							sendResponse({
+								ok: healthy,
+								error: healthy ? undefined : "接口响应异常",
+							});
+						} catch (error) {
+							sendResponse({
+								ok: false,
+								error: `网络错误：${
+									error instanceof Error ? error.message : String(error)
+								}`,
+							});
+						}
+					})();
+					return true;
+				}
+
+				// Worker 用量：数据与基数均由接口返回；失败返回 null（界面显示 --/--万）
+				if (msg?.type === "jt:usage") {
+					const key = (msg.deeplKey || "").trim();
+					const baseUrl = (msg.translateUrl || "").trim();
+					void (async () => {
+						if (!baseUrl || !key) {
+							sendResponse({ count: null, limit: null });
+							return;
+						}
+						try {
+							const res = await fetch(buildWorkerUrl(baseUrl, "usage"), {
+								headers: { Authorization: `Bearer ${key}` },
+								signal: AbortSignal.timeout(5000),
+							});
+							if (!res.ok) {
+								sendResponse({ count: null, limit: null });
+								return;
+							}
+							const data = await res.json();
+							const usage = parseWorkerUsage(data);
+							sendResponse(
+								usage
+									? { count: usage.count, limit: usage.limit }
+									: { count: null, limit: null },
+							);
 						} catch {
-							sendResponse({ count: null });
+							sendResponse({ count: null, limit: null });
 						}
 					})();
 					return true;

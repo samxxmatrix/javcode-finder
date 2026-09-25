@@ -1,71 +1,105 @@
 import { describe, expect, it } from "vitest";
 import {
-	buildDeepLBody,
 	buildGoogleUrl,
+	buildWorkerTranslateBody,
+	buildWorkerUrl,
 	formatUsage,
-	parseDeepLResponse,
-	parseDeepLUsage,
 	parseGoogleResponse,
+	parseWorkerHealth,
+	parseWorkerTranslation,
+	parseWorkerUsage,
 } from "../src/lib/translate";
 
-describe("buildDeepLBody", () => {
-	it("uses ZH target for simplified Chinese", () => {
-		const body = buildDeepLBody("Hello world", "zh-CN");
-		expect(body.get("text")).toBe("Hello world");
-		expect(body.get("target_lang")).toBe("ZH");
-	});
-
-	it("uses ZH-HANT target for traditional Chinese", () => {
-		const body = buildDeepLBody("Hello world", "zh-TW");
-		expect(body.get("target_lang")).toBe("ZH-HANT");
+describe("buildWorkerUrl", () => {
+	it("joins base URL with path, normalizing trailing slash", () => {
+		expect(buildWorkerUrl("https://deepl.samwu00.de5.net/", "translate")).toBe(
+			"https://deepl.samwu00.de5.net/translate",
+		);
+		expect(buildWorkerUrl("https://deepl.samwu00.de5.net", "health")).toBe(
+			"https://deepl.samwu00.de5.net/health",
+		);
 	});
 });
 
-describe("parseDeepLResponse", () => {
+describe("buildWorkerTranslateBody", () => {
+	it("uses ZH target for simplified Chinese", () => {
+		const body = JSON.parse(buildWorkerTranslateBody("Hello world", "zh-CN"));
+		expect(body).toEqual({ text: "Hello world", target_lang: "ZH" });
+	});
+
+	it("uses ZH-HANT target for traditional Chinese", () => {
+		const body = JSON.parse(buildWorkerTranslateBody("Hello world", "zh-TW"));
+		expect(body).toEqual({ text: "Hello world", target_lang: "ZH-HANT" });
+	});
+});
+
+describe("parseWorkerTranslation", () => {
 	it("extracts the translated text", () => {
 		expect(
-			parseDeepLResponse({
-				translations: [
-					{
-						detected_source_language: "EN",
-						text: "你好世界",
-					},
-				],
+			parseWorkerTranslation({
+				success: true,
+				translation: "你好世界",
 			}),
 		).toBe("你好世界");
 	});
 
-	it("returns empty string for malformed responses", () => {
-		expect(parseDeepLResponse(null)).toBe("");
-		expect(parseDeepLResponse({})).toBe("");
-		expect(parseDeepLResponse({ translations: [] })).toBe("");
+	it("returns empty string for malformed or failed responses", () => {
+		expect(parseWorkerTranslation(null)).toBe("");
+		expect(parseWorkerTranslation({})).toBe("");
+		expect(parseWorkerTranslation({ success: true })).toBe("");
+		expect(parseWorkerTranslation({ success: false, translation: "x" })).toBe("");
 	});
 });
 
-describe("parseDeepLUsage", () => {
-	it("extracts the character count", () => {
+describe("parseWorkerHealth", () => {
+	it("returns true only for success with ok status", () => {
+		expect(parseWorkerHealth({ success: true, status: "ok" })).toBe(true);
+		expect(parseWorkerHealth({ success: false })).toBe(false);
+		expect(parseWorkerHealth(null)).toBe(false);
+		expect(parseWorkerHealth({})).toBe(false);
+	});
+});
+
+describe("parseWorkerUsage", () => {
+	it("extracts count and limit from the wrapped usage object", () => {
 		expect(
-			parseDeepLUsage({ character_count: 4239, character_limit: 1000000 }),
-		).toBe(4239);
+			parseWorkerUsage({
+				success: true,
+				usage: { character_count: 4239, character_limit: 1000000 },
+			}),
+		).toEqual({ count: 4239, limit: 1000000 });
 	});
 
 	it("returns null for malformed responses", () => {
-		expect(parseDeepLUsage(null)).toBeNull();
-		expect(parseDeepLUsage({})).toBeNull();
-		expect(parseDeepLUsage({ character_count: "4239" })).toBeNull();
-		expect(parseDeepLUsage({ character_count: -1 })).toBeNull();
+		expect(parseWorkerUsage(null)).toBeNull();
+		expect(parseWorkerUsage({})).toBeNull();
+		expect(parseWorkerUsage({ success: true })).toBeNull();
+		expect(
+			parseWorkerUsage({
+				success: true,
+				usage: { character_count: "4239", character_limit: 1000000 },
+			}),
+		).toBeNull();
+		expect(
+			parseWorkerUsage({
+				success: true,
+				usage: { character_count: -1, character_limit: 1000000 },
+			}),
+		).toBeNull();
 	});
 });
 
 describe("formatUsage", () => {
-	it("formats the count in ten-thousands against a fixed 1M limit", () => {
-		expect(formatUsage(4239)).toBe("0.4239/100万");
-		expect(formatUsage(0)).toBe("0.0000/100万");
-		expect(formatUsage(1000000)).toBe("100.0000/100万");
+	it("formats count and limit in ten-thousands with interface-provided base", () => {
+		expect(formatUsage(4239, 1000000)).toBe("0.4239/100万");
+		expect(formatUsage(0, 1000000)).toBe("0.0000/100万");
+		expect(formatUsage(1000000, 1000000)).toBe("100.0000/100万");
 	});
 
-	it("returns --/100万 for missing counts", () => {
-		expect(formatUsage(null)).toBe("--/100万");
+	it("returns --/--万 when count or limit is missing", () => {
+		expect(formatUsage(null, 1000000)).toBe("--/--万");
+		expect(formatUsage(4239, null)).toBe("--/--万");
+		expect(formatUsage(null, null)).toBe("--/--万");
 	});
 });
 
