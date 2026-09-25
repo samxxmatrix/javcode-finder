@@ -1,0 +1,156 @@
+DMM 番号查询 API 接口文档
+1. 基本信息
+
+Base URL
+
+https://dmm.0045.kdns.fr/
+
+（国内友好入口。后端链路：Cloudflare 边缘 → Vercel 东京 → DMM）
+
+所有 API 请求都必须携带 Key：
+
+?key=YOUR_API_KEY
+
+（Query 参数）
+
+或者请求头：
+
+x-api-key: YOUR_API_KEY
+
+未携带或 Key 错误时：
+
+{
+  "code": 40101,
+  "error": "MISSING_API_KEY",
+  "message": "API Key is missing. Provide via query parameter ?key= or Header x-api-key."
+}
+2. 接口列表
+方法	接口	需要 Key	用途
+GET	/:code	✅	按番号查询完整信息（推荐用法）
+GET	/api?code=xxx	✅	按番号查询完整信息（等价写法）
+GET	/cid/:code	✅	仅查 CID（轻量，跳过详情页）
+
+可选参数：
+
+参数	说明
+key	API Key（与 x-api-key 头二选一）
+refresh=1	强制绕过缓存，重新抓取 DMM
+debug=1	调试模式：返回抓取过程中间状态（排查用）
+
+3. 基本用法
+
+GET https://dmm.0045.kdns.fr/BDSM-091?key=YOUR_API_KEY
+
+成功响应：
+
+{
+  "code": "BDSM-091",
+  "cid": "h_1096bdsm091",
+  "title": "背徳の変態願望を胸に秘め哀犬夫人は今日も淫らな調教に通う。……",
+  "short_title": "緊縛哀犬夫人 宮西ひかる",
+  "cover_url": "https://pics.dmm.co.jp/mono/movie/adult/h_1096bdsm091/h_1096bdsm091pl.jpg",
+  "preview_url": "https://cc3001.dmm.co.jp/pv/QQs_.../h_1096bdsm091hhbs.mp4",
+  "detail_url": "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=h_1096bdsm091/",
+  "cached": false
+}
+4. 字段说明
+
+字段	类型	说明
+code	String	查询的番号（大写）
+cid	String	DMM 商品 ID
+title	String	长标题（作品介绍文，可能较长）
+short_title	String	短标题（商品名）
+cover_url	String	封面大图（pl.jpg 规格）
+preview_url	String	预告片 mp4 地址；该片无预告片时为 null
+detail_url	String	DMM 详情页地址
+cached	Boolean	本次是否命中缓存
+
+注意：title 中的部分敏感字会被 DMM 打码显示为 ●，接口原样返回，不还原。
+
+5. 仅查 CID
+
+GET https://dmm.0045.kdns.fr/cid/BDSM-091?key=YOUR_API_KEY
+
+响应：
+
+{
+  "code": "BDSM-091",
+  "cid": "h_1096bdsm091",
+  "cached": false
+}
+
+只做搜索页抓取 + 番号匹配，不抓详情页，比完整查询快约一半。
+
+缓存优先复用完整查询的结果（同一番号完整查过则直接命中），否则用独立的 CID 缓存（Redis key 前缀 CID:）。
+
+6. 番号匹配规则
+
+接口先搜索 DMM，再按规则挑选结果，防止抓错片：
+
+优先级	规则	示例
+1	CID 与番号精确一致（去分隔符、小写）	IPX-118 → ipx118
+2	CID 包含番号	BDSM-091 → h_1096bdsm091
+3	都不匹配	返回 404
+
+实测挡住的场景：
+
+搜索 IPX-118 时 DMM 把合集版 7ipx118 排在第一位，接口仍正确返回 ipx118
+
+搜索不存在的 QQQ-000 时 DMM 模糊搜索会返回一堆 IQQQ 系列，接口正确返回 404
+
+7. 缓存
+
+查询结果缓存在 Redis（东京区域），永久保存（无过期时间）。
+
+第一次查询：
+
+GET /BDSM-091
+      ↓ 未命中
+抓取 DMM 搜索页 + 详情页
+      ↓
+写入 Redis
+      ↓
+返回 cached: false（约 4-5 秒）
+
+第二次查询：
+
+GET /BDSM-091
+      ↓ 命中
+Redis
+      ↓
+返回 cached: true（约 0.5 秒）
+
+强制刷新：
+
+GET /BDSM-091?key=xxx&refresh=1
+
+绕过缓存重新抓取，并覆盖缓存。
+
+注意：Redis 免费档无持久化，服务维护/重启时缓存可能丢失，接口会自动重新抓取兜底，不影响正确性。
+
+8. 错误响应
+
+统一格式：
+
+{
+  "code": 40401,
+  "error": "ITEM_NOT_FOUND",
+  "message": "Item not found for code: BDSM-091"
+}
+
+错误码表：
+
+HTTP	code	error	原因
+400	40001	MISSING_CODE	缺少番号参数
+401	40101	MISSING_API_KEY	缺少 API Key
+403	40301	INVALID_API_KEY	API Key 错误
+404	40401	ITEM_NOT_FOUND	番号不存在，或 DMM 无该商品
+500	50001	INTERNAL_SERVER_ERROR	服务内部错误（抓取被拦等）
+
+注意：404 同时覆盖"番号不存在"和"DMM 详情页不可用"两种情况，客户端无需区分。
+
+9. 调试接口
+
+GET /BDSM-091?key=xxx&debug=1
+
+返回抓取过程中间状态（搜索页大小、CID 提取结果、出口 IP 等），用于排查部署环境问题。正常业务不要调用。
