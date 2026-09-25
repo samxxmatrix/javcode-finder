@@ -142,6 +142,35 @@ describe("settings", () => {
 		expect(getSettings().webdavEnabled).toBe(false);
 	});
 
+	it("dmm lookup settings default off with empty URL/key and can be saved", () => {
+		// 默认：开关关闭、地址与 Key 为空（关闭时预览走 javtrailers 默认链路）
+		expect(DEFAULT_SETTINGS.dmmEnabled).toBe(false);
+		expect(DEFAULT_SETTINGS.dmmApiUrl).toBe("");
+		expect(DEFAULT_SETTINGS.dmmApiKey).toBe("");
+		expect(getSettings().dmmEnabled).toBe(false);
+		expect(getSettings().dmmApiUrl).toBe("");
+		expect(getSettings().dmmApiKey).toBe("");
+
+		saveSettings({
+			dmmEnabled: true,
+			dmmApiUrl: "https://dmm.0045.kdns.fr/",
+			dmmApiKey: "test-key",
+		});
+		expect(getSettings().dmmEnabled).toBe(true);
+		expect(getSettings().dmmApiUrl).toBe("https://dmm.0045.kdns.fr/");
+		expect(getSettings().dmmApiKey).toBe("test-key");
+
+		// 清空与关闭 → 回默认（javtrailers 模式）
+		saveSettings({
+			dmmEnabled: false,
+			dmmApiUrl: "",
+			dmmApiKey: "",
+		});
+		expect(getSettings().dmmEnabled).toBe(false);
+		expect(getSettings().dmmApiUrl).toBe("");
+		expect(getSettings().dmmApiKey).toBe("");
+	});
+
 	it("resets to default settings", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.org/{code}",

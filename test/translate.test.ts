@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildGoogleUrl,
+	buildMergedTranslateText,
 	buildWorkerTranslateBody,
 	buildWorkerUrl,
 	formatUsage,
@@ -9,6 +10,7 @@ import {
 	parseWorkerHealth,
 	parseWorkerTranslation,
 	parseWorkerUsage,
+	splitMergedTranslation,
 } from "../src/lib/translate";
 
 describe("buildWorkerUrl", () => {
@@ -91,8 +93,51 @@ describe("formatWorkerError", () => {
 	});
 });
 
-describe("parseWorkerUsage", () => {
-	it("extracts count and limit from the wrapped usage object", () => {
+describe("buildMergedTranslateText", () => {
+	it("wraps short title in braces and separates long title with newline", () => {
+		expect(
+			buildMergedTranslateText("緊縛哀犬夫人 宮西ひかる", "背徳の変態願望を胸に秘め…"),
+		).toBe("{緊縛哀犬夫人 宮西ひかる}\n背徳の変態願望を胸に秘め…");
+	});
+});
+
+describe("splitMergedTranslation", () => {
+	it("splits braces-wrapped short title and long title", () => {
+		const result = splitMergedTranslation(
+			"{Tied Dog Wife Hikaru Miyanishi}\nHidden in her heart was a perverted desire...",
+		);
+		expect(result.short).toBe("Tied Dog Wife Hikaru Miyanishi");
+		expect(result.long).toBe("Hidden in her heart was a perverted desire...");
+	});
+
+	it("handles full-width braces from translators", () => {
+		const result = splitMergedTranslation(
+			"｛緊縛哀犬夫人 宮西ひかる｝\n背徳の変態願望…",
+		);
+		expect(result.short).toBe("緊縛哀犬夫人 宮西ひかる");
+		expect(result.long).toBe("背徳の変態願望…");
+	});
+
+	it("handles braces without newline separator", () => {
+		const result = splitMergedTranslation("{短标题}长标题内容");
+		expect(result.short).toBe("短标题");
+		expect(result.long).toBe("长标题内容");
+	});
+
+	it("falls back to whole text as long title when braces are lost", () => {
+		const result = splitMergedTranslation("翻译器吃掉了花括号的整段译文内容");
+		expect(result.short).toBeNull();
+		expect(result.long).toBe("翻译器吃掉了花括号的整段译文内容");
+	});
+
+	it("falls back when braces exist but no long title follows", () => {
+		const result = splitMergedTranslation("{只有短标题}");
+		expect(result.short).toBeNull();
+		expect(result.long).toBe("{只有短标题}");
+	});
+});
+
+describe("parseWorkerUsage", () => {	it("extracts count and limit from the wrapped usage object", () => {
 		expect(
 			parseWorkerUsage({
 				success: true,

@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-	buildCoverUrlFromContentId,
-	buildTrailerUrlFromContentId,
-} from "../../../src/lib/javtrailers";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
-import { buildGoogleUrl } from "../../../src/lib/translate";
+import {
+	buildGoogleUrl,
+	buildMergedTranslateText,
+	splitMergedTranslation,
+} from "../../../src/lib/translate";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { getSettings } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
@@ -20,9 +20,17 @@ interface TrailerPreviewProps {
 }
 
 interface Resolution {
+	// 数据来源：dmm（开关开启且查询命中）或 javtrailers（默认/兜底）
+	source: "dmm" | "javtrailers" | null;
 	contentId: string | null;
-	// 影片完整标题（来自 javtrailers 卡片）
+	// 短标题（商品名，加粗先行显示；javtrailers 源无此字段）
+	shortTitle: string | null;
+	// 长标题（dmm 长文描述或 javtrailers 卡片标题）
 	title: string | null;
+	// 封面/预告片 URL 由 background 按来源拼好返回
+	coverUrl: string | null;
+	previewUrl: string | null;
+	previewType: "mp4" | "hls" | null;
 	// 解析进行中：期间不加载封面、不判定失败，避免"先报错后显示封面"的闪烁
 	resolving: boolean;
 }
@@ -45,8 +53,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
 	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
-	// 标题译文（中文/繁中界面下通过谷歌翻译获取；失败或英文界面保持 null）
-	const [translatedTitle, setTranslatedTitle] = useState<string | null>(null);
+	// 标题译文（拼装翻译后拆分还原：短标题译文 + 长标题译文；失败或英文界面保持 null）
+	const [translatedShort, setTranslatedShort] = useState<string | null>(null);
+	const [translatedLong, setTranslatedLong] = useState<string | null>(null);
 	// 标题显示就绪：翻译流程结束（成功/失败）或英文界面直接跳过。期间不渲染标题区，避免原文→译文的闪烁
 	const [titleReady, setTitleReady] = useState(false);
 	// 手动重试翻译进行中
@@ -62,12 +71,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// workerError：Worker 失败原因（错误码+文案），即使谷歌兜底成功也会带回供错误行提示。
 	// 全程静默：翻译链路不向控制台输出任何异常
 	const requestTranslate = async (
-		title: string,
+		text: string,
 	): Promise<{ translated: string; error?: string; workerError?: string }> => {
 		const s = getSettings();
 		const res = (await browser.runtime.sendMessage({
 			type: "jt:translate",
-			text: title,
+			text,
 			target: locale === "zh-hant" ? "zh-TW" : "zh-CN",
 			deeplKey: s.deeplApiKey,
 			translateUrl: s.translateApiUrl,
@@ -81,10 +90,46 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			workerError: res?.workerError,
 		};
 	};
-	// 通过 background 解析到的 Content ID（javtrailers 完整格式，含前缀与补零）
+
+	// 翻译结果应用到状态：拼装翻译时按花括号标记拆分短/长标题译文；
+	// javtrailers 源无拼装（卡片标题即短标题），译文放短标题行
+	const applyTranslation = (result: {
+		translated: string;
+		error?: string;
+		workerError?: string;
+	}) => {
+		setNeedsVerify(false);
+		if (result.translated) {
+			if (resolution.shortTitle) {
+				// dmm 源：拼装翻译，拆不出时整体作为长标题译文
+				const split = splitMergedTranslation(result.translated);
+				setTranslatedShort(split.short);
+				setTranslatedLong(split.long);
+			} else {
+				// javtrailers 源：译文即短标题译文
+				setTranslatedShort(result.translated);
+				setTranslatedLong(null);
+			}
+			setTranslateError(result.workerError || null);
+			return true;
+		}
+		if (result.error === "google-verify") {
+			setNeedsVerify(true);
+			setTranslateError(result.workerError || null);
+		} else {
+			setTranslateError(result.workerError || result.error || null);
+		}
+		return false;
+	};
+	// 通过 background 解析到的媒体信息（dmm 优先命中或 javtrailers 兜底）
 	const [resolution, setResolution] = useState<Resolution>({
+		source: null,
 		contentId: null,
+		shortTitle: null,
 		title: null,
+		coverUrl: null,
+		previewUrl: null,
+		previewType: null,
 		resolving: true,
 	});
 	// 重新加载计数：点击标题行番号时递增，触发重新解析
@@ -98,30 +143,44 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		rootRef.current?.scrollIntoView({ block: "start" });
 	}, []);
 
-	// 挂载时解析 Content ID：番号→Content ID 不可靠推导（如 DLDSS-547 → 1dldss00547），
-	// 必须走搜索页解析；失败时用补零规则兜底（对无前缀番号仍有效）
+	// 挂载时解析媒体信息：DMM 开关开启时 background 优先走 DMM API，未命中回退
+	// javtrailers 搜索页解析；开关关闭时直接走 javtrailers（默认链路）。
 	useEffect(() => {
 		let disposed = false;
 		void (async () => {
 			try {
+				const s = getSettings();
 				const res = (await browser.runtime.sendMessage({
 					type: "jt:resolve-detail",
 					code,
+					dmmEnabled: s.dmmEnabled,
+					dmmApiUrl: s.dmmApiUrl,
+					dmmApiKey: s.dmmApiKey,
 				})) as
 					| {
+							source?: "dmm" | "javtrailers" | null;
 							contentId?: string | null;
 							title?: string | null;
+							shortTitle?: string | null;
+							coverUrl?: string | null;
+							previewUrl?: string | null;
+							previewType?: "mp4" | "hls" | null;
 					  }
 					| undefined;
 				if (!disposed) {
 					setResolution({
+						source: res?.source || null,
 						contentId: res?.contentId || null,
+						shortTitle: res?.shortTitle || null,
 						title: res?.title || null,
+						coverUrl: res?.coverUrl || null,
+						previewUrl: res?.previewUrl || null,
+						previewType: res?.previewType || null,
 						resolving: false,
 					});
 				}
 			} catch {
-				// background 无响应：结束解析状态，走补零兜底
+				// background 无响应：结束解析状态，媒体不可用
 				if (!disposed) {
 					setResolution((prev) => ({ ...prev, resolving: false }));
 				}
@@ -132,13 +191,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	}, [code, reloadKey]);
 
-	// 封面/预告片/详情页 URL 一律以解析出的 Content ID 为准（无兜底猜测）
-	const coverUrl = resolution.contentId
-		? buildCoverUrlFromContentId(resolution.contentId)
-		: "";
-	const trailerUrl = resolution.contentId
-		? buildTrailerUrlFromContentId(resolution.contentId)
-		: "";
+	// 封面/预告片 URL 由 background 按来源拼好（dmm 直链或 javtrailers HLS）
+	const coverUrl = resolution.coverUrl || "";
+	const trailerUrl = resolution.previewUrl || "";
 
 	// 解析到 Content ID 后封面 URL 变化，重置失败状态与封面 src 以重新尝试
 	useEffect(() => {
@@ -148,8 +203,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	}, [coverUrl]);
 
 	// 中文/繁中界面下翻译标题；英文界面不翻译。失败保持 null（回退原文）
+	// 短标题与长标题拼装一次发送（短标题花括号包裹标记），返回后按标记拆分还原
 	useEffect(() => {
-		if (!resolution.title) return;
+		// 闭包内 property narrowing 不保留，取局部常量
+		const title = resolution.title;
+		if (!title) return;
+		const shortTitle = resolution.shortTitle;
 		if (locale === "en") {
 			setTitleReady(true);
 			return;
@@ -158,20 +217,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		let disposed = false;
 		void (async () => {
 			try {
-				const result = await requestTranslate(resolution.title!);
+				const translateInput = shortTitle
+					? buildMergedTranslateText(shortTitle, title)
+					: title;
+				const result = await requestTranslate(translateInput);
 				if (!disposed) {
-					if (result.translated) {
-						setTranslatedTitle(result.translated);
-						setNeedsVerify(false);
-						// Worker 失败但谷歌兜底成功：错误行提示 Worker 配置问题
-						setTranslateError(result.workerError || null);
-					} else if (result.error === "google-verify") {
-						// 谷歌限流：走人工验证流程，不显示谷歌错误信息（Worker 配置问题仍提示）
-						setNeedsVerify(true);
-						setTranslateError(result.workerError || null);
-					} else {
-						setTranslateError(result.workerError || result.error || null);
-					}
+					applyTranslation(result);
 					setTitleReady(true);
 				}
 			} catch {
@@ -184,24 +235,19 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return () => {
 			disposed = true;
 		};
-	}, [resolution.title, locale]);
+	}, [resolution.title, resolution.shortTitle, locale]);
 
 	// 翻译失败后手动重试（验证窗口关闭后也自动调用）
 	const handleRetryTranslate = async () => {
-		if (!resolution.title || retrying) return;
+		const title = resolution.title;
+		if (!title || retrying) return;
 		setRetrying(true);
 		try {
-			const result = await requestTranslate(resolution.title);
-			if (result.translated) {
-				setTranslatedTitle(result.translated);
-				setNeedsVerify(false);
-				setTranslateError(result.workerError || null);
-			} else if (result.error === "google-verify") {
-				setNeedsVerify(true);
-				setTranslateError(result.workerError || null);
-			} else {
-				setTranslateError(result.workerError || result.error || null);
-			}
+			const translateInput = resolution.shortTitle
+				? buildMergedTranslateText(resolution.shortTitle, title)
+				: title;
+			const result = await requestTranslate(translateInput);
+			applyTranslation(result);
 		} catch {
 			// 保持失败状态，图标仍在可再次点击
 		} finally {
@@ -264,10 +310,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return result;
 	};
 
-	// 封面加载失败：立即隐藏 broken 占位，尝试详情页备用封面；仍失败才判定无封面
+	// 封面加载失败：dmm 源无备用封面直接判定失败；javtrailers 源尝试详情页备用封面
 	const handleCoverError = () => {
-		if (coverSrc) {
-			// 备用封面也失败
+		if (resolution.source !== "javtrailers" || coverSrc) {
+			// 备用封面也失败，或 dmm 源无兜底
 			setCoverLoading(false);
 			setCoverError(true);
 			return;
@@ -285,7 +331,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		})();
 	};
 
-	// HLS 404 后的兜底：用详情页的 sample MP4 直连播放
+	// HLS 404 后的兜底（仅 javtrailers 源）：用详情页的 sample MP4 直连播放
 	const playFallbackTrailer = async () => {
 		const fb = await requestFallback();
 		const video = videoRef.current;
@@ -308,6 +354,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		video.volume = getSettings().previewVolume / 100;
 
 		setStatus("loading");
+		// dmm 源：mp4 直链直接播放，无需 hls.js 与 CORS 处理
+		if (resolution.source === "dmm" && trailerUrl) {
+			video.src = trailerUrl;
+			setStatus("playing");
+			void video.play().catch(() => setStatus("failed"));
+			return;
+		}
 		try {
 			// 懒加载 hls.js（~200KB），仅首次点播放时拉取，不拖慢面板首开
 			const { default: Hls } = await import("hls.js");
@@ -352,10 +405,20 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		hlsRef.current = null;
 		setStatus("idle");
 		setCoverError(false);
-		setTranslatedTitle(null);
+		setTranslatedShort(null);
+		setTranslatedLong(null);
 		setTitleReady(false);
 		setTranslateError(null);
-		setResolution({ contentId: null, title: null, resolving: true });
+		setResolution({
+			source: null,
+			contentId: null,
+			shortTitle: null,
+			title: null,
+			coverUrl: null,
+			previewUrl: null,
+			previewType: null,
+			resolving: true,
+		});
 		setReloadKey((k) => k + 1);
 	};
 
@@ -363,6 +426,25 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		hlsRef.current?.destroy();
 		hlsRef.current = null;
 		onClose();
+	};
+
+	// 短标题行内容：dmm 商品名或 javtrailers 卡片标题；长标题行内容：仅 dmm 长文
+	const displayShortTitle =
+		resolution.shortTitle ||
+		(resolution.source === "javtrailers" ? resolution.title : null);
+	const displayLongTitle = resolution.shortTitle ? resolution.title : null;
+
+	// 标题文本渲染：连续换行压缩为单个（删除空行），<br> 转成元素换行
+	// （DMM 长文与翻译结果都可能含 <br> 或连续 \n）
+	const renderTitleText = (text: string) => {
+		const collapsed = text.replace(/\n+/g, "\n").replace(/^\n+|\n+$/g, "");
+		const parts = collapsed.split(/<br\s*\/?>/i);
+		return parts.map((part, i) => (
+			<React.Fragment key={i}>
+				{i > 0 && <br />}
+				{part}
+			</React.Fragment>
+		));
 	};
 
 	return (
@@ -453,7 +535,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 								<span className="trailer-preview__loading" aria-hidden="true">
 									<span className="spinner" />
 								</span>
-							) : (
+							) : trailerUrl ? (
 								<button
 									type="button"
 									className="trailer-preview__play-btn"
@@ -471,45 +553,54 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 										<path d="M7 4v16l13 -8l-13 -8" />
 									</svg>
 								</button>
-							)}
+							) : null}
 						</div>
 					))}
 			</div>
 
-			{resolution.title && titleReady && (
+			{(displayShortTitle || displayLongTitle) && (
 				<div className="trailer-preview__title-area">
-					<p className="trailer-preview__title-text">
-						{translatedTitle || resolution.title}
-						{/* 中文/繁中界面翻译失败时显示重试图标 */}
-						{locale !== "en" && !translatedTitle && (
-							<button
-								type="button"
-								className="trailer-preview__translate-retry"
-								onClick={handleRetryTranslate}
-								disabled={retrying}
-								title={t.retryTranslate}
-								aria-label={t.retryTranslate}
-							>
-								{retrying ? (
-									<span
-										className="spinner spinner--small"
-										aria-hidden="true"
-									/>
-								) : (
-									<svg
-										viewBox="0 0 1024 1024"
-										fill="currentColor"
-										width="13"
-										height="13"
-										aria-hidden="true"
-									>
-										<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
-										<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
-									</svg>
-								)}
-							</button>
-						)}
-					</p>
+					{/* 短标题行：金色（dmm 商品名 / javtrailers 卡片标题），解析到即显示；翻译完成后替换为译文 */}
+					{displayShortTitle && (
+						<p className="trailer-preview__title-short">
+							{renderTitleText(translatedShort || displayShortTitle)}
+						</p>
+					)}
+					{/* 长标题行：仅 dmm 源的长文，翻译流程结束后显示，避免原文→译文的闪烁 */}
+					{displayLongTitle && titleReady && (
+						<p className="trailer-preview__title-text">
+							{renderTitleText(translatedLong || displayLongTitle || "")}
+						</p>
+					)}
+					{/* 中文/繁中界面翻译失败时显示重试图标（短/长标题行共用） */}
+					{locale !== "en" && titleReady && !translatedShort && !translatedLong && (
+						<button
+							type="button"
+							className="trailer-preview__translate-retry"
+							onClick={handleRetryTranslate}
+							disabled={retrying}
+							title={t.retryTranslate}
+							aria-label={t.retryTranslate}
+						>
+							{retrying ? (
+								<span
+									className="spinner spinner--small"
+									aria-hidden="true"
+								/>
+							) : (
+								<svg
+									viewBox="0 0 1024 1024"
+									fill="currentColor"
+									width="13"
+									height="13"
+									aria-hidden="true"
+								>
+									<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
+									<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
+								</svg>
+							)}
+						</button>
+					)}
 					{/* 谷歌限流时显示人工验证提示 */}
 					{needsVerify && (
 						<div className="trailer-preview__verify">
@@ -517,7 +608,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							<button
 								type="button"
 								className="trailer-preview__verify-btn"
-								onClick={() => openVerifyWindow(resolution.title || "")}
+								onClick={() => openVerifyWindow(displayLongTitle || displayShortTitle || "")}
 							>
 								{t.openVerifyPage}
 							</button>

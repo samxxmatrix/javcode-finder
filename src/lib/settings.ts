@@ -34,6 +34,11 @@ export interface ExtensionSettings {
 	webdavPass: string;
 	// 云盘同步开关：关闭时不存取云端（收藏仅本地）
 	webdavEnabled: boolean;
+	// DMM 查询 API 配置（地址与 Key 均空 = 未配置，走 javtrailers 默认链路）
+	dmmApiUrl: string;
+	dmmApiKey: string;
+	// DMM 开关：打开时预览/详情优先走 DMM API，javtrailers 兜底
+	dmmEnabled: boolean;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -63,6 +68,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	webdavUser: "",
 	webdavPass: "",
 	webdavEnabled: false,
+	dmmApiUrl: "",
+	dmmApiKey: "",
+	dmmEnabled: false,
 };
 
 export function normalizeDomain(input: string): string {
@@ -212,6 +220,14 @@ export function getSettings(): ExtensionSettings {
 				typeof parsed.webdavEnabled === "boolean"
 					? parsed.webdavEnabled
 					: DEFAULT_SETTINGS.webdavEnabled,
+			dmmApiUrl:
+				typeof parsed.dmmApiUrl === "string" ? parsed.dmmApiUrl.trim() : "",
+			dmmApiKey:
+				typeof parsed.dmmApiKey === "string" ? parsed.dmmApiKey.trim() : "",
+			dmmEnabled:
+				typeof parsed.dmmEnabled === "boolean"
+					? parsed.dmmEnabled
+					: DEFAULT_SETTINGS.dmmEnabled,
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -305,6 +321,18 @@ export function saveSettings(
 				settings.webdavEnabled !== undefined
 					? settings.webdavEnabled
 					: current.webdavEnabled,
+			dmmApiUrl:
+				settings.dmmApiUrl !== undefined
+					? settings.dmmApiUrl.trim()
+					: current.dmmApiUrl,
+			dmmApiKey:
+				settings.dmmApiKey !== undefined
+					? settings.dmmApiKey.trim()
+					: current.dmmApiKey,
+			dmmEnabled:
+				settings.dmmEnabled !== undefined
+					? settings.dmmEnabled
+					: current.dmmEnabled,
 		};
 		const storage = getStorage();
 		if (storage) {

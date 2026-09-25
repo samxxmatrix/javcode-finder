@@ -99,6 +99,13 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [webdavEnabled, setWebdavEnabled] = useState(false);
 	// 云盘验证错误（错误汇总区显示，可关闭）
 	const [webdavError, setWebdavError] = useState<string | null>(null);
+	// DMM 查询 API 配置（地址与 Key 均空 = 未配置）
+	const [dmmApiUrl, setDmmApiUrl] = useState("");
+	const [dmmApiKey, setDmmApiKey] = useState("");
+	// DMM 开关（打开才优先走 DMM，打开时验证）
+	const [dmmEnabled, setDmmEnabled] = useState(false);
+	// DMM 验证错误（错误汇总区显示，可关闭）
+	const [dmmVerifyError, setDmmVerifyError] = useState<string | null>(null);
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -168,6 +175,38 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}
 	};
 
+	// DMM 开关：打开时先验证接口（cid 查询探针），失败回弹关闭并显示错误行
+	const handleToggleDmm = async (checked: boolean) => {
+		setDmmVerifyError(null);
+		if (!checked) {
+			setDmmEnabled(false);
+			return;
+		}
+		const url = dmmApiUrl.trim();
+		const key = dmmApiKey.trim();
+		if (!url || !key) {
+			setDmmVerifyError(t.dmmIncomplete);
+			setDmmEnabled(false);
+			return;
+		}
+		try {
+			const health = (await browser.runtime.sendMessage({
+				type: "jt:dmm-health",
+				dmmApiUrl: url,
+				dmmApiKey: key,
+			})) as { ok?: boolean; error?: string } | undefined;
+			if (!health?.ok) {
+				setDmmVerifyError(`接口验证失败：${health?.error || "未知错误"}`);
+				setDmmEnabled(false);
+				return;
+			}
+			setDmmEnabled(true);
+		} catch {
+			setDmmVerifyError("接口验证失败：网络错误");
+			setDmmEnabled(false);
+		}
+	};
+
 	useEffect(() => {
 		const current = getSettings();
 		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
@@ -184,6 +223,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setWebdavUser(current.webdavUser);
 		setWebdavPass(current.webdavPass);
 		setWebdavEnabled(current.webdavEnabled);
+		setDmmApiUrl(current.dmmApiUrl);
+		setDmmApiKey(current.dmmApiKey);
+		setDmmEnabled(current.dmmEnabled);
 		// 打开设置页时展示已保存配置的用量（未配置时显示 --/--万）
 		void refreshTranslateUsage(current.translateApiUrl, current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
@@ -313,6 +355,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			webdavUser,
 			webdavPass,
 			webdavEnabled,
+			dmmApiUrl,
+			dmmApiKey,
+			dmmEnabled,
 		});
 		// 保存后立即用新配置刷新用量
 		void refreshTranslateUsage(translateUrl, deeplApiKey);
@@ -355,6 +400,10 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setShowPass(false);
 		setWebdavEnabled(false);
 		setWebdavError(null);
+		setDmmApiUrl("");
+		setDmmApiKey("");
+		setDmmEnabled(false);
+		setDmmVerifyError(null);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
@@ -414,7 +463,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			</section>
 
 			{/* 所有错误信息统一显示在版本信息下方，均可关闭 */}
-			{(translateVerifyError || regexError || webdavError) && (
+			{(translateVerifyError || regexError || webdavError || dmmVerifyError) && (
 				<div className="settings-errors" role="alert">
 					{translateVerifyError && (
 						<div className="settings-field__error settings-field__error--dismissible">
@@ -467,6 +516,28 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								type="button"
 								className="settings-field__error-close"
 								onClick={() => setWebdavError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
+					{dmmVerifyError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{dmmVerifyError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setDmmVerifyError(null)}
 								title={t.closeError}
 								aria-label={t.closeError}
 							>
@@ -595,6 +666,72 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				</div>
 
 				<div className="settings-field">
+			<div className="settings-field">
+				<div className="settings-field__header-row">
+					<label className="settings-field__label" htmlFor="dmm-api-url">
+						{t.dmmApiUrlLabel}
+					</label>
+					{/* 苹果开关：打开时验证接口；开启后预览/详情优先走 DMM 官方数据 */}
+					<label
+						className="settings-field__switch"
+						title={t.dmmEnableLabel}
+					>
+						<input
+							type="checkbox"
+							checked={dmmEnabled}
+							onChange={(e) => void handleToggleDmm(e.target.checked)}
+							aria-label={t.dmmEnableLabel}
+						/>
+						<span
+							className="settings-field__switch-track"
+							aria-hidden="true"
+						/>
+					</label>
+				</div>
+				<div className="settings-field__input-wrap">
+					<input
+						id="dmm-api-url"
+						type="text"
+						className="settings-field__input settings-field__input--code"
+						value={dmmApiUrl}
+						onChange={(e) => setDmmApiUrl(e.target.value)}
+						placeholder="https://dmm.0045.kdns.fr"
+						spellCheck={false}
+						autoComplete="off"
+					/>
+					<ClearButton
+						show={Boolean(dmmApiUrl)}
+						onClick={() => setDmmApiUrl("")}
+						title={t.clearInput}
+					/>
+				</div>
+			</div>
+
+			<div className="settings-field">
+				<div className="settings-field__header-row">
+					<label className="settings-field__label" htmlFor="dmm-api-key">
+						{t.dmmApiKeyLabel}
+					</label>
+				</div>
+				<div className="settings-field__input-wrap">
+					<input
+						id="dmm-api-key"
+						type="text"
+						className="settings-field__input settings-field__input--code"
+						value={dmmApiKey}
+						onChange={(e) => setDmmApiKey(e.target.value)}
+						placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+						spellCheck={false}
+						autoComplete="off"
+					/>
+					<ClearButton
+						show={Boolean(dmmApiKey)}
+						onClick={() => setDmmApiKey("")}
+						title={t.clearInput}
+					/>
+				</div>
+			</div>
+
 					<div className="settings-field__header-row">
 						<label className="settings-field__label" htmlFor="webdav-url">
 							{t.cloudSyncLabel}

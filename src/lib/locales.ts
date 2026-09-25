@@ -67,6 +67,10 @@ export interface LocaleMessages {
 	webdavConnectError: string;
 	showPassword: string;
 	hidePassword: string;
+	dmmApiUrlLabel: string;
+	dmmApiKeyLabel: string;
+	dmmEnableLabel: string;
+	dmmIncomplete: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -139,6 +143,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     webdavConnectError: "连接失败，检查地址与网络",
     showPassword: "显示密码",
     hidePassword: "隐藏密码",
+    dmmApiUrlLabel: "DMM API 地址",
+    dmmApiKeyLabel: "DMM API Key",
+    dmmEnableLabel: "启用 DMM 查询（预览/详情优先官方数据）",
+    dmmIncomplete: "请补全 DMM API 地址和 Key",
   },
 
   "zh-hant": {
@@ -211,6 +219,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     webdavConnectError: "連線失敗，請檢查地址與網路",
     showPassword: "顯示密碼",
     hidePassword: "隱藏密碼",
+    dmmApiUrlLabel: "DMM API 位址",
+    dmmApiKeyLabel: "DMM API Key",
+    dmmEnableLabel: "啟用 DMM 查詢（預覽/詳情優先官方資料）",
+    dmmIncomplete: "請補全 DMM API 位址與 Key",
   },
 
   en: {
@@ -285,6 +297,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     webdavConnectError: "Connection failed, check the URL and network",
     showPassword: "Show password",
     hidePassword: "Hide password",
+    dmmApiUrlLabel: "DMM API URL",
+    dmmApiKeyLabel: "DMM API Key",
+    dmmEnableLabel: "Enable DMM lookup (official data first)",
+    dmmIncomplete: "Fill in the DMM API URL and Key",
   },
 };
 

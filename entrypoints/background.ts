@@ -1,4 +1,16 @@
-import { parseDetailPageFallback, parseSearchPageHtml } from "../src/lib/javtrailers";
+import {
+	buildCoverUrlFromContentId,
+	buildTrailerUrlFromContentId,
+	parseDetailPageFallback,
+	parseSearchPageHtml,
+} from "../src/lib/javtrailers";
+import {
+	buildDmmHealthUrl,
+	buildDmmLookupUrl,
+	formatDmmError,
+	parseDmmLookupResponse,
+	type DmmLookupData,
+} from "../src/lib/dmm";
 import {
 	buildBasicAuth,
 	joinWebdavUrl,
@@ -116,6 +128,9 @@ export default defineBackground(() => {
 					webdavPass?: string;
 					body?: string;
 					contentId?: string;
+					dmmApiUrl?: string;
+					dmmApiKey?: string;
+					dmmEnabled?: boolean;
 				};
 
 				// 标题翻译：优先自建 Worker（开关开启且地址/Key 齐全）；
@@ -353,6 +368,72 @@ export default defineBackground(() => {
 					return true;
 				}
 
+				// DMM 健康检查：开关打开时的接口可用性验证（cid-only 接口，最轻量）
+				if (msg?.type === "jt:dmm-health") {
+					const key = (msg.dmmApiKey || "").trim();
+					const baseUrl = (msg.dmmApiUrl || "").trim();
+					void (async () => {
+						if (!baseUrl || !key) {
+							sendResponse({
+								ok: false,
+								error: "DMM API 地址和 Key 均需填写",
+							});
+							return;
+						}
+						try {
+							// BDSM-091 实测稳定存在，作为连通性探针
+							const res = await fetch(
+								buildDmmHealthUrl(baseUrl, key, "BDSM-091"),
+								{ signal: AbortSignal.timeout(5000) },
+							);
+							if (!res.ok) {
+								let data: unknown = null;
+								try {
+									data = await res.json();
+								} catch {
+									// 响应体不是 JSON 时仅用状态码
+								}
+								sendResponse({
+									ok: false,
+									error: formatDmmError(res.status, data),
+								});
+								return;
+							}
+							sendResponse({ ok: true });
+						} catch (error) {
+							sendResponse({
+								ok: false,
+								error: `DMM 接口错误：${
+									error instanceof Error ? error.message : String(error)
+								}`,
+							});
+						}
+					})();
+					return true;
+				}
+
+				// DMM 查询（内部共用）：成功返回数据；404（未找到）返回 null；其他错误抛错
+				const lookupDmm = async (
+					baseUrl: string,
+					key: string,
+					code: string,
+				): Promise<DmmLookupData | null> => {
+					const res = await fetch(buildDmmLookupUrl(baseUrl, key, code), {
+						signal: AbortSignal.timeout(5000),
+					});
+					if (res.status === 404) return null;
+					if (!res.ok) {
+						let data: unknown = null;
+						try {
+							data = await res.json();
+						} catch {
+							// 响应体不是 JSON 时仅用状态码
+						}
+						throw new Error(formatDmmError(res.status, data));
+					}
+					return parseDmmLookupResponse(await res.json());
+				};
+
 				// 详情页兜底：主媒体服务 404 时，从详情页提取 mgstage 封面与 sample MP4
 				if (msg?.type === "jt:resolve-fallback") {
 					const contentId = (msg.contentId || "").trim();
@@ -383,6 +464,31 @@ export default defineBackground(() => {
 				const code = msg.code;
 
 				void (async () => {
+					// 一级：DMM API（开关开启且地址/Key 齐全时优先；未找到/异常静默回退 javtrailers）
+					const dmmBase = (msg.dmmApiUrl || "").trim();
+					const dmmKey = (msg.dmmApiKey || "").trim();
+					if (msg.dmmEnabled === true && dmmBase && dmmKey) {
+						try {
+							const dmm = await lookupDmm(dmmBase, dmmKey, code);
+							if (dmm) {
+								sendResponse({
+									source: "dmm",
+									detailUrl: dmm.detailUrl,
+									contentId: dmm.cid,
+									title: dmm.title,
+									shortTitle: dmm.shortTitle,
+									coverUrl: dmm.coverUrl,
+									previewUrl: dmm.previewUrl,
+									previewType: "mp4",
+								});
+								return;
+							}
+						} catch {
+							// DMM 失败：静默回退 javtrailers（错误不在预览区提示）
+						}
+					}
+
+					// 二级：javtrailers 搜索页解析（原逻辑）
 					try {
 						const res = await fetch(
 							`https://javtrailers.com/search/${encodeURIComponent(code)}`,
@@ -390,6 +496,7 @@ export default defineBackground(() => {
 						);
 						if (!res.ok) {
 							sendResponse({
+								source: null,
 								detailUrl: null,
 								contentId: null,
 								title: null,
@@ -400,15 +507,25 @@ export default defineBackground(() => {
 						const html = await res.text();
 						const resolution = parseSearchPageHtml(html, code);
 						sendResponse({
+							source: resolution ? "javtrailers" : null,
 							detailUrl: resolution?.detailUrl ?? null,
 							contentId: resolution?.contentId ?? null,
 							title: resolution?.title ?? null,
+							shortTitle: null,
+							coverUrl: resolution?.contentId
+								? buildCoverUrlFromContentId(resolution.contentId)
+								: null,
+							previewUrl: resolution?.contentId
+								? buildTrailerUrlFromContentId(resolution.contentId)
+								: null,
+							previewType: resolution ? "hls" : null,
 							debug: resolution
 								? undefined
 								: `no-match(len=${html.length})`,
 						});
 					} catch (error) {
 						sendResponse({
+							source: null,
 							detailUrl: null,
 							contentId: null,
 							title: null,

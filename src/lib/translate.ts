@@ -131,6 +131,37 @@ export function formatWorkerError(status: number, data: unknown): string {
 }
 
 /**
+ * 拼装"短标题+长标题"一次翻译：短标题用花括号包裹置于首行（翻译后按此标记拆分还原）。
+ */
+export function buildMergedTranslateText(
+	shortTitle: string,
+	longTitle: string,
+): string {
+	return `{${shortTitle}}\n${longTitle}`;
+}
+
+export interface SplitTranslation {
+	// 短标题译文；翻译器改写花括号导致拆不出时为 null
+	short: string | null;
+	// 长标题译文（拆不出时即整段译文）
+	long: string;
+}
+
+/**
+ * 拆分拼装翻译结果：{短标题}\n长标题 → 短标题译文 + 长标题译文。
+ * 兼容全角花括号；拆不出（花括号被翻译器吃掉/只有短标题无后续）时整体视为长标题。
+ */
+export function splitMergedTranslation(text: string): SplitTranslation {
+	const m = text.match(/^[{｛]([\s\S]*?)[}｝]\s*\n?([\s\S]*)$/);
+	const short = m?.[1] ?? null;
+	const long = m?.[2] || text;
+	if (!short || long === text) {
+		return { short: null, long: text };
+	}
+	return { short, long };
+}
+
+/**
  * 格式化 Worker 网络层错误（fetch 抛异常）：超时与一般网络错误区分文案。
  */
 export function formatWorkerFetchError(error: unknown): string {
