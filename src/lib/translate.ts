@@ -112,6 +112,38 @@ export function formatUsage(
 }
 
 /**
+ * 格式化 Worker 错误信息：优先取响应体的 code（错误码）与 error（中文文案），
+ * 缺失时回退 HTTP 状态码。用于面板错误行显示（状态码+原因）。
+ */
+export function formatWorkerError(status: number, data: unknown): string {
+	const parsed = (data ?? {}) as { code?: string; error?: string };
+	const code =
+		typeof parsed.code === "string" && parsed.code ? ` [${parsed.code}]` : "";
+	let message: string;
+	if (typeof parsed.error === "string" && parsed.error) {
+		message = parsed.error;
+	} else if (status) {
+		message = `HTTP ${status}`;
+	} else {
+		message = "未知错误";
+	}
+	return `翻译服务错误${code}：${message}`;
+}
+
+/**
+ * 格式化 Worker 网络层错误（fetch 抛异常）：超时与一般网络错误区分文案。
+ */
+export function formatWorkerFetchError(error: unknown): string {
+	const message =
+		error instanceof Error && error.name === "TimeoutError"
+			? "请求超时"
+			: error instanceof Error
+				? error.message
+				: String(error);
+	return `翻译服务错误：${message}`;
+}
+
+/**
  * 构造谷歌翻译 gtx 请求 URL。
  * 目标语言：简体 zh-CN、繁体 zh-TW（与 Worker 的 ZH/ZH-HANT 映射不同）。
  */

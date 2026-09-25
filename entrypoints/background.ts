@@ -7,6 +7,8 @@ import {
 	buildGoogleUrl,
 	buildWorkerTranslateBody,
 	buildWorkerUrl,
+	formatWorkerError,
+	formatWorkerFetchError,
 	parseGoogleResponse,
 	parseWorkerHealth,
 	parseWorkerTranslation,
@@ -117,14 +119,15 @@ export default defineBackground(() => {
 				};
 
 				// 标题翻译：优先自建 Worker（开关开启且地址/Key 齐全）；
-				// 失败或未配置时无感降级谷歌 gtx，两者都失败返回错误信息（调用方回退原文）。
-				// 全程静默：不向控制台输出任何异常。
+				// 失败或未配置时无感降级谷歌 gtx。Worker 失败原因（错误码+文案）随响应
+				// 返回给面板显示在错误行，不影响谷歌兜底出的译文。全程静默不输出控制台。
 				if (msg?.type === "jt:translate" && msg.text) {
 					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
 					const key = (msg.deeplKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					void (async () => {
 						// 一级：自建 Worker（仅开关开启且地址与 Key 齐全时尝试）
+						let workerError: string | undefined;
 						if (msg.translateEnabled && baseUrl && key) {
 							try {
 								const res = await fetch(buildWorkerUrl(baseUrl, "translate"), {
@@ -143,10 +146,21 @@ export default defineBackground(() => {
 										sendResponse({ translated });
 										return;
 									}
+									// success: false 或空译文 → 记录原因并降级谷歌
+									workerError = formatWorkerError(res.status, data);
+								} else {
+									// 非 2xx → 记录原因并降级谷歌
+									let data: unknown = null;
+									try {
+										data = await res.json();
+									} catch {
+										// 响应体不是 JSON 时仅用状态码
+									}
+									workerError = formatWorkerError(res.status, data);
 								}
-								// 非 2xx、success:false 或空译文 → 降级谷歌
-							} catch {
-								// 网络异常 → 降级谷歌
+							} catch (error) {
+								// 网络异常/超时 → 记录原因并降级谷歌
+								workerError = formatWorkerFetchError(error);
 							}
 						}
 						// 二级：谷歌 gtx 公开端点（限流 429 时同样失败，回退原文）
@@ -162,12 +176,14 @@ export default defineBackground(() => {
 										res.status === 403 || res.status === 429
 											? "google-verify"
 											: `谷歌翻译错误：HTTP ${res.status}`,
+									workerError,
 								});
 								return;
 							}
 							const data = await res.json();
 							sendResponse({
 								translated: parseGoogleResponse(data),
+								workerError,
 							});
 						} catch (error) {
 							sendResponse({
@@ -175,6 +191,7 @@ export default defineBackground(() => {
 								error: `谷歌翻译错误：${
 									error instanceof Error ? error.message : String(error)
 								}`,
+								workerError,
 							});
 						}
 					})();

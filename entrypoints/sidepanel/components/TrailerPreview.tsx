@@ -59,10 +59,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const verifyWinIdRef = useRef<number | null>(null);
 
 	// 请求翻译并返回译文与错误码（translated 空 = 失败）；Worker 配置从设置读取随消息携带。
+	// workerError：Worker 失败原因（错误码+文案），即使谷歌兜底成功也会带回供错误行提示。
 	// 全程静默：翻译链路不向控制台输出任何异常
 	const requestTranslate = async (
 		title: string,
-	): Promise<{ translated: string; error?: string }> => {
+	): Promise<{ translated: string; error?: string; workerError?: string }> => {
 		const s = getSettings();
 		const res = (await browser.runtime.sendMessage({
 			type: "jt:translate",
@@ -71,8 +72,14 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			deeplKey: s.deeplApiKey,
 			translateUrl: s.translateApiUrl,
 			translateEnabled: s.translateEnabled,
-		})) as { translated?: string; error?: string } | undefined;
-		return { translated: res?.translated || "", error: res?.error };
+		})) as
+			| { translated?: string; error?: string; workerError?: string }
+			| undefined;
+		return {
+			translated: res?.translated || "",
+			error: res?.error,
+			workerError: res?.workerError,
+		};
 	};
 	// 通过 background 解析到的 Content ID（javtrailers 完整格式，含前缀与补零）
 	const [resolution, setResolution] = useState<Resolution>({
@@ -156,13 +163,14 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					if (result.translated) {
 						setTranslatedTitle(result.translated);
 						setNeedsVerify(false);
-						setTranslateError(null);
+						// Worker 失败但谷歌兜底成功：错误行提示 Worker 配置问题
+						setTranslateError(result.workerError || null);
 					} else if (result.error === "google-verify") {
-						// 谷歌限流：走人工验证流程，不显示错误信息行
+						// 谷歌限流：走人工验证流程，不显示谷歌错误信息（Worker 配置问题仍提示）
 						setNeedsVerify(true);
-						setTranslateError(null);
-					} else if (result.error) {
-						setTranslateError(result.error);
+						setTranslateError(result.workerError || null);
+					} else {
+						setTranslateError(result.workerError || result.error || null);
 					}
 					setTitleReady(true);
 				}
@@ -187,12 +195,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			if (result.translated) {
 				setTranslatedTitle(result.translated);
 				setNeedsVerify(false);
-				setTranslateError(null);
+				setTranslateError(result.workerError || null);
 			} else if (result.error === "google-verify") {
 				setNeedsVerify(true);
-				setTranslateError(null);
-			} else if (result.error) {
-				setTranslateError(result.error);
+				setTranslateError(result.workerError || null);
+			} else {
+				setTranslateError(result.workerError || result.error || null);
 			}
 		} catch {
 			// 保持失败状态，图标仍在可再次点击

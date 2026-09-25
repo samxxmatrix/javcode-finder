@@ -4,6 +4,7 @@ import {
 	buildWorkerTranslateBody,
 	buildWorkerUrl,
 	formatUsage,
+	formatWorkerError,
 	parseGoogleResponse,
 	parseWorkerHealth,
 	parseWorkerTranslation,
@@ -57,6 +58,36 @@ describe("parseWorkerHealth", () => {
 		expect(parseWorkerHealth({ success: false })).toBe(false);
 		expect(parseWorkerHealth(null)).toBe(false);
 		expect(parseWorkerHealth({})).toBe(false);
+	});
+});
+
+describe("formatWorkerError", () => {
+	it("formats error code and message from the response body", () => {
+		expect(
+			formatWorkerError(401, {
+				success: false,
+				code: "AUTH_INVALID",
+				error: "访问密钥无效",
+			}),
+		).toBe("翻译服务错误 [AUTH_INVALID]：访问密钥无效");
+		expect(
+			formatWorkerError(413, {
+				success: false,
+				code: "INPUT_TOO_LONG",
+				error: "输入文本过长",
+			}),
+		).toBe("翻译服务错误 [INPUT_TOO_LONG]：输入文本过长");
+	});
+
+	it("falls back to HTTP status when body has no error message", () => {
+		expect(formatWorkerError(502, null)).toBe("翻译服务错误：HTTP 502");
+		expect(formatWorkerError(500, {})).toBe("翻译服务错误：HTTP 500");
+	});
+
+	it("keeps the code when error message is missing", () => {
+		expect(formatWorkerError(200, { success: false, code: "EMPTY_TEXT" })).toBe(
+			"翻译服务错误 [EMPTY_TEXT]：HTTP 200",
+		);
 	});
 });
 

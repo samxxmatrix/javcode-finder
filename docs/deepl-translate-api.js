@@ -1,5 +1,5 @@
-const DEEPL_API_URL = "https://api.deepl.com/v2/translate";
-const DEEPL_USAGE_URL = "https://api.deepl.com/v2/usage";
+const DEEPL_API_URL = "https://api-free.deepl.com/v2/translate";
+const DEEPL_USAGE_URL = "https://api-free.deepl.com/v2/usage";
 
 // ============================================================
 // Cloudflare Variables 中配置：
@@ -7,16 +7,9 @@ const DEEPL_USAGE_URL = "https://api.deepl.com/v2/usage";
 // CLIENT_API_KEY  → Text
 // ============================================================
 
-// DeepL 单个请求的分段大小
 const MAX_CHUNK_CHARS = 4000;
-
-// 单次 API 最大输入字符数
 const MAX_INPUT_CHARS = 50000;
-
-// DeepL 429 最大重试次数
 const MAX_RETRIES = 3;
-
-// 缓存 7 天
 const CACHE_TTL = 604800;
 
 
@@ -103,6 +96,64 @@ function json(data, status = 200) {
 
 
 // ============================================================
+// 统一错误响应
+// ============================================================
+
+function errorResponse(code, error, status = 500) {
+  return json(
+    {
+      success: false,
+      code,
+      error
+    },
+    status
+  );
+}
+
+
+// ============================================================
+// DeepL HTTP 状态 → 错误码映射
+// ============================================================
+
+function mapDeepLError(status) {
+  switch (status) {
+    case 400:
+      return ["DEEPL_BAD_REQUEST", "DeepL 请求无效"];
+    case 401:
+      return ["DEEPL_AUTH_FAILED", "DeepL 密钥无效"];
+    case 403:
+      return ["DEEPL_FORBIDDEN", "DeepL 访问被拒绝"];
+    case 404:
+      return ["DEEPL_NOT_FOUND", "DeepL 接口不存在"];
+    case 429:
+      return ["DEEPL_RATE_LIMIT", "DeepL 请求过于频繁"];
+    case 456:
+      return ["DEEPL_QUOTA_EXCEEDED", "DeepL 配额已用尽"];
+    default:
+      if (status >= 500) {
+        return ["DEEPL_SERVER_ERROR", "DeepL 服务异常"];
+      }
+      return ["DEEPL_SERVER_ERROR", "DeepL 服务异常"];
+  }
+}
+
+
+// ============================================================
+// 构造带 code 的错误
+// ============================================================
+
+function createError(code, message, status = 502, detail = null) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  if (detail !== null) {
+    error.detail = detail;
+  }
+  return error;
+}
+
+
+// ============================================================
 // 语言标准化
 // ============================================================
 
@@ -136,16 +187,14 @@ function charCount(text) {
 
 function checkClientKey(request, env) {
 
-  // 没有配置 CLIENT_API_KEY
+  // 未配置 CLIENT_API_KEY
   if (!env.CLIENT_API_KEY) {
     return {
       ok: false,
-      response: json(
-        {
-          success: false,
-          error: "Unauthorized"
-        },
-        401
+      response: errorResponse(
+        "AUTH_CONFIG_MISSING",
+        "服务密钥未配置",
+        503
       )
     };
   }
@@ -153,22 +202,28 @@ function checkClientKey(request, env) {
   const authorization =
     request.headers.get("Authorization");
 
-  // 必须是：
-  //
-  // Authorization: Bearer YOUR_CLIENT_API_KEY
-  //
+  // 缺少 Authorization
+  if (!authorization) {
+    return {
+      ok: false,
+      response: errorResponse(
+        "AUTH_REQUIRED",
+        "缺少访问密钥",
+        401
+      )
+    };
+  }
 
+  // Authorization: Bearer YOUR_CLIENT_API_KEY
   if (
     authorization !==
     `Bearer ${env.CLIENT_API_KEY}`
   ) {
     return {
       ok: false,
-      response: json(
-        {
-          success: false,
-          error: "Unauthorized"
-        },
+      response: errorResponse(
+        "AUTH_INVALID",
+        "访问密钥无效",
         401
       )
     };
@@ -182,7 +237,6 @@ function checkClientKey(request, env) {
 
 // ============================================================
 // SHA-256
-// 用于生成缓存 Key
 // ============================================================
 
 async function sha256(text) {
@@ -271,8 +325,6 @@ function splitSentences(text) {
       continue;
     }
 
-    // 英文句号后面不是空白，
-    // 可能只是小数点/缩写，不切割
     if (
       char === "." &&
       i + 1 < chars.length &&
@@ -339,7 +391,6 @@ function splitLongText(
       current = "";
     }
 
-    // 单个句子本身超过限制
     if (
       charCount(sentence) >
       maxChars
@@ -452,10 +503,6 @@ async function callDeepL(
   }
 
 
-  // ==========================================================
-  // 自动重试
-  // ==========================================================
-
   for (
     let attempt = 0;
     attempt <= MAX_RETRIES;
@@ -492,9 +539,10 @@ async function callDeepL(
         MAX_RETRIES
       ) {
 
-        throw new Error(
-          "Failed to connect to DeepL: " +
-          error.message
+        throw createError(
+          "DEEPL_CONNECTION_FAILED",
+          "无法连接 DeepL",
+          502
         );
       }
 
@@ -507,10 +555,7 @@ async function callDeepL(
     }
 
 
-    // ========================================================
     // 429 Rate Limit
-    // ========================================================
-
     if (
       response.status === 429
     ) {
@@ -520,14 +565,11 @@ async function callDeepL(
         MAX_RETRIES
       ) {
 
-        const error =
-          new Error(
-            "DeepL rate limit exceeded"
-          );
-
-        error.status = 429;
-
-        throw error;
+        throw createError(
+          "DEEPL_RATE_LIMIT",
+          "DeepL 请求过于频繁",
+          429
+        );
       }
 
       await sleep(
@@ -538,10 +580,6 @@ async function callDeepL(
       continue;
     }
 
-
-    // ========================================================
-    // 读取 JSON
-    // ========================================================
 
     let result;
 
@@ -552,44 +590,37 @@ async function callDeepL(
 
     } catch {
 
-      throw new Error(
-        "Invalid response from DeepL"
+      throw createError(
+        "DEEPL_RESPONSE_INVALID",
+        "DeepL 响应无效",
+        502
       );
     }
 
 
-    // ========================================================
-    // DeepL API 错误
-    // ========================================================
-
     if (!response.ok) {
 
-      const error =
-        new Error(
-          "DeepL API error"
-        );
+      const [code, message] =
+        mapDeepLError(response.status);
 
-      error.status =
-        response.status;
-
-      error.detail =
-        result;
-
-      throw error;
+      throw createError(
+        code,
+        message,
+        response.status,
+        result
+      );
     }
 
-
-    // ========================================================
-    // 检查翻译结果
-    // ========================================================
 
     if (
       !result.translations ||
       !result.translations.length
     ) {
 
-      throw new Error(
-        "DeepL returned no translation"
+      throw createError(
+        "DEEPL_NO_TRANSLATION",
+        "DeepL 未返回翻译",
+        502
       );
     }
 
@@ -604,18 +635,31 @@ async function callDeepL(
 
 async function getUsage(env) {
 
-  const response =
-    await fetch(
-      DEEPL_USAGE_URL,
-      {
-        method: "GET",
+  let response;
 
-        headers: {
-          "Authorization":
-            `DeepL-Auth-Key ${env.DEEPL_API_KEY}`
+  try {
+
+    response =
+      await fetch(
+        DEEPL_USAGE_URL,
+        {
+          method: "GET",
+
+          headers: {
+            "Authorization":
+              `DeepL-Auth-Key ${env.DEEPL_API_KEY}`
+          }
         }
-      }
+      );
+
+  } catch (error) {
+
+    throw createError(
+      "DEEPL_CONNECTION_FAILED",
+      "无法连接 DeepL",
+      502
     );
+  }
 
 
   let result;
@@ -627,26 +671,25 @@ async function getUsage(env) {
 
   } catch {
 
-    throw new Error(
-      "Invalid response from DeepL usage API"
+    throw createError(
+      "DEEPL_RESPONSE_INVALID",
+      "DeepL 响应无效",
+      502
     );
   }
 
 
   if (!response.ok) {
 
-    const error =
-      new Error(
-        "DeepL usage API error"
-      );
+    const [code, message] =
+      mapDeepLError(response.status);
 
-    error.status =
-      response.status;
-
-    error.detail =
-      result;
-
-    throw error;
+    throw createError(
+      code,
+      message,
+      response.status,
+      result
+    );
   }
 
   return result;
@@ -664,12 +707,9 @@ async function usage(
 
   if (!env.DEEPL_API_KEY) {
 
-    return json(
-      {
-        success: false,
-        error:
-          "Service unavailable"
-      },
+    return errorResponse(
+      "CONFIG_DEEPL_KEY_MISSING",
+      "DeepL 密钥未配置",
       503
     );
   }
@@ -726,13 +766,9 @@ async function usage(
 
   } catch (error) {
 
-    return json(
-      {
-        success: false,
-        error: error.message,
-        detail:
-          error.detail || null
-      },
+    return errorResponse(
+      error.code || "USAGE_FAILED",
+      error.message || "无法获取 DeepL 用量",
       error.status || 502
     );
   }
@@ -751,12 +787,9 @@ async function translate(
 
   if (!env.DEEPL_API_KEY) {
 
-    return json(
-      {
-        success: false,
-        error:
-          "Service unavailable"
-      },
+    return errorResponse(
+      "CONFIG_DEEPL_KEY_MISSING",
+      "DeepL 密钥未配置",
       503
     );
   }
@@ -775,22 +808,16 @@ async function translate(
 
   } catch {
 
-    return json(
-      {
-        success: false,
-        error: "Invalid JSON"
-      },
+    return errorResponse(
+      "INVALID_JSON",
+      "JSON 格式无效",
       400
     );
   }
 
 
   // ==========================================================
-  // 支持：
-  //
-  // text
-  // input
-  // q
+  // 支持：text / input / q
   // ==========================================================
 
   const text =
@@ -799,16 +826,11 @@ async function translate(
     body.q;
 
 
-  if (
-    typeof text !== "string"
-  ) {
+  if (typeof text !== "string") {
 
-    return json(
-      {
-        success: false,
-        error:
-          "text must be a string"
-      },
+    return errorResponse(
+      "INVALID_TEXT",
+      "text 必须为字符串",
       400
     );
   }
@@ -816,12 +838,9 @@ async function translate(
 
   if (!text.length) {
 
-    return json(
-      {
-        success: false,
-        error:
-          "text cannot be empty"
-      },
+    return errorResponse(
+      "EMPTY_TEXT",
+      "文本不能为空",
       400
     );
   }
@@ -840,19 +859,9 @@ async function translate(
     MAX_INPUT_CHARS
   ) {
 
-    return json(
-      {
-        success: false,
-
-        error:
-          "Input text is too long",
-
-        max_characters:
-          MAX_INPUT_CHARS,
-
-        received_characters:
-          inputCharacters
-      },
+    return errorResponse(
+      "INPUT_TOO_LONG",
+      "输入文本过长",
       413
     );
   }
@@ -860,9 +869,6 @@ async function translate(
 
   // ==========================================================
   // 目标语言
-  //
-  // target_lang
-  // target
   // ==========================================================
 
   const targetLang =
@@ -875,9 +881,6 @@ async function translate(
 
   // ==========================================================
   // 源语言
-  //
-  // source_lang
-  // source
   // ==========================================================
 
   const sourceLang =
@@ -901,10 +904,6 @@ async function translate(
       sourceLang
     );
 
-
-  // ==========================================================
-  // 检查缓存
-  // ==========================================================
 
   const cached =
     await cache.match(
@@ -978,39 +977,22 @@ async function translate(
 
     } catch (error) {
 
-      return json(
-        {
-          success: false,
-
-          error:
-            error.message,
-
-          chunk_index:
-            i,
-
-          total_chunks:
-            chunks.length,
-
-          detail:
-            error.detail || null
-        },
-        error.status || 502
+      return errorResponse(
+        error.code || "INTERNAL_ERROR",
+        error.message || "服务内部错误",
+        error.status || 500
       );
     }
   }
 
 
   // ==========================================================
-  // 合并翻译结果
+  // 合并
   // ==========================================================
 
   const translation =
     translations.join("\n\n");
 
-
-  // ==========================================================
-  // 返回数据
-  // ==========================================================
 
   const output = {
 
@@ -1100,8 +1082,6 @@ export default {
 
     // ========================================================
     // CORS OPTIONS
-    //
-    // OPTIONS 不返回任何 API 信息
     // ========================================================
 
     if (
@@ -1122,17 +1102,7 @@ export default {
 
 
     // ========================================================
-    // 所有请求统一鉴权
-    //
-    // 不管访问：
-    //
-    // /
-    // /health
-    // /usage
-    // /translate
-    // /abc
-    //
-    // 都必须带 CLIENT_API_KEY
+    // 统一鉴权
     // ========================================================
 
     const auth =
@@ -1209,15 +1179,12 @@ export default {
 
 
     // ========================================================
-    // 所有未知路径
-    // 不暴露接口列表
+    // 未知路径
     // ========================================================
 
-    return json(
-      {
-        success: false,
-        error: "Not Found"
-      },
+    return errorResponse(
+      "NOT_FOUND",
+      "接口不存在",
       404
     );
   }
