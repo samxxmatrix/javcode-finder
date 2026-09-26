@@ -3,3 +3,5 @@
 node_modules/
 .vercel/
 .env.local
+# docs 目录仅本地保存（部署代码含密钥与配置），不提交 git
+docs/

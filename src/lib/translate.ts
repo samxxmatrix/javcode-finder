@@ -1,6 +1,6 @@
 /**
  * 标题翻译的数据层：
- * 一级：自建 DeepL Worker（Bearer + JSON，见 docs/deepl-translate-api接口文档.txt）；
+ * 一级：自建 DeepL Worker（Bearer + JSON，见 docs/deepl-translate-api接口文档.md）；
  * 二级：谷歌翻译 gtx 公开端点兜底。
  * URL/请求构造与响应解析均为纯函数，便于测试。
  */
