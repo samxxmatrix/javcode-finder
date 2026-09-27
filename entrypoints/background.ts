@@ -16,18 +16,29 @@ import {
 	joinWebdavUrl,
 } from "../src/lib/favorites";
 import {
-	buildGoogleUrl,
+	buildBingBody,
+	buildBingUrl,
+	buildGoogleBody,
+	buildGooglePostUrl,
 	buildWorkerTranslateBody,
 	buildWorkerUrl,
+	formatBingError,
+	formatBingFetchError,
+	formatGoogleError,
+	formatGoogleFetchError,
 	formatWorkerError,
 	formatWorkerFetchError,
+	parseBingResponse,
 	parseGoogleResponse,
 	parseWorkerHealth,
 	parseWorkerTranslation,
 	parseWorkerUsage,
+	type FallbackService,
 	type TranslateTarget,
 } from "../src/lib/translate";
 import { clearCodeMarksForTab } from "../src/lib/mark-codes";
+import { messages } from "../src/lib/locales";
+import type { SupportedLocale } from "../src/lib/types";
 
 export default defineBackground(() => {
 	// 给 media.javtrailers.com 响应注入 CORS 头，使扩展面板内的 hls.js 能跨域拉取 HLS 预告片流。
@@ -123,6 +134,8 @@ export default defineBackground(() => {
 					deeplKey?: string;
 					translateUrl?: string;
 					translateEnabled?: boolean;
+					fallbackService?: FallbackService;
+					locale?: SupportedLocale;
 					webdavUrl?: string;
 					webdavUser?: string;
 					webdavPass?: string;
@@ -134,10 +147,13 @@ export default defineBackground(() => {
 				};
 
 				// 标题翻译：优先自建 Worker（开关开启且地址/Key 齐全）；
-				// 失败或未配置时无感降级谷歌 gtx。Worker 失败原因（错误码+文案）随响应
-				// 返回给面板显示在错误行，不影响谷歌兜底出的译文。全程静默不输出控制台。
+				// 失败或未配置时降级用户选定的备用服务（谷歌 t 端点或微软 Edge 内置接口）。
+				// Worker 失败原因（错误码+文案）随响应返回给面板显示在错误行，
+				// 不影响备用服务出的译文。全程静默不输出控制台。
 				if (msg?.type === "jt:translate" && msg.text) {
 					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
+					const fallback: FallbackService =
+						msg.fallbackService === "bing" ? "bing" : "google";
 					const key = (msg.deeplKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					void (async () => {
@@ -162,7 +178,7 @@ export default defineBackground(() => {
 										return;
 									}
 									// success: false 或空译文 → 记录原因并降级谷歌
-									workerError = formatWorkerError(res.status, data);
+									workerError = formatWorkerError(res.status, data, target);
 								} else {
 									// 非 2xx → 记录原因并降级谷歌
 									let data: unknown = null;
@@ -171,16 +187,49 @@ export default defineBackground(() => {
 									} catch {
 										// 响应体不是 JSON 时仅用状态码
 									}
-									workerError = formatWorkerError(res.status, data);
+									workerError = formatWorkerError(res.status, data, target);
 								}
 							} catch (error) {
 								// 网络异常/超时 → 记录原因并降级谷歌
-								workerError = formatWorkerFetchError(error);
+								workerError = formatWorkerFetchError(error, target);
 							}
 						}
-						// 二级：谷歌 gtx 公开端点（限流 429 时同样失败，回退原文）
+						// 二级：微软 Edge 内置翻译接口（无认证；参数校验严格，语言码走 BCP-47 映射）
+						if (fallback === "bing") {
+							try {
+								const res = await fetch(buildBingUrl(target), {
+									method: "POST",
+									headers: { "Content-Type": "application/json" },
+									body: buildBingBody(msg.text!),
+									signal: AbortSignal.timeout(5000),
+								});
+								if (!res.ok) {
+									sendResponse({
+										translated: "",
+										error: formatBingError(res.status, target),
+										workerError,
+									});
+									return;
+								}
+								const data = await res.json();
+								sendResponse({
+									translated: parseBingResponse(data),
+									workerError,
+								});
+							} catch (error) {
+								sendResponse({
+									translated: "",
+									error: formatBingFetchError(error, target),
+									workerError,
+								});
+							}
+							return;
+						}
+						// 二级：谷歌 gtx t 端点（POST 表单；single 端点已被风控封禁，不再使用）
 						try {
-							const res = await fetch(buildGoogleUrl(msg.text!, target), {
+							const res = await fetch(buildGooglePostUrl(target), {
+								method: "POST",
+								body: buildGoogleBody(msg.text!),
 								signal: AbortSignal.timeout(5000),
 							});
 							if (!res.ok) {
@@ -190,7 +239,7 @@ export default defineBackground(() => {
 									error:
 										res.status === 403 || res.status === 429
 											? "google-verify"
-											: `谷歌翻译错误：HTTP ${res.status}`,
+											: formatGoogleError(res.status, target),
 									workerError,
 								});
 								return;
@@ -203,9 +252,7 @@ export default defineBackground(() => {
 						} catch (error) {
 							sendResponse({
 								translated: "",
-								error: `谷歌翻译错误：${
-									error instanceof Error ? error.message : String(error)
-								}`,
+								error: formatGoogleFetchError(error, target),
 								workerError,
 							});
 						}
@@ -217,9 +264,11 @@ export default defineBackground(() => {
 				if (msg?.type === "jt:health") {
 					const key = (msg.deeplKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
+					// 健康检查在设置页发起，界面语言可为英文：文案走三语言 messages
+					const m = messages[msg.locale] ?? messages["zh-hans"];
 					void (async () => {
 						if (!baseUrl || !key) {
-							sendResponse({ ok: false, error: "翻译 API 地址和 Key 均需填写" });
+							sendResponse({ ok: false, error: m.translateApiIncomplete });
 							return;
 						}
 						try {
@@ -235,15 +284,11 @@ export default defineBackground(() => {
 							const healthy = parseWorkerHealth(data);
 							sendResponse({
 								ok: healthy,
-								error: healthy ? undefined : "接口响应异常",
+								error: healthy ? undefined : m.abnormalResponse,
 							});
-						} catch (error) {
-							sendResponse({
-								ok: false,
-								error: `网络错误：${
-									error instanceof Error ? error.message : String(error)
-								}`,
-							});
+						} catch {
+							// 网络层失败不展示浏览器英文消息（如 Failed to fetch）
+							sendResponse({ ok: false, error: m.networkError });
 						}
 					})();
 					return true;
@@ -372,11 +417,12 @@ export default defineBackground(() => {
 				if (msg?.type === "jt:dmm-health") {
 					const key = (msg.dmmApiKey || "").trim();
 					const baseUrl = (msg.dmmApiUrl || "").trim();
+					const m = messages[msg.locale] ?? messages["zh-hans"];
 					void (async () => {
 						if (!baseUrl || !key) {
 							sendResponse({
 								ok: false,
-								error: "DMM API 地址和 Key 均需填写",
+								error: m.dmmIncomplete,
 							});
 							return;
 						}
@@ -395,17 +441,16 @@ export default defineBackground(() => {
 								}
 								sendResponse({
 									ok: false,
-									error: formatDmmError(res.status, data),
+									error: formatDmmError(res.status, data, msg.locale),
 								});
 								return;
 							}
 							sendResponse({ ok: true });
-						} catch (error) {
+						} catch {
+							// 网络层失败不展示浏览器英文消息（如 Failed to fetch）
 							sendResponse({
 								ok: false,
-								error: `DMM 接口错误：${
-									error instanceof Error ? error.message : String(error)
-								}`,
+								error: `${m.dmmError}：${m.networkError}`,
 							});
 						}
 					})();

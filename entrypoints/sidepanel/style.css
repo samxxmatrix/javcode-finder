@@ -821,6 +821,44 @@ button:focus-visible {
 	color: var(--text-primary);
 }
 
+/* 分段按钮：备用翻译服务二选一，选中项金色实底 */
+.settings-field__segment {
+	display: flex;
+	width: fit-content;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.settings-field__segment-btn {
+	padding: 5px 14px;
+	background-color: var(--bg-surface);
+	border: none;
+	color: var(--text-muted);
+	font-size: 12.5px;
+	cursor: pointer;
+	transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-field__segment-btn + .settings-field__segment-btn {
+	border-left: 1px solid var(--border-strong);
+}
+
+.settings-field__segment-btn:hover {
+	background-color: var(--bg-surface-hover);
+}
+
+.settings-field__segment-btn[aria-pressed="true"] {
+	background-color: var(--accent-gold);
+	color: var(--bg-surface);
+	font-weight: 600;
+}
+
+.settings-field__segment-btn:focus-visible {
+	outline: 2px solid var(--accent-gold);
+	outline-offset: -2px;
+}
+
 .settings-field__preview {
 	display: flex;
 	align-items: baseline;
@@ -1177,10 +1215,10 @@ button:focus-visible {
 	color: var(--text-muted);
 }
 
-/* 翻译错误信息行：详细错误（状态码+原因），可关闭 */
+/* 翻译错误信息区：每行一条错误（Worker + 备用服务），右上角单个关闭按钮 */
 .trailer-preview__translate-error {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: space-between;
 	gap: 8px;
 	margin-top: 8px;
@@ -1191,6 +1229,14 @@ button:focus-visible {
 	color: var(--accent-red);
 	line-height: 1.4;
 	background-color: var(--bg-surface);
+}
+
+.trailer-preview__translate-error-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+	flex: 1;
 }
 
 .trailer-preview__translate-error-text {

@@ -24,7 +24,7 @@ import {
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
 import { classifyWebdavVerify, type WebdavVerifyResult } from "../../../src/lib/favorites";
-import { formatUsage } from "../../../src/lib/translate";
+import { formatUsage, type FallbackService } from "../../../src/lib/translate";
 
 interface SettingsViewProps {
 	locale: SupportedLocale;
@@ -79,9 +79,12 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [customName, setCustomName] = useState("");
 	const [customTemplate, setCustomTemplate] = useState("");
 	const [deeplApiKey, setDeeplApiKey] = useState("");
-	// 自建 Worker 翻译：地址与开关（默认关闭 = 纯谷歌模式）
+	// 自建 Worker 翻译：地址与开关（默认关闭 = 纯备用服务模式）
 	const [translateUrl, setTranslateUrl] = useState("");
 	const [translateEnabled, setTranslateEnabled] = useState(false);
+	// 备用翻译服务：Worker 失败/未配置时兜底（默认谷歌）
+	const [fallbackService, setFallbackService] =
+		useState<FallbackService>("google");
 	// Worker 用量：数据与基数均由接口返回；null = 未获取（显示 --/--万）
 	const [translateUsage, setTranslateUsage] = useState<{
 		count: number | null;
@@ -150,7 +153,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		const url = translateUrl.trim();
 		const key = deeplApiKey.trim();
 		if (!url || !key) {
-			setTranslateVerifyError("翻译 API 地址和 Key 均需填写");
+			setTranslateVerifyError(t.translateApiIncomplete);
 			setTranslateEnabled(false);
 			return;
 		}
@@ -159,10 +162,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				type: "jt:health",
 				deeplKey: key,
 				translateUrl: url,
+				locale,
 			})) as { ok?: boolean; error?: string } | undefined;
 			if (!health?.ok) {
 				setTranslateVerifyError(
-					`接口验证失败：${health?.error || "未知错误"}`,
+					`${t.verifyFailed}：${health?.error || t.unknownError}`,
 				);
 				setTranslateEnabled(false);
 				return;
@@ -170,7 +174,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			await refreshTranslateUsage(url, key);
 			setTranslateEnabled(true);
 		} catch {
-			setTranslateVerifyError("接口验证失败：网络错误");
+			setTranslateVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setTranslateEnabled(false);
 		}
 	};
@@ -194,15 +198,18 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				type: "jt:dmm-health",
 				dmmApiUrl: url,
 				dmmApiKey: key,
+				locale,
 			})) as { ok?: boolean; error?: string } | undefined;
 			if (!health?.ok) {
-				setDmmVerifyError(`接口验证失败：${health?.error || "未知错误"}`);
+				setDmmVerifyError(
+					`${t.verifyFailed}：${health?.error || t.unknownError}`,
+				);
 				setDmmEnabled(false);
 				return;
 			}
 			setDmmEnabled(true);
 		} catch {
-			setDmmVerifyError("接口验证失败：网络错误");
+			setDmmVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setDmmEnabled(false);
 		}
 	};
@@ -219,6 +226,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setDeeplApiKey(current.deeplApiKey);
 		setTranslateUrl(current.translateApiUrl);
 		setTranslateEnabled(current.translateEnabled);
+		setFallbackService(current.fallbackService);
 		setWebdavUrl(current.webdavUrl);
 		setWebdavUser(current.webdavUser);
 		setWebdavPass(current.webdavPass);
@@ -351,6 +359,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			deeplApiKey,
 			translateApiUrl: translateUrl,
 			translateEnabled,
+			fallbackService,
 			webdavUrl,
 			webdavUser,
 			webdavPass,
@@ -601,7 +610,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						<label className="settings-field__label" htmlFor="translate-url">
 							{t.translateUrlLabel}
 						</label>
-						{/* 苹果开关：打开时验证接口可用性并获取用量；关闭时直接使用谷歌翻译 */}
+						{/* 苹果开关：打开时验证接口可用性并获取用量；关闭时直接使用备用翻译服务 */}
 						<label
 							className="settings-field__switch"
 							title={t.translateEnableLabel}
@@ -662,6 +671,35 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							onClick={() => setDeeplApiKey("")}
 							title={t.clearInput}
 						/>
+					</div>
+				</div>
+
+				<div className="settings-field">
+					<div className="settings-field__header-row">
+						<span className="settings-field__label">{t.fallbackServiceLabel}</span>
+						{/* 分段按钮：Worker 失败/未配置时的兜底服务（谷歌默认） */}
+						<div
+							className="settings-field__segment"
+							role="group"
+							aria-label={t.fallbackServiceLabel}
+						>
+							<button
+								type="button"
+								className="settings-field__segment-btn"
+								aria-pressed={fallbackService === "google"}
+								onClick={() => setFallbackService("google")}
+							>
+								{t.fallbackGoogle}
+							</button>
+							<button
+								type="button"
+								className="settings-field__segment-btn"
+								aria-pressed={fallbackService === "bing"}
+								onClick={() => setFallbackService("bing")}
+							>
+								{t.fallbackBing}
+							</button>
+						</div>
 					</div>
 				</div>
 

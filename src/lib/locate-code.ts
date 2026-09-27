@@ -60,6 +60,20 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 			return true;
 		};
 
+		// Clean up any existing locate badges BEFORE scanning: 旧 badge 内的番号文本
+		// 会被 TreeWalker 扫到并创建失效 Range（清理时 normalize 合并文本节点），
+		// 导致 surroundContents 位置错乱（mark 移到番号后/黄底消失）
+		document.querySelectorAll(".javcode-locate-badge").forEach((el) => {
+			const parent = el.parentNode;
+			if (parent) {
+				while (el.firstChild) {
+					parent.insertBefore(el.firstChild, el);
+				}
+				parent.removeChild(el);
+				parent.normalize();
+			}
+		});
+
 		const walker = document.createTreeWalker(
 			document.body,
 			NodeFilter.SHOW_TEXT,
@@ -139,18 +153,6 @@ export function locateCodeInTab(targetCode: string): LocateResult {
 		if (!currentMatch) {
 			return { found: false };
 		}
-
-		// Clean up any existing locate badges
-		document.querySelectorAll(".javcode-locate-badge").forEach((el) => {
-			const parent = el.parentNode;
-			if (parent) {
-				while (el.firstChild) {
-					parent.insertBefore(el.firstChild, el);
-				}
-				parent.removeChild(el);
-				parent.normalize();
-			}
-		});
 
 		// Ensure pulse keyframe style is present
 		if (!document.getElementById("javcode-locate-style")) {

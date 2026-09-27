@@ -1,4 +1,5 @@
 import { detectLocale } from "./locales";
+import type { FallbackService } from "./translate";
 import type { SupportedLocale } from "./types";
 
 // String.raw 保持反斜杠字面：正则所见即所得（普通字符串中 \b 是退格符、\d 会丢反斜杠）
@@ -26,8 +27,10 @@ export interface ExtensionSettings {
 	deeplApiKey: string;
 	// Worker 地址（空 = 未配置，直接用谷歌翻译）
 	translateApiUrl: string;
-	// 启用开关：关闭时跳过 Worker，直接用谷歌翻译
+	// 启用开关：关闭时跳过 Worker，直接走备用翻译服务
 	translateEnabled: boolean;
+	// 备用翻译服务：Worker 失败/未配置时兜底（谷歌或微软 Edge 内置接口）
+	fallbackService: FallbackService;
 	// WebDAV 云端配置（三项全空 = 未配置云端）
 	webdavUrl: string;
 	webdavUser: string;
@@ -64,6 +67,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	deeplApiKey: "",
 	translateApiUrl: "",
 	translateEnabled: false,
+	fallbackService: "google",
 	webdavUrl: "",
 	webdavUser: "",
 	webdavPass: "",
@@ -210,6 +214,8 @@ export function getSettings(): ExtensionSettings {
 				typeof parsed.translateEnabled === "boolean"
 					? parsed.translateEnabled
 					: DEFAULT_SETTINGS.translateEnabled,
+			fallbackService:
+				parsed.fallbackService === "bing" ? "bing" : "google",
 			webdavUrl:
 				typeof parsed.webdavUrl === "string" ? parsed.webdavUrl.trim() : "",
 			webdavUser:
@@ -304,6 +310,8 @@ export function saveSettings(
 				settings.translateEnabled !== undefined
 					? settings.translateEnabled
 					: current.translateEnabled,
+			fallbackService:
+				settings.fallbackService === "bing" ? "bing" : "google",
 			// 云端三项传入空字符串表示"关闭云端同步"，与未传字段区分处理
 			webdavUrl:
 				settings.webdavUrl !== undefined

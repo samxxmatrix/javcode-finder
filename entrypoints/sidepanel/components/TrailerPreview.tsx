@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
 import {
-	buildGoogleUrl,
+	buildGoogleVerifyUrl,
 	buildMergedTranslateText,
 	splitMergedTranslation,
 } from "../../../src/lib/translate";
@@ -62,8 +62,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [retrying, setRetrying] = useState(false);
 	// 谷歌限流需要人工验证（打开验证页完成 reCAPTCHA 后自动重试）
 	const [needsVerify, setNeedsVerify] = useState(false);
-	// 翻译错误信息行（详细：状态码+原因）；google-verify 走验证流程不显示
-	const [translateError, setTranslateError] = useState<string | null>(null);
+	// 翻译错误信息区：每行一条（Worker 失败原因 + 备用服务失败原因）；google-verify 不占用错误行
+	const [translateErrors, setTranslateErrors] = useState<string[] | null>(null);
 	// 验证弹窗的窗口 id（关闭时触发自动重试）
 	const verifyWinIdRef = useRef<number | null>(null);
 
@@ -81,6 +81,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			deeplKey: s.deeplApiKey,
 			translateUrl: s.translateApiUrl,
 			translateEnabled: s.translateEnabled,
+			fallbackService: s.fallbackService,
 		})) as
 			| { translated?: string; error?: string; workerError?: string }
 			| undefined;
@@ -91,7 +92,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	};
 
-	// 翻译结果应用到状态：拼装翻译时按花括号标记拆分短/长标题译文；
+	// 翻译结果应用到状态：拼装翻译时按 <code> 保护标记（翻译后还原为花括号）拆分短/长标题译文；
 	// javtrailers 源无拼装（卡片标题即短标题），译文放短标题行
 	const applyTranslation = (result: {
 		translated: string;
@@ -110,14 +111,18 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				setTranslatedShort(result.translated);
 				setTranslatedLong(null);
 			}
-			setTranslateError(result.workerError || null);
+			// 兜底成功时也显示 Worker 失败原因（提示主翻译服务异常）
+			setTranslateErrors(result.workerError ? [result.workerError] : null);
 			return true;
 		}
 		if (result.error === "google-verify") {
 			setNeedsVerify(true);
-			setTranslateError(result.workerError || null);
+			setTranslateErrors(result.workerError ? [result.workerError] : null);
 		} else {
-			setTranslateError(result.workerError || result.error || null);
+			const errors = [result.workerError, result.error].filter(
+				(x): x is string => Boolean(x),
+			);
+			setTranslateErrors(errors.length ? errors : null);
 		}
 		return false;
 	};
@@ -203,7 +208,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	}, [coverUrl]);
 
 	// 中文/繁中界面下翻译标题；英文界面不翻译。失败保持 null（回退原文）
-	// 短标题与长标题拼装一次发送（短标题花括号包裹标记），返回后按标记拆分还原
+	// 短标题与长标题拼装一次发送（短标题 <code> 标签保护标记），返回后还原拆分
 	useEffect(() => {
 		// 闭包内 property narrowing 不保留，取局部常量
 		const title = resolution.title;
@@ -260,7 +265,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const openVerifyWindow = async (text: string) => {
 		try {
 			const win = await browser.windows.create({
-				url: buildGoogleUrl(text, locale === "zh-hant" ? "zh-TW" : "zh-CN"),
+				url: buildGoogleVerifyUrl(
+					text,
+					locale === "zh-hant" ? "zh-TW" : "zh-CN",
+				),
 				type: "popup",
 				width: 420,
 				height: 640,
@@ -408,7 +416,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setTranslatedShort(null);
 		setTranslatedLong(null);
 		setTitleReady(false);
-		setTranslateError(null);
+		setTranslateErrors(null);
 		setResolution({
 			source: null,
 			contentId: null,
@@ -614,16 +622,23 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						</div>
 					)}
-					{/* 翻译错误信息行（详细：状态码+原因），可关闭；验证流程不显示 */}
-					{translateError && (
+					{/* 翻译错误信息区（每行一条：Worker 失败原因 + 备用服务失败原因），右上角单个关闭按钮 */}
+					{translateErrors && translateErrors.length > 0 && (
 						<div className="trailer-preview__translate-error" role="alert">
-							<span className="trailer-preview__translate-error-text">
-								{translateError}
-							</span>
+							<div className="trailer-preview__translate-error-list">
+								{translateErrors.map((message, index) => (
+									<span
+										key={`${index}-${message}`}
+										className="trailer-preview__translate-error-text"
+									>
+										{message}
+									</span>
+								))}
+							</div>
 							<button
 								type="button"
 								className="trailer-preview__translate-error-close"
-								onClick={() => setTranslateError(null)}
+								onClick={() => setTranslateErrors(null)}
 								title={t.closeError}
 								aria-label={t.closeError}
 							>

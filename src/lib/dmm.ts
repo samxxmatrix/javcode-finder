@@ -1,3 +1,6 @@
+import { messages } from "./locales";
+import type { SupportedLocale } from "./types";
+
 export interface DmmLookupData {
 	cid: string;
 	channel: string;
@@ -58,8 +61,14 @@ export function parseDmmLookupResponse(data: unknown): DmmLookupData | null {
 
 /**
  * 格式化 DMM 接口错误（设置区错误行展示）；status 0 = 网络层错误。
+ * 前缀与兜底短语按界面语言；服务端 message 按原样显示。
  */
-export function formatDmmError(status: number, data: unknown): string {
+export function formatDmmError(
+	status: number,
+	data: unknown,
+	locale: SupportedLocale = "zh-hans",
+): string {
+	const m = messages[locale];
 	const parsed = (data ?? {}) as { code?: number; message?: string };
 	const code = typeof parsed.code === "number" ? ` [${parsed.code}]` : "";
 	let message: string;
@@ -68,7 +77,7 @@ export function formatDmmError(status: number, data: unknown): string {
 	} else if (status) {
 		message = `HTTP ${status}`;
 	} else {
-		message = "网络错误";
+		message = m.networkError;
 	}
-	return `DMM 接口错误${code}：${message}`;
+	return `${m.dmmError}${code}：${message}`;
 }

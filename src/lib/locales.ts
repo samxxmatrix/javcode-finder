@@ -53,6 +53,15 @@ export interface LocaleMessages {
 	googleVerifyHint: string;
 	openVerifyPage: string;
 	deeplApiKeyLabel: string;
+	fallbackServiceLabel: string;
+	fallbackGoogle: string;
+	fallbackBing: string;
+	translateApiIncomplete: string;
+	verifyFailed: string;
+	unknownError: string;
+	networkError: string;
+	abnormalResponse: string;
+	dmmError: string;
 	addFavorite: string;
 	removeFavorite: string;
 	cloudSyncLabel: string;
@@ -129,6 +138,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     googleVerifyHint: "谷歌翻译需要人工验证",
     openVerifyPage: "打开验证页面",
     deeplApiKeyLabel: "翻译 API Key",
+    fallbackServiceLabel: "备用翻译服务",
+    fallbackGoogle: "谷歌翻译",
+    fallbackBing: "微软翻译",
+    translateApiIncomplete: "翻译 API 地址和 Key 均需填写",
+    verifyFailed: "接口验证失败",
+    unknownError: "未知错误",
+    networkError: "网络错误",
+    abnormalResponse: "接口响应异常",
+    dmmError: "DMM 接口错误",
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "云盘同步（WebDAV）",
@@ -205,6 +223,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     googleVerifyHint: "谷歌翻譯需要人工驗證",
     openVerifyPage: "開啟驗證頁面",
     deeplApiKeyLabel: "翻譯 API Key",
+    fallbackServiceLabel: "備用翻譯服務",
+    fallbackGoogle: "谷歌翻譯",
+    fallbackBing: "微軟翻譯",
+    translateApiIncomplete: "翻譯 API 地址和 Key 均需填寫",
+    verifyFailed: "介面驗證失敗",
+    unknownError: "未知錯誤",
+    networkError: "網路錯誤",
+    abnormalResponse: "介面回應異常",
+    dmmError: "DMM 介面錯誤",
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "雲端同步（WebDAV）",
@@ -283,6 +310,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     googleVerifyHint: "Google Translate needs human verification",
     openVerifyPage: "Open verification page",
     deeplApiKeyLabel: "翻译 API Key",
+    fallbackServiceLabel: "Fallback translation service",
+    fallbackGoogle: "Google Translate",
+    fallbackBing: "Microsoft Translate",
+    translateApiIncomplete: "Translation API URL and Key are both required",
+    verifyFailed: "Interface verification failed",
+    unknownError: "Unknown error",
+    networkError: "Network error",
+    abnormalResponse: "Unexpected interface response",
+    dmmError: "DMM API error",
     addFavorite: "Add to favorites",
     removeFavorite: "Remove from favorites",
     cloudSyncLabel: "Cloud Sync (WebDAV)",
