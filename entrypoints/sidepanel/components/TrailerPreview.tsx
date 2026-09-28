@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
-import { destroyHlsInstance } from "../../../src/lib/hls-instance";
+import {
+	destroyHlsBefore,
+	destroyHlsInstance,
+} from "../../../src/lib/hls-instance";
 import {
 	getPreviewPresentation,
 	transitionPreviewNotice,
@@ -341,9 +344,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 
 	// HLS 404 后的兜底（仅 javtrailers 源）：用详情页的 sample MP4 直连播放
 	const playFallbackTrailer = async (requestId: number) => {
-		const fb = await requestFallback(media?.contentId ?? null, resolutionRequestRef.current);
+		const fb = await destroyHlsBefore(hlsRef, () =>
+			requestFallback(
+				media?.contentId ?? null,
+				resolutionRequestRef.current,
+			),
+		);
 		if (requestId !== playbackRequestRef.current) return;
-		destroyHlsInstance(hlsRef);
 		const video = videoRef.current;
 		if (!fb.trailerUrl || !video) {
 			setStatus("failed");
