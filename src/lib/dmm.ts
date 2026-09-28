@@ -1,5 +1,5 @@
 import { messages } from "./locales";
-import type { SupportedLocale } from "./types";
+import type { PreviewLookupErrorKind, SupportedLocale } from "./types";
 
 export interface DmmLookupData {
 	cid: string;
@@ -9,6 +9,14 @@ export interface DmmLookupData {
 	coverUrl: string | null;
 	previewUrl: string | null;
 	detailUrl: string;
+}
+
+export interface DmmLookupErrorData {
+	kind: PreviewLookupErrorKind;
+	status: number;
+	code?: number | string;
+	error?: string;
+	message?: string;
 }
 
 /**
@@ -56,6 +64,49 @@ export function parseDmmLookupResponse(data: unknown): DmmLookupData | null {
 			typeof d.preview_url === "string" && d.preview_url ? d.preview_url : null,
 		detailUrl:
 			typeof d.detail_url === "string" && d.detail_url ? d.detail_url : "",
+	};
+}
+
+/**
+ * Extracts a safe, structured error from a failed DMM lookup response.
+ * DMM documents HTTP 404 and ITEM_NOT_FOUND as a missing lookup result.
+ */
+export function parseDmmLookupError(
+	status: number,
+	data: unknown,
+): DmmLookupErrorData {
+	const parsed = (data ?? {}) as {
+		code?: unknown;
+		error?: unknown;
+		message?: unknown;
+	};
+	const code =
+		typeof parsed.code === "number" || typeof parsed.code === "string"
+			? parsed.code
+			: undefined;
+	const error =
+		typeof parsed.error === "string" ? parsed.error : undefined;
+	const message =
+		typeof parsed.message === "string" ? parsed.message : undefined;
+	const notFound =
+		status === 404 ||
+		code === 40401 ||
+		code === "40401" ||
+		error === "ITEM_NOT_FOUND";
+
+	return {
+		kind:
+			status === 0
+				? "network"
+				: notFound
+					? "not_found"
+					: status >= 200 && status < 300
+						? "api"
+						: "http",
+		status,
+		...(code !== undefined ? { code } : {}),
+		...(error !== undefined ? { error } : {}),
+		...(message !== undefined ? { message } : {}),
 	};
 }
 

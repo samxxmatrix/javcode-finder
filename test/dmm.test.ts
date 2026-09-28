@@ -3,6 +3,7 @@ import {
 	buildDmmHealthUrl,
 	buildDmmLookupUrl,
 	formatDmmError,
+	parseDmmLookupError,
 	parseDmmLookupResponse,
 } from "../src/lib/dmm";
 
@@ -103,5 +104,76 @@ describe("formatDmmError", () => {
 
 	it("handles status 0 (network error) without HTTP prefix", () => {
 		expect(formatDmmError(0, null)).toBe("DMM 接口错误：网络错误");
+	});
+});
+
+describe("parseDmmLookupError", () => {
+	it("preserves the documented 401 API error fields", () => {
+		expect(
+			parseDmmLookupError(401, {
+				code: 40101,
+				error: "MISSING_API_KEY",
+				message: "API Key is missing.",
+			}),
+		).toEqual({
+			kind: "http",
+			status: 401,
+			code: 40101,
+			error: "MISSING_API_KEY",
+			message: "API Key is missing.",
+		});
+	});
+
+	it("classifies documented 404 responses as no-match", () => {
+		expect(
+			parseDmmLookupError(404, {
+				code: 40401,
+				error: "ITEM_NOT_FOUND",
+				message: "Item not found.",
+			}),
+		).toEqual({
+			kind: "not_found",
+			status: 404,
+			code: 40401,
+			error: "ITEM_NOT_FOUND",
+			message: "Item not found.",
+		});
+		expect(
+			parseDmmLookupError(200, {
+				code: 40401,
+				error: "ITEM_NOT_FOUND",
+				message: "Item not found.",
+			}).kind,
+		).toBe("not_found");
+	});
+
+	it("preserves the documented 500 API error fields", () => {
+		expect(
+			parseDmmLookupError(500, {
+				code: 50001,
+				error: "INTERNAL_ERROR",
+				message: "Internal server error.",
+			}),
+		).toEqual({
+			kind: "http",
+			status: 500,
+			code: 50001,
+			error: "INTERNAL_ERROR",
+			message: "Internal server error.",
+		});
+	});
+
+	it("retains the HTTP status when the error body is not JSON", () => {
+		expect(parseDmmLookupError(502, null)).toEqual({
+			kind: "http",
+			status: 502,
+		});
+	});
+
+	it("classifies status 0 as a network error", () => {
+		expect(parseDmmLookupError(0, null)).toEqual({
+			kind: "network",
+			status: 0,
+		});
 	});
 });

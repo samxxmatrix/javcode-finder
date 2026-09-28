@@ -8,9 +8,12 @@ import {
 	buildDmmHealthUrl,
 	buildDmmLookupUrl,
 	formatDmmError,
+	parseDmmLookupError,
 	parseDmmLookupResponse,
 	type DmmLookupData,
 } from "../src/lib/dmm";
+import { resolvePreview } from "../src/lib/resolve-preview";
+import type { PreviewLookupError, PreviewMedia } from "../src/lib/types";
 import {
 	buildBasicAuth,
 	joinWebdavUrl,
@@ -265,7 +268,7 @@ export default defineBackground(() => {
 					const key = (msg.deeplKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					// 健康检查在设置页发起，界面语言可为英文：文案走三语言 messages
-					const m = messages[msg.locale] ?? messages["zh-hans"];
+					const m = messages[msg.locale ?? "zh-hans"];
 					void (async () => {
 						if (!baseUrl || !key) {
 							sendResponse({ ok: false, error: m.translateApiIncomplete });
@@ -417,7 +420,7 @@ export default defineBackground(() => {
 				if (msg?.type === "jt:dmm-health") {
 					const key = (msg.dmmApiKey || "").trim();
 					const baseUrl = (msg.dmmApiUrl || "").trim();
-					const m = messages[msg.locale] ?? messages["zh-hans"];
+					const m = messages[msg.locale ?? "zh-hans"];
 					void (async () => {
 						if (!baseUrl || !key) {
 							sendResponse({
@@ -457,26 +460,56 @@ export default defineBackground(() => {
 					return true;
 				}
 
-				// DMM 查询（内部共用）：成功返回数据；404（未找到）返回 null；其他错误抛错
+				// DMM 查询（内部共用）：返回结构化错误以便预览保留接口详情。
 				const lookupDmm = async (
 					baseUrl: string,
 					key: string,
 					code: string,
 				): Promise<DmmLookupData | null> => {
-					const res = await fetch(buildDmmLookupUrl(baseUrl, key, code), {
-						signal: AbortSignal.timeout(5000),
-					});
-					if (res.status === 404) return null;
+					let res: Response;
+					try {
+						res = await fetch(buildDmmLookupUrl(baseUrl, key, code), {
+							signal: AbortSignal.timeout(5000),
+						});
+					} catch (error) {
+						const kind =
+							error instanceof Error && error.name === "TimeoutError"
+								? "timeout"
+								: "network";
+						throw {
+							source: "dmm",
+							kind,
+							status: 0,
+						} satisfies PreviewLookupError;
+					}
+
 					if (!res.ok) {
 						let data: unknown = null;
 						try {
 							data = await res.json();
 						} catch {
-							// 响应体不是 JSON 时仅用状态码
+							// Keep HTTP status even when the response body is malformed.
 						}
-						throw new Error(formatDmmError(res.status, data));
+						throw {
+							source: "dmm",
+							...parseDmmLookupError(res.status, data),
+						} satisfies PreviewLookupError;
 					}
-					return parseDmmLookupResponse(await res.json());
+					const data: unknown = await res.json();
+					const parsed = parseDmmLookupResponse(data);
+					if (parsed) return parsed;
+
+					if (
+						typeof data === "object" &&
+						data !== null &&
+						("error" in data || "message" in data)
+					) {
+						const apiError = parseDmmLookupError(res.status, data);
+						if (apiError.kind !== "not_found") {
+							throw { source: "dmm", ...apiError } satisfies PreviewLookupError;
+						}
+					}
+					return null;
 				};
 
 				// 详情页兜底：主媒体服务 404 时，从详情页提取 mgstage 封面与 sample MP4
@@ -509,74 +542,76 @@ export default defineBackground(() => {
 				const code = msg.code;
 
 				void (async () => {
-					// 一级：DMM API（开关开启且地址/Key 齐全时优先；未找到/异常静默回退 javtrailers）
 					const dmmBase = (msg.dmmApiUrl || "").trim();
 					const dmmKey = (msg.dmmApiKey || "").trim();
-					if (msg.dmmEnabled === true && dmmBase && dmmKey) {
-						try {
+					const resolution = await resolvePreview({
+						dmmEnabled:
+							msg.dmmEnabled === true && Boolean(dmmBase && dmmKey),
+						dmmLookup: async () => {
 							const dmm = await lookupDmm(dmmBase, dmmKey, code);
-							if (dmm) {
-								sendResponse({
-									source: "dmm",
-									detailUrl: dmm.detailUrl,
-									contentId: dmm.cid,
-									title: dmm.title,
-									shortTitle: dmm.shortTitle,
-									coverUrl: dmm.coverUrl,
-									previewUrl: dmm.previewUrl,
-									previewType: "mp4",
-								});
-								return;
+							if (!dmm) return null;
+							return {
+								source: "dmm",
+								detailUrl: dmm.detailUrl,
+								contentId: dmm.cid,
+								title: dmm.title,
+								shortTitle: dmm.shortTitle,
+								coverUrl: dmm.coverUrl,
+								previewUrl: dmm.previewUrl,
+								previewType: "mp4",
+							} satisfies PreviewMedia;
+						},
+						javtrailersLookup: async () => {
+							let res: Response;
+							try {
+								res = await fetch(
+									`https://javtrailers.com/search/${encodeURIComponent(code)}`,
+									{ signal: AbortSignal.timeout(5000) },
+								);
+							} catch (error) {
+								throw {
+									source: "javtrailers",
+									kind:
+										error instanceof Error &&
+										error.name === "TimeoutError"
+											? "timeout"
+											: "network",
+								} satisfies PreviewLookupError;
 							}
-						} catch {
-							// DMM 失败：静默回退 javtrailers（错误不在预览区提示）
-						}
-					}
-
-					// 二级：javtrailers 搜索页解析（原逻辑）
-					try {
-						const res = await fetch(
-							`https://javtrailers.com/search/${encodeURIComponent(code)}`,
-							{ signal: AbortSignal.timeout(5000) },
-						);
-						if (!res.ok) {
-							sendResponse({
-								source: null,
-								detailUrl: null,
-								contentId: null,
-								title: null,
-								debug: `HTTP ${res.status}`,
-							});
-							return;
-						}
-						const html = await res.text();
-						const resolution = parseSearchPageHtml(html, code);
-						sendResponse({
-							source: resolution ? "javtrailers" : null,
-							detailUrl: resolution?.detailUrl ?? null,
-							contentId: resolution?.contentId ?? null,
-							title: resolution?.title ?? null,
-							shortTitle: null,
-							coverUrl: resolution?.contentId
-								? buildCoverUrlFromContentId(resolution.contentId)
-								: null,
-							previewUrl: resolution?.contentId
-								? buildTrailerUrlFromContentId(resolution.contentId)
-								: null,
-							previewType: resolution ? "hls" : null,
-							debug: resolution
-								? undefined
-								: `no-match(len=${html.length})`,
-						});
-					} catch (error) {
-						sendResponse({
-							source: null,
-							detailUrl: null,
-							contentId: null,
-							title: null,
-							debug: `fetch-error:${error instanceof Error ? error.message : String(error)}`,
-						});
-					}
+							if (!res.ok) {
+								throw {
+									source: "javtrailers",
+									kind: "http",
+									status: res.status,
+								} satisfies PreviewLookupError;
+							}
+							const html = await res.text();
+							const match = parseSearchPageHtml(html, code);
+							if (!match) return null;
+							return {
+								source: "javtrailers",
+								detailUrl: match.detailUrl,
+								contentId: match.contentId,
+								title: match.title,
+								shortTitle: null,
+								coverUrl: buildCoverUrlFromContentId(match.contentId),
+								previewUrl: buildTrailerUrlFromContentId(match.contentId),
+								previewType: "hls",
+							} satisfies PreviewMedia;
+						},
+					});
+					sendResponse({
+						...resolution,
+						...resolution.media,
+						source: resolution.media?.source ?? null,
+						detailUrl: resolution.media?.detailUrl ?? null,
+						contentId: resolution.media?.contentId ?? null,
+						title: resolution.media?.title ?? null,
+						shortTitle: resolution.media?.shortTitle ?? null,
+						coverUrl: resolution.media?.coverUrl ?? null,
+						previewUrl: resolution.media?.previewUrl ?? null,
+						previewType: resolution.media?.previewType ?? null,
+					});
 				})();
 
 				return true; // 保持消息通道直到 sendResponse 被调用
