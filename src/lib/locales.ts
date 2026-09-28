@@ -69,6 +69,7 @@ export interface LocaleMessages {
 	verifyFailed: string;
 	unknownError: string;
 	networkError: string;
+	timeoutError: string;
 	abnormalResponse: string;
 	dmmError: string;
 	addFavorite: string;
@@ -163,6 +164,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     verifyFailed: "接口验证失败",
     unknownError: "未知错误",
     networkError: "网络错误",
+    timeoutError: "请求超时",
     abnormalResponse: "接口响应异常",
     dmmError: "DMM 接口错误",
     addFavorite: "加入收藏",
@@ -257,6 +259,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     verifyFailed: "介面驗證失敗",
     unknownError: "未知錯誤",
     networkError: "網路錯誤",
+    timeoutError: "請求逾時",
     abnormalResponse: "介面回應異常",
     dmmError: "DMM 介面錯誤",
     addFavorite: "加入收藏",
@@ -353,6 +356,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     verifyFailed: "Interface verification failed",
     unknownError: "Unknown error",
     networkError: "Network error",
+    timeoutError: "Request timed out",
     abnormalResponse: "Unexpected interface response",
     dmmError: "DMM API error",
     addFavorite: "Add to favorites",

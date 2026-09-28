@@ -69,7 +69,8 @@ export function getPreviewPresentation(
 		notices.push({
 			key: "lookup_error",
 			errors: resolution.errors,
-			dismissible: false,
+			dismissible: true,
+			actions: [{ type: "dismiss" }],
 		});
 	}
 
@@ -81,7 +82,8 @@ export function getPreviewPresentation(
 		notices.push({
 			key: "used_fallback",
 			errors: [],
-			dismissible: false,
+			dismissible: true,
+			actions: [{ type: "dismiss" }],
 		});
 	}
 

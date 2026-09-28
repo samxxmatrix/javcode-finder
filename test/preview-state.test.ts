@@ -67,10 +67,43 @@ describe("getPreviewPresentation", () => {
 			{
 				key: "lookup_error",
 				errors: [dmmError],
-				dismissible: false,
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
 			},
 		]);
 		expect(result.retryAction).toEqual({ type: "lookup" });
+	});
+
+	it("allows lookup errors and fallback details to be dismissed", () => {
+		const result = getPreviewPresentation(
+			input(
+				{ status: "resolved", media, errors: [dmmError] },
+				{ hasCover: true, hasTrailer: true },
+			),
+		);
+
+		expect(result.notices).toEqual([
+			{
+				key: "lookup_error",
+				errors: [dmmError],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
+			{
+				key: "used_fallback",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
+		]);
+		expect(
+			getPreviewPresentation(
+				input(
+					{ status: "resolved", media, errors: [dmmError] },
+					{ hasCover: true, hasTrailer: true, noticeDismissed: true },
+				),
+			).notices,
+		).toEqual([]);
 	});
 
 	it("keeps a resolved cover when no trailer address is available", () => {
@@ -133,7 +166,8 @@ describe("getPreviewPresentation", () => {
 			{
 				key: "lookup_error",
 				errors: [lookupError],
-				dismissible: false,
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
 			},
 		]);
 		expect(result.retryAction).toEqual({ type: "lookup" });
@@ -167,8 +201,18 @@ describe("getPreviewPresentation", () => {
 		expect(result.mediaMessage).toBeNull();
 		expect(result.showPlayButton).toBe(false);
 		expect(result.notices).toEqual([
-			{ key: "lookup_error", errors: [dmmError], dismissible: false },
-			{ key: "used_fallback", errors: [], dismissible: false },
+			{
+				key: "lookup_error",
+				errors: [dmmError],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
+			{
+				key: "used_fallback",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
 			{
 				key: "no_trailer",
 				errors: [],
@@ -189,7 +233,12 @@ describe("getPreviewPresentation", () => {
 
 		expect(result.mediaMessage).toBe("playback_failed");
 		expect(result.notices).toEqual([
-			{ key: "lookup_error", errors: [dmmError], dismissible: false },
+			{
+				key: "lookup_error",
+				errors: [dmmError],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
 			{
 				key: "playback_error",
 				errors: [],
