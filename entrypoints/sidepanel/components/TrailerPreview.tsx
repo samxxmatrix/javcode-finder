@@ -361,6 +361,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const handlePlay = async () => {
 		const video = videoRef.current;
 		if (!video || status === "loading" || status === "playing") return;
+		setNoticeDismissed(false);
 		const requestId = ++playbackRequestRef.current;
 		videoPlaybackRequestRef.current = requestId;
 
