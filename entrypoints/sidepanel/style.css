@@ -720,11 +720,11 @@ button:focus-visible {
 	transition: transform 0.2s ease;
 }
 
-.settings-field__switch input:checked + .settings-field__switch-track {
+.settings-field__switch input:checked+.settings-field__switch-track {
 	background-color: var(--accent-gold);
 }
 
-.settings-field__switch input:checked + .settings-field__switch-track::before {
+.settings-field__switch input:checked+.settings-field__switch-track::before {
 	transform: translateX(14px);
 }
 
@@ -840,7 +840,7 @@ button:focus-visible {
 	transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.settings-field__segment-btn + .settings-field__segment-btn {
+.settings-field__segment-btn+.settings-field__segment-btn {
 	border-left: 1px solid var(--border-strong);
 }
 
@@ -1018,6 +1018,66 @@ button:focus-visible {
 
 .trailer-preview__media-message .spinner {
 	margin-bottom: 0;
+}
+
+.trailer-preview__primary-retry {
+	padding: 4px 8px;
+	border: 1px solid var(--border-subtle);
+	border-radius: 4px;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.trailer-preview__primary-retry:hover {
+	background: var(--bg-surface-hover);
+}
+
+.trailer-preview__notice {
+	position: absolute;
+	z-index: 2;
+	right: 8px;
+	bottom: 0px;
+	left: 8px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 24px;
+	padding: 3px 6px;
+	border-radius: 4px;
+	background: var(--bg-surface);
+	color: var(--accent-red);
+	font-size: 11.5px;
+	line-height: 1.35;
+	opacity: 0.8;
+}
+
+.trailer-preview__notice-text {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.trailer-preview__notice-action {
+	flex-shrink: 0;
+	padding: 2px 4px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.trailer-preview__notice-close {
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	color: inherit;
 }
 
 /* 灰色透明播放按钮：半透明黑灰底 + 白色图标，悬浮时放大并变金色 */

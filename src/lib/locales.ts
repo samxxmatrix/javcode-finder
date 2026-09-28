@@ -48,6 +48,15 @@ export interface LocaleMessages {
 	playTrailer: string;
 	previewVolumeLabel: string;
 	previewUnavailable: string;
+	noNumberInformation: string;
+	noTrailer: string;
+	playbackFailed: string;
+	dmmSourceLabel: string;
+	javtrailersSourceLabel: string;
+	sourceErrorPrefix: string;
+	usedFallback: string;
+	lookupRetry: string;
+	playbackRetry: string;
 	closePreview: string;
 	retryTranslate: string;
 	googleVerifyHint: string;
@@ -60,6 +69,7 @@ export interface LocaleMessages {
 	verifyFailed: string;
 	unknownError: string;
 	networkError: string;
+	timeoutError: string;
 	abnormalResponse: string;
 	dmmError: string;
 	addFavorite: string;
@@ -133,6 +143,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     playTrailer: "播放预告片",
     previewVolumeLabel: "预览视频音量",
     previewUnavailable: "该番号暂无预告片",
+    noNumberInformation: "暂无此番号信息",
+    noTrailer: "暂无预告片",
+    playbackFailed: "预告片播放失败",
+    dmmSourceLabel: "DMM",
+    javtrailersSourceLabel: "JavTrailers",
+    sourceErrorPrefix: "来源错误：",
+    usedFallback: "已使用备用来源",
+    lookupRetry: "重新查询",
+    playbackRetry: "重新播放",
     closePreview: "关闭预览",
     retryTranslate: "重新翻译",
     googleVerifyHint: "谷歌翻译需要人工验证",
@@ -145,6 +164,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     verifyFailed: "接口验证失败",
     unknownError: "未知错误",
     networkError: "网络错误",
+    timeoutError: "请求超时",
     abnormalResponse: "接口响应异常",
     dmmError: "DMM 接口错误",
     addFavorite: "加入收藏",
@@ -218,6 +238,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     playTrailer: "播放預告片",
     previewVolumeLabel: "預覽影片音量",
     previewUnavailable: "未獲取到預告片",
+    noNumberInformation: "暫無此番號資訊",
+    noTrailer: "暫無預告片",
+    playbackFailed: "預告片播放失敗",
+    dmmSourceLabel: "DMM",
+    javtrailersSourceLabel: "JavTrailers",
+    sourceErrorPrefix: "來源錯誤：",
+    usedFallback: "已使用備用來源",
+    lookupRetry: "重新查詢",
+    playbackRetry: "重新播放",
     closePreview: "關閉預覽",
     retryTranslate: "重新翻譯",
     googleVerifyHint: "谷歌翻譯需要人工驗證",
@@ -230,6 +259,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     verifyFailed: "介面驗證失敗",
     unknownError: "未知錯誤",
     networkError: "網路錯誤",
+    timeoutError: "請求逾時",
     abnormalResponse: "介面回應異常",
     dmmError: "DMM 介面錯誤",
     addFavorite: "加入收藏",
@@ -305,6 +335,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     playTrailer: "Play Trailer",
     previewVolumeLabel: "Preview volume",
     previewUnavailable: "Trailer unavailable",
+    noNumberInformation: "No information is available for this code",
+    noTrailer: "No trailer available",
+    playbackFailed: "Trailer playback failed",
+    dmmSourceLabel: "DMM",
+    javtrailersSourceLabel: "JavTrailers",
+    sourceErrorPrefix: "Source error:",
+    usedFallback: "Using a fallback source",
+    lookupRetry: "Retry lookup",
+    playbackRetry: "Retry playback",
     closePreview: "Close preview",
     retryTranslate: "Retry translation",
     googleVerifyHint: "Google Translate needs human verification",
@@ -317,6 +356,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     verifyFailed: "Interface verification failed",
     unknownError: "Unknown error",
     networkError: "Network error",
+    timeoutError: "Request timed out",
     abnormalResponse: "Unexpected interface response",
     dmmError: "DMM API error",
     addFavorite: "Add to favorites",

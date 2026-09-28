@@ -1,5 +1,13 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
+import {
+	destroyHlsBefore,
+	destroyHlsInstance,
+} from "../../../src/lib/hls-instance";
+import {
+	getPreviewPresentation,
+	transitionPreviewNotice,
+} from "../../../src/lib/preview-state";
 import {
 	buildGoogleVerifyUrl,
 	buildMergedTranslateText,
@@ -7,7 +15,12 @@ import {
 } from "../../../src/lib/translate";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { getSettings } from "../../../src/lib/settings";
-import type { SupportedLocale } from "../../../src/lib/types";
+import type {
+	PreviewLookupError,
+	PreviewMedia,
+	PreviewResolution,
+	SupportedLocale,
+} from "../../../src/lib/types";
 import { FavoriteIcon } from "./FavoriteIcon";
 
 interface TrailerPreviewProps {
@@ -19,23 +32,8 @@ interface TrailerPreviewProps {
 	onToggleFavorite: () => void;
 }
 
-interface Resolution {
-	// 数据来源：dmm（开关开启且查询命中）或 javtrailers（默认/兜底）
-	source: "dmm" | "javtrailers" | null;
-	contentId: string | null;
-	// 短标题（商品名，加粗先行显示；javtrailers 源无此字段）
-	shortTitle: string | null;
-	// 长标题（dmm 长文描述或 javtrailers 卡片标题）
-	title: string | null;
-	// 封面/预告片 URL 由 background 按来源拼好返回
-	coverUrl: string | null;
-	previewUrl: string | null;
-	previewType: "mp4" | "hls" | null;
-	// 解析进行中：期间不加载封面、不判定失败，避免"先报错后显示封面"的闪烁
-	resolving: boolean;
-}
-
-type PlayerStatus = "idle" | "loading" | "playing" | "not_found" | "failed";
+type PlayerStatus = "idle" | "loading" | "playing" | "failed";
+type ResolutionState = PreviewResolution | { status: "loading" };
 
 export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	code,
@@ -53,6 +51,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
 	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
+	const [noticeDismissed, setNoticeDismissed] = useState(false);
 	// 标题译文（拼装翻译后拆分还原：短标题译文 + 长标题译文；失败或英文界面保持 null）
 	const [translatedShort, setTranslatedShort] = useState<string | null>(null);
 	const [translatedLong, setTranslatedLong] = useState<string | null>(null);
@@ -101,7 +100,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	}) => {
 		setNeedsVerify(false);
 		if (result.translated) {
-			if (resolution.shortTitle) {
+			if (media?.shortTitle) {
 				// dmm 源：拼装翻译，拆不出时整体作为长标题译文
 				const split = splitMergedTranslation(result.translated);
 				setTranslatedShort(split.short);
@@ -127,78 +126,84 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return false;
 	};
 	// 通过 background 解析到的媒体信息（dmm 优先命中或 javtrailers 兜底）
-	const [resolution, setResolution] = useState<Resolution>({
-		source: null,
-		contentId: null,
-		shortTitle: null,
-		title: null,
-		coverUrl: null,
-		previewUrl: null,
-		previewType: null,
-		resolving: true,
+	const [resolution, setResolution] = useState<ResolutionState>({
+		status: "loading",
 	});
-	// 重新加载计数：点击标题行番号时递增，触发重新解析
-	const [reloadKey, setReloadKey] = useState(0);
 	const videoRef = useRef<HTMLVideoElement | null>(null);
 	const hlsRef = useRef<{ destroy(): void } | null>(null);
 	const rootRef = useRef<HTMLElement | null>(null);
+	const resolutionRequestRef = useRef(0);
+	const playbackRequestRef = useRef(0);
+	const videoPlaybackRequestRef = useRef(0);
 
 	// 挂载时把预览卡片滚动到可视区域顶部（列表较长时点击番号可能看不见预览）
 	useEffect(() => {
 		rootRef.current?.scrollIntoView({ block: "start" });
 	}, []);
 
-	// 挂载时解析媒体信息：DMM 开关开启时 background 优先走 DMM API，未命中回退
-	// javtrailers 搜索页解析；开关关闭时直接走 javtrailers（默认链路）。
-	useEffect(() => {
-		let disposed = false;
-		void (async () => {
-			try {
-				const s = getSettings();
-				const res = (await browser.runtime.sendMessage({
-					type: "jt:resolve-detail",
-					code,
-					dmmEnabled: s.dmmEnabled,
-					dmmApiUrl: s.dmmApiUrl,
-					dmmApiKey: s.dmmApiKey,
-				})) as
-					| {
-							source?: "dmm" | "javtrailers" | null;
-							contentId?: string | null;
-							title?: string | null;
-							shortTitle?: string | null;
-							coverUrl?: string | null;
-							previewUrl?: string | null;
-							previewType?: "mp4" | "hls" | null;
-					  }
-					| undefined;
-				if (!disposed) {
-					setResolution({
-						source: res?.source || null,
-						contentId: res?.contentId || null,
-						shortTitle: res?.shortTitle || null,
-						title: res?.title || null,
-						coverUrl: res?.coverUrl || null,
-						previewUrl: res?.previewUrl || null,
-						previewType: res?.previewType || null,
-						resolving: false,
-					});
-				}
-			} catch {
-				// background 无响应：结束解析状态，媒体不可用
-				if (!disposed) {
-					setResolution((prev) => ({ ...prev, resolving: false }));
-				}
-			}
-		})();
-		return () => {
-			disposed = true;
-		};
-	}, [code, reloadKey]);
+	const media: PreviewMedia | null =
+		resolution.status === "resolved" ? resolution.media : null;
+	const coverUrl = media?.coverUrl || "";
+	const trailerUrl = media?.previewUrl || "";
 
-	// 封面/预告片 URL 由 background 按来源拼好（dmm 直链或 javtrailers HLS）
-	const coverUrl = resolution.coverUrl || "";
-	const trailerUrl = resolution.previewUrl || "";
+	const resolveCurrentCode = useCallback(async () => {
+		const requestId = ++resolutionRequestRef.current;
+		playbackRequestRef.current++;
+		destroyHlsInstance(hlsRef);
+		videoRef.current?.pause();
+		videoRef.current?.removeAttribute("src");
+		videoRef.current?.load();
+		setResolution({ status: "loading" });
+		setStatus("idle");
+		setFallbackMedia(null);
+		setCoverError(false);
+		setCoverSrc("");
+		setCoverLoading(false);
+		setNoticeDismissed((dismissed) =>
+			transitionPreviewNotice(dismissed, "lookup_retry"),
+		);
+		setTranslatedShort(null);
+		setTranslatedLong(null);
+		setTitleReady(false);
+		setNeedsVerify(false);
+		setRetrying(false);
+		setTranslateErrors(null);
+
+		try {
+			const settings = getSettings();
+			const response = (await browser.runtime.sendMessage({
+				type: "jt:resolve-detail",
+				code,
+				dmmEnabled: settings.dmmEnabled,
+				dmmApiUrl: settings.dmmApiUrl,
+				dmmApiKey: settings.dmmApiKey,
+			})) as PreviewResolution | undefined;
+			if (requestId !== resolutionRequestRef.current) return;
+			setResolution(
+				response ?? {
+					status: "error",
+					media: null,
+					errors: [{ source: "javtrailers", kind: "network" }],
+				},
+			);
+		} catch {
+			if (requestId !== resolutionRequestRef.current) return;
+			setResolution({
+				status: "error",
+				media: null,
+				errors: [{ source: "javtrailers", kind: "network" }],
+			});
+		}
+	}, [code]);
+
+	useEffect(() => {
+		void resolveCurrentCode();
+		return () => {
+			resolutionRequestRef.current++;
+			playbackRequestRef.current++;
+			destroyHlsInstance(hlsRef);
+		};
+	}, [resolveCurrentCode]);
 
 	// 解析到 Content ID 后封面 URL 变化，重置失败状态与封面 src 以重新尝试
 	useEffect(() => {
@@ -211,9 +216,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 短标题与长标题拼装一次发送（短标题 <code> 标签保护标记），返回后还原拆分
 	useEffect(() => {
 		// 闭包内 property narrowing 不保留，取局部常量
-		const title = resolution.title;
+		const title = media?.title;
 		if (!title) return;
-		const shortTitle = resolution.shortTitle;
+		const shortTitle = media?.shortTitle;
 		if (locale === "en") {
 			setTitleReady(true);
 			return;
@@ -240,16 +245,16 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return () => {
 			disposed = true;
 		};
-	}, [resolution.title, resolution.shortTitle, locale]);
+	}, [media?.title, media?.shortTitle, locale]);
 
 	// 翻译失败后手动重试（验证窗口关闭后也自动调用）
 	const handleRetryTranslate = async () => {
-		const title = resolution.title;
+		const title = media?.title;
 		if (!title || retrying) return;
 		setRetrying(true);
 		try {
-			const translateInput = resolution.shortTitle
-				? buildMergedTranslateText(resolution.shortTitle, title)
+			const translateInput = media?.shortTitle
+				? buildMergedTranslateText(media.shortTitle, title)
 				: title;
 			const result = await requestTranslate(translateInput);
 			applyTranslation(result);
@@ -293,42 +298,40 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	}, []);
 
-	// 卸载或切换番号时销毁 hls 实例，停止后台拉流
-	useEffect(() => {
-		return () => {
-			hlsRef.current?.destroy();
-			hlsRef.current = null;
-		};
-	}, []);
-
 	// 拉取详情页备用媒体；每个番号只拉一次（结果含 null 也缓存，不重复请求）
-	const requestFallback = async (): Promise<DetailPageFallback> => {
+	const requestFallback = async (
+		contentId: string | null,
+		requestId: number,
+	): Promise<DetailPageFallback> => {
 		if (fallbackMedia) return fallbackMedia;
+		if (!contentId) return { coverUrl: null, trailerUrl: null };
 		let result: DetailPageFallback = { coverUrl: null, trailerUrl: null };
 		try {
 			const res = (await browser.runtime.sendMessage({
 				type: "jt:resolve-fallback",
-				contentId: resolution.contentId,
+				contentId,
 			})) as DetailPageFallback | undefined;
 			if (res) result = res;
 		} catch {
 			// 拉取失败保持空兜底
 		}
-		setFallbackMedia(result);
+		if (requestId === resolutionRequestRef.current) setFallbackMedia(result);
 		return result;
 	};
 
 	// 封面加载失败：dmm 源无备用封面直接判定失败；javtrailers 源尝试详情页备用封面
 	const handleCoverError = () => {
-		if (resolution.source !== "javtrailers" || coverSrc) {
+		if (media?.source !== "javtrailers" || coverSrc) {
 			// 备用封面也失败，或 dmm 源无兜底
 			setCoverLoading(false);
 			setCoverError(true);
 			return;
 		}
 		setCoverLoading(true);
+		const requestId = resolutionRequestRef.current;
 		void (async () => {
-			const fb = await requestFallback();
+			const fb = await requestFallback(media?.contentId ?? null, requestId);
+			if (requestId !== resolutionRequestRef.current) return;
 			if (fb.coverUrl) {
 				// 备用图加载完成后由 onLoad 恢复显示
 				setCoverSrc(fb.coverUrl);
@@ -340,107 +343,169 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	};
 
 	// HLS 404 后的兜底（仅 javtrailers 源）：用详情页的 sample MP4 直连播放
-	const playFallbackTrailer = async () => {
-		const fb = await requestFallback();
+	const playFallbackTrailer = async (requestId: number) => {
+		const fb = await destroyHlsBefore(hlsRef, () =>
+			requestFallback(
+				media?.contentId ?? null,
+				resolutionRequestRef.current,
+			),
+		);
+		if (requestId !== playbackRequestRef.current) return;
 		const video = videoRef.current;
 		if (!fb.trailerUrl || !video) {
-			setStatus("not_found");
+			setStatus("failed");
 			return;
 		}
-		hlsRef.current?.destroy();
-		hlsRef.current = null;
 		video.src = fb.trailerUrl;
-		setStatus("playing");
-		void video.play().catch(() => setStatus("failed"));
+		setStatus("loading");
+		void video.play().then(
+			() => {
+				if (requestId === playbackRequestRef.current) setStatus("playing");
+			},
+			() => {
+				if (requestId === playbackRequestRef.current) setStatus("failed");
+			},
+		);
 	};
 
 	const handlePlay = async () => {
 		const video = videoRef.current;
 		if (!video || status === "loading" || status === "playing") return;
+		setNoticeDismissed((dismissed) =>
+			transitionPreviewNotice(dismissed, "playback_retry"),
+		);
+		const requestId = ++playbackRequestRef.current;
+		videoPlaybackRequestRef.current = requestId;
+		destroyHlsInstance(hlsRef);
 
 		// 播放开始时应用设置中的预览音量（0-100 → 0-1）
 		video.volume = getSettings().previewVolume / 100;
 
 		setStatus("loading");
 		// dmm 源：mp4 直链直接播放，无需 hls.js 与 CORS 处理
-		if (resolution.source === "dmm" && trailerUrl) {
+		if (media?.source === "dmm" && trailerUrl) {
 			video.src = trailerUrl;
-			setStatus("playing");
-			void video.play().catch(() => setStatus("failed"));
+			void video.play().then(
+				() => {
+					if (requestId === playbackRequestRef.current) setStatus("playing");
+				},
+				() => {
+					if (requestId === playbackRequestRef.current) setStatus("failed");
+				},
+			);
 			return;
 		}
 		try {
 			// 懒加载 hls.js（~200KB），仅首次点播放时拉取，不拖慢面板首开
 			const { default: Hls } = await import("hls.js");
+			if (requestId !== playbackRequestRef.current) return;
 			if (Hls.isSupported()) {
 				const hls = new Hls();
 				hlsRef.current = hls;
 				hls.loadSource(trailerUrl);
 				hls.attachMedia(video);
 				hls.on(Hls.Events.MANIFEST_PARSED, () => {
+					if (requestId !== playbackRequestRef.current) return;
 					setStatus("playing");
 					// 处于用户点击手势内，不会被自动播放策略拦截
-					void video.play().catch(() => {});
+					void video.play().catch(() => {
+						if (requestId !== playbackRequestRef.current) return;
+						setStatus("failed");
+						destroyHlsInstance(hlsRef);
+					});
 				});
 				hls.on(Hls.Events.ERROR, (_event, data) => {
+					if (requestId !== playbackRequestRef.current) return;
 					if (!data.fatal) return;
 					// 404 说明该番号无 HLS 预告片；尝试详情页备用 MP4 兜底
 					if (data.response?.code === 404) {
-						void playFallbackTrailer();
+						void playFallbackTrailer(requestId);
 						return;
 					}
 					// 其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）按加载失败处理
 					setStatus("failed");
-					hlsRef.current?.destroy();
-					hlsRef.current = null;
+					destroyHlsInstance(hlsRef);
 				});
 			} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
 				// Safari 原生支持 HLS，无需 hls.js
 				video.src = trailerUrl;
-				setStatus("playing");
-				void video.play().catch(() => {});
+				void video.play().then(
+					() => {
+						if (requestId === playbackRequestRef.current) setStatus("playing");
+					},
+					() => {
+						if (requestId === playbackRequestRef.current) setStatus("failed");
+					},
+				);
 			} else {
 				setStatus("failed");
 			}
 		} catch {
-			setStatus("failed");
+			if (requestId === playbackRequestRef.current) setStatus("failed");
 		}
 	};
 
-	// 点击标题行番号：重置全部加载状态后重新解析预览
-	const handleReload = () => {
-		hlsRef.current?.destroy();
-		hlsRef.current = null;
-		setStatus("idle");
-		setCoverError(false);
-		setTranslatedShort(null);
-		setTranslatedLong(null);
-		setTitleReady(false);
-		setTranslateErrors(null);
-		setResolution({
-			source: null,
-			contentId: null,
-			shortTitle: null,
-			title: null,
-			coverUrl: null,
-			previewUrl: null,
-			previewType: null,
-			resolving: true,
-		});
-		setReloadKey((k) => k + 1);
-	};
+	const handleReload = () => void resolveCurrentCode();
 
 	const handleClose = () => {
-		hlsRef.current?.destroy();
-		hlsRef.current = null;
+		destroyHlsInstance(hlsRef);
 		onClose();
 	};
 
 	// 短标题行内容：dmm 商品名或 javtrailers 卡片标题；长标题行内容：仅 dmm 长文
 	const displayShortTitle =
-		resolution.shortTitle ||
-		(resolution.source === "javtrailers" ? resolution.title : null);
-	const displayLongTitle = resolution.shortTitle ? resolution.title : null;
+		media?.shortTitle || (media?.source === "javtrailers" ? media.title : null);
+	const displayLongTitle = media?.shortTitle ? media.title : null;
+	const presentation = getPreviewPresentation({
+		resolution,
+		playbackStatus: status,
+		hasCover: Boolean(media?.coverUrl) && !coverError,
+		hasTrailer: Boolean(media?.previewUrl),
+		noticeDismissed,
+	});
+	const formatLookupError = (error: PreviewLookupError) => {
+		const sourceLabel =
+			error.source === "dmm" ? t.dmmSourceLabel : t.javtrailersSourceLabel;
+		const code = error.code === undefined ? "" : String(error.code);
+		const detail =
+			error.kind === "timeout"
+				? t.timeoutError
+				: error.kind === "network"
+					? t.networkError
+				: error.message?.trim()
+					? `${code ? `${code}: ` : ""}${error.message.trim()}`
+					: error.error?.trim()
+						? `${code ? `${code}: ` : ""}${error.error.trim()}`
+						: error.status
+							? `HTTP ${error.status}`
+							: error.kind === "api"
+								? t.abnormalResponse
+								: t.networkError;
+		return `${t.sourceErrorPrefix}${sourceLabel} ${detail}`;
+	};
+	const noticeText = presentation.notices
+		.map((notice) => {
+			switch (notice.key) {
+				case "lookup_error":
+					return notice.errors.length
+						? notice.errors.map(formatLookupError).join(" · ")
+						: `${t.sourceErrorPrefix}${t.abnormalResponse}`;
+				case "used_fallback":
+					return t.usedFallback;
+				case "no_trailer":
+					return t.noTrailer;
+				case "playback_error":
+					return t.playbackFailed;
+			}
+		})
+		.filter(Boolean)
+		.join(" · ");
+	const retryActions: ("lookup" | "playback")[] =
+		presentation.retryAction?.type === "multiple"
+			? presentation.retryAction.actions
+			: presentation.retryAction
+				? [presentation.retryAction.type]
+				: [];
 
 	// 标题文本渲染：连续换行压缩为单个（删除空行），<br> 转成元素换行
 	// （DMM 长文与翻译结果都可能含 <br> 或连续 \n）
@@ -507,43 +572,71 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					className="trailer-preview__video"
 					controls
 					playsInline
-					style={{ display: status === "playing" ? "block" : "none" }}
+					style={{
+						display: status === "playing" ? "block" : "none",
+						height: status === "playing" && noticeText ? "calc(100% - 32px)" : undefined,
+					}}
+					onError={() => {
+						if (
+							videoPlaybackRequestRef.current === playbackRequestRef.current &&
+							(status === "playing" || status === "loading")
+						) {
+							setStatus("failed");
+						}
+					}}
 				/>
+				{status !== "playing" && presentation.showSpinner && (
+					<div className="trailer-preview__media-message" role="status">
+						<span className="spinner" aria-hidden="true" />
+					</div>
+				)}
 				{status !== "playing" &&
-					(resolution.resolving ? (
-						<div className="trailer-preview__media-message">
-							<span className="spinner" aria-hidden="true" />
-						</div>
-					) : !resolution.contentId ||
-					  coverError ||
-					  status === "not_found" ||
-					  status === "failed" ? (
-						<div className="trailer-preview__media-message">
-							<span>{t.previewUnavailable}</span>
-						</div>
-					) : (
-						<div className="trailer-preview__cover-layer">
-							{coverLoading && (
-								<span className="trailer-preview__loading" aria-hidden="true">
-									<span className="spinner" />
-								</span>
+					!presentation.showSpinner &&
+					(presentation.mediaMessage || coverError ? (
+						<div className="trailer-preview__media-message" role="status">
+							<span>
+								{presentation.mediaMessage === "no_number_information"
+									? t.noNumberInformation
+									: presentation.mediaMessage === "playback_failed"
+										? t.playbackFailed
+										: t.previewUnavailable}
+							</span>
+							{presentation.showPlaybackRetry && (
+								<button
+									type="button"
+									className="trailer-preview__primary-retry"
+									onClick={() => void handlePlay()}
+									aria-label={t.playbackRetry}
+								>
+									{t.playbackRetry}
+								</button>
 							)}
-							<img
-								src={coverSrc || coverUrl}
-								alt={`${code} cover`}
-								className="trailer-preview__cover"
-								referrerPolicy="no-referrer"
-								onLoad={() => setCoverLoading(false)}
-								onError={handleCoverError}
-								// 不用 loading="lazy"：隐藏（display:none）期间懒加载不触发下载，onLoad 永不回调会死锁
-								style={coverLoading ? { display: "none" } : undefined}
-							/>
+						</div>
+					) : media ? (
+						<div className="trailer-preview__cover-layer">
+							{presentation.showCover && (
+								<>
+									{coverLoading && (
+										<span className="trailer-preview__loading" aria-hidden="true">
+											<span className="spinner" />
+										</span>
+									)}
+									<img
+										src={coverSrc || coverUrl}
+										alt={`${code} cover`}
+										className="trailer-preview__cover"
+										referrerPolicy="no-referrer"
+										onLoad={() => setCoverLoading(false)}
+										onError={handleCoverError}
+										style={coverLoading ? { display: "none" } : undefined}
+									/>
+								</>
+							)}
 							{status === "loading" ? (
-								// 点击播放后隐藏按钮，仅显示加载中的 spinner
 								<span className="trailer-preview__loading" aria-hidden="true">
 									<span className="spinner" />
 								</span>
-							) : trailerUrl ? (
+							) : presentation.showPlayButton ? (
 								<button
 									type="button"
 									className="trailer-preview__play-btn"
@@ -563,7 +656,40 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 								</button>
 							) : null}
 						</div>
-					))}
+					) : null)}
+				{noticeText && (
+					<div className="trailer-preview__notice" role="alert" aria-live="assertive">
+						<span className="trailer-preview__notice-text" title={noticeText}>
+							{noticeText}
+						</span>
+						{retryActions.map((action) => (
+							<button
+								key={action}
+								type="button"
+								className="trailer-preview__notice-action"
+								onClick={() =>
+									action === "lookup" ? void resolveCurrentCode() : void handlePlay()
+								}
+								aria-label={action === "lookup" ? t.lookupRetry : t.playbackRetry}
+							>
+								{action === "lookup" ? t.lookupRetry : t.playbackRetry}
+							</button>
+						))}
+						<button
+							type="button"
+							className="settings-field__error-close trailer-preview__notice-close"
+							onClick={() =>
+								setNoticeDismissed((dismissed) =>
+									transitionPreviewNotice(dismissed, "dismiss"),
+								)
+							}
+							aria-label={t.closeError}
+							title={t.closeError}
+						>
+							&times;
+						</button>
+					</div>
+				)}
 			</div>
 
 			{(displayShortTitle || displayLongTitle) && (

@@ -1,5 +1,9 @@
 import { messages } from "./locales";
-import type { SupportedLocale } from "./types";
+import type {
+	PreviewLookupError,
+	PreviewLookupErrorKind,
+	SupportedLocale,
+} from "./types";
 
 export interface DmmLookupData {
 	cid: string;
@@ -9,6 +13,14 @@ export interface DmmLookupData {
 	coverUrl: string | null;
 	previewUrl: string | null;
 	detailUrl: string;
+}
+
+export interface DmmLookupErrorData {
+	kind: PreviewLookupErrorKind;
+	status: number;
+	code?: number | string;
+	error?: string;
+	message?: string;
 }
 
 /**
@@ -56,6 +68,84 @@ export function parseDmmLookupResponse(data: unknown): DmmLookupData | null {
 			typeof d.preview_url === "string" && d.preview_url ? d.preview_url : null,
 		detailUrl:
 			typeof d.detail_url === "string" && d.detail_url ? d.detail_url : "",
+	};
+}
+
+/**
+ * Reads a successful lookup response. Invalid JSON is an API response error,
+ * not a network failure or a missing lookup result.
+ */
+export async function readDmmLookupResponse(response: {
+	status: number;
+	json: () => Promise<unknown>;
+}): Promise<DmmLookupData | null> {
+	let data: unknown;
+	try {
+		data = await response.json();
+	} catch {
+		throw {
+			source: "dmm",
+			kind: "api",
+			status: response.status,
+		} satisfies PreviewLookupError;
+	}
+
+	const parsed = parseDmmLookupResponse(data);
+	if (parsed) return parsed;
+
+	if (
+		typeof data === "object" &&
+		data !== null &&
+		("error" in data || "message" in data)
+	) {
+		const apiError = parseDmmLookupError(response.status, data);
+		if (apiError.kind !== "not_found") {
+			throw { source: "dmm", ...apiError } satisfies PreviewLookupError;
+		}
+	}
+	return null;
+}
+
+/**
+ * Extracts a safe, structured error from a failed DMM lookup response.
+ * DMM documents HTTP 404 and ITEM_NOT_FOUND as a missing lookup result.
+ */
+export function parseDmmLookupError(
+	status: number,
+	data: unknown,
+): DmmLookupErrorData {
+	const parsed = (data ?? {}) as {
+		code?: unknown;
+		error?: unknown;
+		message?: unknown;
+	};
+	const code =
+		typeof parsed.code === "number" || typeof parsed.code === "string"
+			? parsed.code
+			: undefined;
+	const error =
+		typeof parsed.error === "string" ? parsed.error : undefined;
+	const message =
+		typeof parsed.message === "string" ? parsed.message : undefined;
+	const notFound =
+		status === 404 ||
+		code === 40401 ||
+		code === "40401" ||
+		error === "ITEM_NOT_FOUND";
+
+	return {
+		kind:
+			status === 0
+				? "network"
+				: notFound
+					? "not_found"
+					: status >= 200 && status < 300
+						? "api"
+						: "http",
+		status,
+		...(code !== undefined ? { code } : {}),
+		...(error !== undefined ? { error } : {}),
+		...(message !== undefined ? { message } : {}),
 	};
 }
 
