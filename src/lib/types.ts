@@ -16,6 +16,13 @@ export type PopupStatus =
 
 export type PreviewLookupSource = "dmm" | "javtrailers";
 
+export type PreviewPlaybackStatus =
+	| "idle"
+	| "loading"
+	| "playing"
+	| "not_found"
+	| "failed";
+
 export type PreviewLookupErrorKind =
 	| "not_found"
 	| "http"
