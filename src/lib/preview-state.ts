@@ -38,6 +38,7 @@ export interface PreviewPresentation {
 	showSpinner: boolean;
 	showCover: boolean;
 	showPlayButton: boolean;
+	showPlaybackRetry: boolean;
 	mediaMessage: PreviewMediaMessageKey | null;
 	notices: PreviewNotice[];
 	retryAction: PreviewRetryAction | null;
@@ -63,6 +64,7 @@ export function getPreviewPresentation(
 			showSpinner: true,
 			showCover: false,
 			showPlayButton: false,
+			showPlaybackRetry: false,
 			mediaMessage: null,
 			notices: [],
 			retryAction: null,
@@ -131,6 +133,7 @@ export function getPreviewPresentation(
 		showSpinner: false,
 		showCover: resolution.status === "resolved" && hasCover,
 		showPlayButton: resolution.status === "resolved" && hasTrailer,
+		showPlaybackRetry: playbackFailed && noticeDismissed,
 		mediaMessage: playbackFailed
 			? "playback_failed"
 			: resolution.status === "not_found"

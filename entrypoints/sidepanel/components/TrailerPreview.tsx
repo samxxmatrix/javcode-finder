@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
+import { destroyHlsInstance } from "../../../src/lib/hls-instance";
 import {
 	getPreviewPresentation,
 	transitionPreviewNotice,
@@ -145,8 +146,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const resolveCurrentCode = useCallback(async () => {
 		const requestId = ++resolutionRequestRef.current;
 		playbackRequestRef.current++;
-		hlsRef.current?.destroy();
-		hlsRef.current = null;
+		destroyHlsInstance(hlsRef);
 		videoRef.current?.pause();
 		videoRef.current?.removeAttribute("src");
 		videoRef.current?.load();
@@ -198,8 +198,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return () => {
 			resolutionRequestRef.current++;
 			playbackRequestRef.current++;
-			hlsRef.current?.destroy();
-			hlsRef.current = null;
+			destroyHlsInstance(hlsRef);
 		};
 	}, [resolveCurrentCode]);
 
@@ -344,13 +343,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const playFallbackTrailer = async (requestId: number) => {
 		const fb = await requestFallback(media?.contentId ?? null, resolutionRequestRef.current);
 		if (requestId !== playbackRequestRef.current) return;
+		destroyHlsInstance(hlsRef);
 		const video = videoRef.current;
 		if (!fb.trailerUrl || !video) {
 			setStatus("failed");
 			return;
 		}
-		hlsRef.current?.destroy();
-		hlsRef.current = null;
 		video.src = fb.trailerUrl;
 		setStatus("loading");
 		void video.play().then(
@@ -371,6 +369,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		);
 		const requestId = ++playbackRequestRef.current;
 		videoPlaybackRequestRef.current = requestId;
+		destroyHlsInstance(hlsRef);
 
 		// 播放开始时应用设置中的预览音量（0-100 → 0-1）
 		video.volume = getSettings().previewVolume / 100;
@@ -403,7 +402,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					setStatus("playing");
 					// 处于用户点击手势内，不会被自动播放策略拦截
 					void video.play().catch(() => {
-						if (requestId === playbackRequestRef.current) setStatus("failed");
+						if (requestId !== playbackRequestRef.current) return;
+						setStatus("failed");
+						destroyHlsInstance(hlsRef);
 					});
 				});
 				hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -416,8 +417,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					}
 					// 其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）按加载失败处理
 					setStatus("failed");
-					hlsRef.current?.destroy();
-					hlsRef.current = null;
+					destroyHlsInstance(hlsRef);
 				});
 			} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
 				// Safari 原生支持 HLS，无需 hls.js
@@ -441,8 +441,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const handleReload = () => void resolveCurrentCode();
 
 	const handleClose = () => {
-		hlsRef.current?.destroy();
-		hlsRef.current = null;
+		destroyHlsInstance(hlsRef);
 		onClose();
 	};
 
@@ -595,6 +594,16 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 										? t.playbackFailed
 										: t.previewUnavailable}
 							</span>
+							{presentation.showPlaybackRetry && (
+								<button
+									type="button"
+									className="trailer-preview__primary-retry"
+									onClick={() => void handlePlay()}
+									aria-label={t.playbackRetry}
+								>
+									{t.playbackRetry}
+								</button>
+							)}
 						</div>
 					) : media ? (
 						<div className="trailer-preview__cover-layer">

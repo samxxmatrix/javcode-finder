@@ -1020,6 +1020,21 @@ button:focus-visible {
 	margin-bottom: 0;
 }
 
+.trailer-preview__primary-retry {
+	padding: 4px 8px;
+	border: 1px solid var(--border-subtle);
+	border-radius: 4px;
+	background: var(--bg-surface);
+	color: var(--text-primary);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.trailer-preview__primary-retry:hover {
+	background: var(--bg-surface-hover);
+}
+
 .trailer-preview__notice {
 	position: absolute;
 	z-index: 2;

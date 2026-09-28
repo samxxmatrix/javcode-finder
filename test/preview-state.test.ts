@@ -53,6 +53,7 @@ describe("getPreviewPresentation", () => {
 			showSpinner: true,
 			showCover: false,
 			showPlayButton: false,
+			showPlaybackRetry: false,
 			mediaMessage: null,
 			notices: [],
 			retryAction: null,
@@ -130,6 +131,7 @@ describe("getPreviewPresentation", () => {
 			showSpinner: false,
 			showCover: true,
 			showPlayButton: false,
+			showPlaybackRetry: false,
 			mediaMessage: null,
 			notices: [
 				{
@@ -153,6 +155,7 @@ describe("getPreviewPresentation", () => {
 
 		expect(result.mediaMessage).toBe("playback_failed");
 		expect(result.showPlayButton).toBe(true);
+		expect(result.showPlaybackRetry).toBe(false);
 		expect(result.notices).toEqual([
 			{
 				key: "playback_error",
@@ -162,6 +165,23 @@ describe("getPreviewPresentation", () => {
 			},
 		]);
 		expect(result.retryAction).toEqual({ type: "playback" });
+	});
+
+	it("keeps playback retry available in the primary message after notice dismissal", () => {
+		const result = getPreviewPresentation(
+			input(
+				{ status: "resolved", media, errors: [] },
+				{
+					hasTrailer: true,
+					playbackStatus: "failed",
+					noticeDismissed: true,
+				},
+			),
+		);
+
+		expect(result.notices).toEqual([]);
+		expect(result.mediaMessage).toBe("playback_failed");
+		expect(result.showPlaybackRetry).toBe(true);
 	});
 
 	it("does not turn a lookup failure into no-information", () => {
