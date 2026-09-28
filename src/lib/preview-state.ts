@@ -31,11 +31,13 @@ export interface PreviewNotice {
 	key: PreviewNoticeKey;
 	errors: PreviewLookupError[];
 	dismissible: boolean;
+	actions?: { type: "dismiss" }[];
 }
 
 export interface PreviewPresentation {
 	showSpinner: boolean;
 	showCover: boolean;
+	showPlayButton: boolean;
 	mediaMessage: PreviewMediaMessageKey | null;
 	notices: PreviewNotice[];
 	retryAction: PreviewRetryAction | null;
@@ -51,6 +53,7 @@ export function getPreviewPresentation(
 		return {
 			showSpinner: true,
 			showCover: false,
+			showPlayButton: false,
 			mediaMessage: null,
 			notices: [],
 			retryAction: null,
@@ -83,11 +86,21 @@ export function getPreviewPresentation(
 	}
 
 	if (resolution.status === "resolved" && !hasTrailer) {
-		notices.push({ key: "no_trailer", errors: [], dismissible: true });
+		notices.push({
+			key: "no_trailer",
+			errors: [],
+			dismissible: true,
+			actions: [{ type: "dismiss" }],
+		});
 	}
 
 	if (playbackFailed) {
-		notices.push({ key: "playback_error", errors: [], dismissible: true });
+		notices.push({
+			key: "playback_error",
+			errors: [],
+			dismissible: true,
+			actions: [{ type: "dismiss" }],
+		});
 	}
 
 	const visibleNotices = noticeDismissed
@@ -106,6 +119,7 @@ export function getPreviewPresentation(
 	return {
 		showSpinner: false,
 		showCover: resolution.status === "resolved" && hasCover,
+		showPlayButton: resolution.status === "resolved" && hasTrailer,
 		mediaMessage: playbackFailed
 			? "playback_failed"
 			: resolution.status === "not_found"

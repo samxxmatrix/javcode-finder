@@ -40,6 +40,7 @@ describe("getPreviewPresentation", () => {
 		expect(getPreviewPresentation(input({ status: "loading" }))).toEqual({
 			showSpinner: true,
 			showCover: false,
+			showPlayButton: false,
 			mediaMessage: null,
 			notices: [],
 			retryAction: null,
@@ -83,8 +84,16 @@ describe("getPreviewPresentation", () => {
 		expect(result).toEqual({
 			showSpinner: false,
 			showCover: true,
+			showPlayButton: false,
 			mediaMessage: null,
-			notices: [{ key: "no_trailer", errors: [], dismissible: true }],
+			notices: [
+				{
+					key: "no_trailer",
+					errors: [],
+					dismissible: true,
+					actions: [{ type: "dismiss" }],
+				},
+			],
 			retryAction: null,
 		});
 	});
@@ -98,8 +107,14 @@ describe("getPreviewPresentation", () => {
 		);
 
 		expect(result.mediaMessage).toBe("playback_failed");
+		expect(result.showPlayButton).toBe(true);
 		expect(result.notices).toEqual([
-			{ key: "playback_error", errors: [], dismissible: true },
+			{
+				key: "playback_error",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
 		]);
 		expect(result.retryAction).toEqual({ type: "playback" });
 	});
@@ -133,6 +148,7 @@ describe("getPreviewPresentation", () => {
 		);
 
 		expect(result.showCover).toBe(true);
+		expect(result.showPlayButton).toBe(false);
 		expect(result.notices).toEqual([]);
 	});
 
@@ -148,10 +164,17 @@ describe("getPreviewPresentation", () => {
 			),
 		);
 
+		expect(result.mediaMessage).toBeNull();
+		expect(result.showPlayButton).toBe(false);
 		expect(result.notices).toEqual([
 			{ key: "lookup_error", errors: [dmmError], dismissible: false },
 			{ key: "used_fallback", errors: [], dismissible: false },
-			{ key: "no_trailer", errors: [], dismissible: true },
+			{
+				key: "no_trailer",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
 		]);
 		expect(result.retryAction).toEqual({ type: "lookup" });
 	});
@@ -167,7 +190,12 @@ describe("getPreviewPresentation", () => {
 		expect(result.mediaMessage).toBe("playback_failed");
 		expect(result.notices).toEqual([
 			{ key: "lookup_error", errors: [dmmError], dismissible: false },
-			{ key: "playback_error", errors: [], dismissible: true },
+			{
+				key: "playback_error",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
 		]);
 		expect(result.retryAction).toEqual({
 			type: "multiple",
