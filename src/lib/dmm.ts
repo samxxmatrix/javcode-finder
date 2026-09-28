@@ -1,5 +1,9 @@
 import { messages } from "./locales";
-import type { PreviewLookupErrorKind, SupportedLocale } from "./types";
+import type {
+	PreviewLookupError,
+	PreviewLookupErrorKind,
+	SupportedLocale,
+} from "./types";
 
 export interface DmmLookupData {
 	cid: string;
@@ -65,6 +69,41 @@ export function parseDmmLookupResponse(data: unknown): DmmLookupData | null {
 		detailUrl:
 			typeof d.detail_url === "string" && d.detail_url ? d.detail_url : "",
 	};
+}
+
+/**
+ * Reads a successful lookup response. Invalid JSON is an API response error,
+ * not a network failure or a missing lookup result.
+ */
+export async function readDmmLookupResponse(response: {
+	status: number;
+	json: () => Promise<unknown>;
+}): Promise<DmmLookupData | null> {
+	let data: unknown;
+	try {
+		data = await response.json();
+	} catch {
+		throw {
+			source: "dmm",
+			kind: "api",
+			status: response.status,
+		} satisfies PreviewLookupError;
+	}
+
+	const parsed = parseDmmLookupResponse(data);
+	if (parsed) return parsed;
+
+	if (
+		typeof data === "object" &&
+		data !== null &&
+		("error" in data || "message" in data)
+	) {
+		const apiError = parseDmmLookupError(response.status, data);
+		if (apiError.kind !== "not_found") {
+			throw { source: "dmm", ...apiError } satisfies PreviewLookupError;
+		}
+	}
+	return null;
 }
 
 /**

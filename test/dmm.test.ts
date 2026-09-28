@@ -5,6 +5,7 @@ import {
 	formatDmmError,
 	parseDmmLookupError,
 	parseDmmLookupResponse,
+	readDmmLookupResponse,
 } from "../src/lib/dmm";
 
 describe("buildDmmLookupUrl", () => {
@@ -175,5 +176,31 @@ describe("parseDmmLookupError", () => {
 			kind: "network",
 			status: 0,
 		});
+	});
+});
+
+describe("readDmmLookupResponse", () => {
+	it("preserves HTTP 200 as a structured API error when JSON parsing fails", async () => {
+		await expect(
+			readDmmLookupResponse({
+				status: 200,
+				json: async () => {
+					throw new SyntaxError("Unexpected token");
+				},
+			}),
+		).rejects.toEqual({
+			source: "dmm",
+			kind: "api",
+			status: 200,
+		});
+	});
+
+	it("treats valid JSON without a cid as no-match", async () => {
+		await expect(
+			readDmmLookupResponse({
+				status: 200,
+				json: async () => ({ title: "No cid" }),
+			}),
+		).resolves.toBeNull();
 	});
 });

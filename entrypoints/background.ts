@@ -9,7 +9,7 @@ import {
 	buildDmmLookupUrl,
 	formatDmmError,
 	parseDmmLookupError,
-	parseDmmLookupResponse,
+	readDmmLookupResponse,
 	type DmmLookupData,
 } from "../src/lib/dmm";
 import { resolvePreview } from "../src/lib/resolve-preview";
@@ -495,21 +495,7 @@ export default defineBackground(() => {
 							...parseDmmLookupError(res.status, data),
 						} satisfies PreviewLookupError;
 					}
-					const data: unknown = await res.json();
-					const parsed = parseDmmLookupResponse(data);
-					if (parsed) return parsed;
-
-					if (
-						typeof data === "object" &&
-						data !== null &&
-						("error" in data || "message" in data)
-					) {
-						const apiError = parseDmmLookupError(res.status, data);
-						if (apiError.kind !== "not_found") {
-							throw { source: "dmm", ...apiError } satisfies PreviewLookupError;
-						}
-					}
-					return null;
+					return readDmmLookupResponse(res);
 				};
 
 				// 详情页兜底：主媒体服务 404 时，从详情页提取 mgstage 封面与 sample MP4
