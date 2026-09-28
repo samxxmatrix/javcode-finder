@@ -49,6 +49,22 @@ describe("resolvePreview", () => {
 		expect(result).toEqual({ status: "not_found", media: null, errors: [] });
 	});
 
+	it("reports not_found but retains a DMM error when JavTrailers has no match", async () => {
+		const result = await resolvePreview({
+			dmmEnabled: true,
+			dmmLookup: async () => {
+				throw dmmError;
+			},
+			javtrailersLookup: async () => null,
+		});
+
+		expect(result).toEqual({
+			status: "not_found",
+			media: null,
+			errors: [dmmError],
+		});
+	});
+
 	it("skips DMM when disabled", async () => {
 		const dmmLookup = vi.fn(async () => media);
 		const result = await resolvePreview({
