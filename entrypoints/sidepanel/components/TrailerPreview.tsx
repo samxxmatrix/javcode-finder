@@ -396,8 +396,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			return;
 		}
 		try {
-			// 懒加载 hls.js（~200KB），仅首次点播放时拉取，不拖慢面板首开
-			const { default: Hls } = await import("hls.js");
+			// 懒加载 hls.js light 构建，仅首次点播放时加载，不拖慢面板首开
+			const { default: Hls } = await import("hls.js/light");
 			if (requestId !== playbackRequestRef.current) return;
 			if (Hls.isSupported()) {
 				const hls = new Hls();
