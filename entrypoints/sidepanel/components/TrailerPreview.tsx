@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
-import { getPreviewPresentation } from "../../../src/lib/preview-state";
+import {
+	getPreviewPresentation,
+	transitionPreviewNotice,
+} from "../../../src/lib/preview-state";
 import {
 	buildGoogleVerifyUrl,
 	buildMergedTranslateText,
@@ -153,7 +156,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setCoverError(false);
 		setCoverSrc("");
 		setCoverLoading(false);
-		setNoticeDismissed(false);
+		setNoticeDismissed((dismissed) =>
+			transitionPreviewNotice(dismissed, "lookup_retry"),
+		);
 		setTranslatedShort(null);
 		setTranslatedLong(null);
 		setTitleReady(false);
@@ -361,7 +366,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const handlePlay = async () => {
 		const video = videoRef.current;
 		if (!video || status === "loading" || status === "playing") return;
-		setNoticeDismissed(false);
+		setNoticeDismissed((dismissed) =>
+			transitionPreviewNotice(dismissed, "playback_retry"),
+		);
 		const requestId = ++playbackRequestRef.current;
 		videoPlaybackRequestRef.current = requestId;
 
@@ -655,7 +662,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						<button
 							type="button"
 							className="settings-field__error-close trailer-preview__notice-close"
-							onClick={() => setNoticeDismissed(true)}
+							onClick={() =>
+								setNoticeDismissed((dismissed) =>
+									transitionPreviewNotice(dismissed, "dismiss"),
+								)
+							}
 							aria-label={t.closeError}
 							title={t.closeError}
 						>

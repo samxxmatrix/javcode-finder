@@ -43,6 +43,15 @@ export interface PreviewPresentation {
 	retryAction: PreviewRetryAction | null;
 }
 
+export type PreviewNoticeEvent = "dismiss" | "lookup_retry" | "playback_retry";
+
+export function transitionPreviewNotice(
+	dismissed: boolean,
+	event: PreviewNoticeEvent,
+): boolean {
+	return event === "dismiss";
+}
+
 export function getPreviewPresentation(
 	input: PreviewPresentationInput,
 ): PreviewPresentation {

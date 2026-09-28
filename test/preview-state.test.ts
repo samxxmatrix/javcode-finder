@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getPreviewPresentation } from "../src/lib/preview-state";
+import {
+	getPreviewPresentation,
+	transitionPreviewNotice,
+} from "../src/lib/preview-state";
 import type {
 	PreviewLookupError,
 	PreviewMedia,
@@ -33,6 +36,15 @@ const input = (
 	hasTrailer: false,
 	noticeDismissed: false,
 	...overrides,
+});
+
+describe("transitionPreviewNotice", () => {
+	it.each(["lookup_retry", "playback_retry"] as const)(
+		"clears a dismissed notice after %s",
+		(event) => {
+			expect(transitionPreviewNotice(true, event)).toBe(false);
+		},
+	);
 });
 
 describe("getPreviewPresentation", () => {
