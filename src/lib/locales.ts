@@ -289,9 +289,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "啟用 DMM 查詢（預覽/詳情優先官方資料）",
     dmmIncomplete: "請補全 DMM API 位址與 Key",
-    falenoPrefixesLabel: "FALENO 番號頭",
+    falenoPrefixesLabel: "FALENO 番號前綴複查",
     falenoPrefixesDesc:
-      "番號以這些前綴開頭時，若 DMM 與 JavTrailers 均查不到，將回退至 FALENO 官網。清空清單即不啟用。",
+      "番號前綴以設定開頭的，若普通查詢無結果將至 FALENO 官網查詢。清空即不啟用。",
     falenoPrefixPlaceholder: "輸入前綴，如 FNS",
     falenoSourceLabel: "FALENO",
   },
@@ -391,9 +391,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "Enable DMM lookup (official data first)",
     dmmIncomplete: "Fill in the DMM API URL and Key",
-    falenoPrefixesLabel: "FALENO code prefixes",
+    falenoPrefixesLabel: "FALENO code prefix check",
     falenoPrefixesDesc:
-      "Codes starting with these prefixes fall back to the FALENO official site when both DMM and JavTrailers miss. An empty list disables the fallback.",
+      "Codes whose prefixes match the settings fall back to the FALENO official site when the normal lookup finds nothing. Clearing the list disables it.",
     falenoPrefixPlaceholder: "Prefix, e.g. FNS",
     falenoSourceLabel: "FALENO",
   },
