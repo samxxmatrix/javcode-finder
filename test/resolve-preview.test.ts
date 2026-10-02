@@ -237,4 +237,26 @@ describe("resolvePreview", () => {
 			errors: [],
 		});
 	});
+
+	it("reports an error when JavTrailers throws and FALENO has no match", async () => {
+		const javtrailersError: PreviewLookupError = {
+			source: "javtrailers",
+			kind: "http",
+			status: 503,
+		};
+		const result = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => {
+				throw javtrailersError;
+			},
+			falenoLookup: async () => null,
+		});
+
+		expect(result).toEqual({
+			status: "error",
+			media: null,
+			errors: [javtrailersError],
+		});
+	});
 });
