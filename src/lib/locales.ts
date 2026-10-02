@@ -25,6 +25,8 @@ export interface LocaleMessages {
 	translateEnableLabel: string;
 	saveSettings: string;
 	resetDefaults: string;
+	searchCodePlaceholder: string;
+	searchCodeLabel: string;
 	settingsSaved: string;
 	backToScanner: string;
 	previewUrlLabel: string;
@@ -123,6 +125,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateEnableLabel: "启用翻译",
     saveSettings: "保存设置",
     resetDefaults: "恢复默认",
+    searchCodePlaceholder: "输入番号",
+    searchCodeLabel: "查询番号",
     settingsSaved: "设置已保存！",
     backToScanner: "返回扫描",
     previewUrlLabel: "示例效果预览 (以 ABP-123 为例)：",
@@ -222,6 +226,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateEnableLabel: "啟用翻譯",
     saveSettings: "儲存設定",
     resetDefaults: "恢復預設",
+    searchCodePlaceholder: "輸入番號",
+    searchCodeLabel: "查詢番號",
     settingsSaved: "設定已儲存！",
     backToScanner: "返回掃描",
     previewUrlLabel: "範例效果預覽 (以 ABP-123 為例)：",
@@ -323,6 +329,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateEnableLabel: "Enable Translation",
     saveSettings: "Save Settings",
     resetDefaults: "Reset Defaults",
+    searchCodePlaceholder: "Enter code",
+    searchCodeLabel: "Search Code",
     settingsSaved: "Settings saved!",
     backToScanner: "Back to Scanner",
     previewUrlLabel: "Preview URL (e.g. ABP-123):",

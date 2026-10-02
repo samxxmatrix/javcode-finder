@@ -23,6 +23,7 @@ import type {
 	PopupStatus,
 	SupportedLocale,
 } from "../../src/lib/types";
+import { ClearButton } from "./components/ClearButton";
 import { CodeList } from "./components/CodeList";
 import { SettingsView, type SettingsViewHandle } from "./components/SettingsView";
 import { TrailerPreview } from "./components/TrailerPreview";
@@ -46,6 +47,8 @@ export const App: React.FC = () => {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	// 点击番号后在列表上方展开的预告片预览
 	const [previewCode, setPreviewCode] = useState<string | null>(null);
+	// 顶部查询输入框内容
+	const [searchInput, setSearchInput] = useState("");
 	// 顶部图标按钮调用设置页的保存/重置
 	const settingsRef = useRef<SettingsViewHandle>(null);
 	// 收藏的番号列表（本地 storage 为准，云端为镜像）
@@ -224,6 +227,13 @@ export const App: React.FC = () => {
 		await runScan();
 	};
 
+	// 顶部输入框查询：与点击列表项/网页圆点同一流程，直接展开对应番号的预览
+	const handleSearch = () => {
+		const code = searchInput.trim();
+		if (!code) return;
+		setPreviewCode(code);
+	};
+
 	// 从云端拉取收藏并覆盖本地（仅本地为空时调用，避免覆盖较新的本地数据）；
 	// 开关关闭时不存取云端
 	const pullFromCloud = async (): Promise<void> => {
@@ -392,6 +402,45 @@ export const App: React.FC = () => {
 						{t.title}
 					</h1>
 				</div>
+				{!showSettings && (
+					<div className="popup-header__search">
+						<div className="popup-header__search-input-wrap">
+							<input
+								type="text"
+								className="popup-header__search-input"
+								value={searchInput}
+								onChange={(e) => setSearchInput(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") handleSearch();
+								}}
+								placeholder={t.searchCodePlaceholder}
+								aria-label={t.searchCodeLabel}
+							/>
+							<ClearButton
+								show={Boolean(searchInput)}
+								onClick={() => setSearchInput("")}
+								title={t.clearInput}
+							/>
+						</div>
+						<button
+							type="button"
+							className="popup-header__icon-btn"
+							onClick={handleSearch}
+							title={t.searchCodeLabel}
+							aria-label={t.searchCodeLabel}
+						>
+							<svg
+								viewBox="0 0 1024 1024"
+								fill="currentColor"
+								width="16"
+								height="16"
+								aria-hidden="true"
+							>
+								<path d="M609.376 654.816A239.264 239.264 0 0 1 464 704a240 240 0 1 1 240-240 239.264 239.264 0 0 1-49.472 145.728L790.4 745.6A32 32 0 0 1 768 800a32 32 0 0 1-22.72-9.28l-135.904-135.904zM464 288a176 176 0 1 0 176 176A176.32 176.32 0 0 0 464 288z" />
+							</svg>
+						</button>
+					</div>
+				)}
 				<div className="popup-header__actions">
 					{showSettings ? (
 						<>
