@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
 	buildFalenoWorksUrl,
@@ -7,12 +6,8 @@ import {
 	parseFalenoWorksHtml,
 	toFalenoCodeKey,
 } from "../src/lib/faleno";
-
-// 真实作品页保存的固件(2026-09 FNS-263),解析结果必须与页面内容逐字一致
-const fns263Fixture = readFileSync(
-	new URL("./fixtures/FNS263.html", import.meta.url),
-	"utf8",
-);
+// 真实作品页保存的固件(2026-09 FNS-263),解析结果必须与页面内容逐字一致(?raw 由 Vite 在转换期内联,无需 Node 类型)
+import fns263Fixture from "./fixtures/FNS263.html?raw";
 
 describe("faleno", () => {
 	it("converts a code to the FALENO lowercase key", () => {
