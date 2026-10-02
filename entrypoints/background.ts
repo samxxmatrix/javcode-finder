@@ -617,6 +617,10 @@ export default defineBackground(() => {
 											: "network",
 								} satisfies PreviewLookupError;
 							}
+							// 404 状态码 = 作品不存在，按查无处理（返回 null）；以 200 返回的
+							// 「ページが見つかりませんでした」页面由 parseFalenoWorksHtml 识别为查无。
+							// 其余非 2xx（如 WAF 403）仍视为错误
+							if (res.status === 404) return null;
 							if (!res.ok) {
 								throw {
 									source: "faleno",

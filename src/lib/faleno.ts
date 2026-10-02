@@ -49,6 +49,17 @@ function decodeHtmlEntities(text: string): string {
 		.replace(/&gt;/g, ">");
 }
 
+/** 站点「页面不存在」页的标题锚点 */
+const NOT_FOUND_PAGE_MARKER = "ページが見つかりませんでした";
+
+/**
+ * HTML 是否为站点「ページが見つかりませんでした」(404 Not Found) 页面。
+ * 不存在的作品可能以 404 状态码返回,也可能以 200 + 该页面返回,两种情况都按查无处理。
+ */
+export function isFalenoNotFoundPage(html: string): boolean {
+	return html.includes(NOT_FOUND_PAGE_MARKER);
+}
+
 export interface FalenoWorksData {
 	previewUrl: string | null;
 	coverUrl: string | null;
@@ -66,10 +77,10 @@ export interface FalenoWorksData {
  *
  * 页面内 pop_sample 出现多次(相关作品区),首个即目标作品;
  * 块内第一个 <img> 是封面(第二个是播放图标,忽略)。
- * 无 pop_sample 结构返回 null(视为查无)。
+ * 404 页面与无 pop_sample 结构的页面均返回 null(视为查无)。
  */
 export function parseFalenoWorksHtml(html: string): FalenoWorksData | null {
-	if (!html) return null;
+	if (!html || isFalenoNotFoundPage(html)) return null;
 	const sampleBlock = html.split('class="pop_sample"')[1];
 	if (!sampleBlock) return null;
 
