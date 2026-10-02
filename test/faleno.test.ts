@@ -1,10 +1,18 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
 	buildFalenoWorksUrl,
 	matchesFalenoPrefix,
 	normalizePrefix,
+	parseFalenoWorksHtml,
 	toFalenoCodeKey,
 } from "../src/lib/faleno";
+
+// 真实作品页保存的固件(2026-09 FNS-263),解析结果必须与页面内容逐字一致
+const fns263Fixture = readFileSync(
+	new URL("./fixtures/FNS263.html", import.meta.url),
+	"utf8",
+);
 
 describe("faleno", () => {
 	it("converts a code to the FALENO lowercase key", () => {
@@ -18,11 +26,13 @@ describe("faleno", () => {
 			"https://faleno.jp/top/works/fns263",
 		);
 		expect(buildFalenoWorksUrl("")).toBe("");
+		expect(buildFalenoWorksUrl(" - ")).toBe("");
 	});
 
 	it("normalizes prefix entries", () => {
 		expect(normalizePrefix(" fns ")).toBe("FNS");
 		expect(normalizePrefix("")).toBe("");
+		expect(normalizePrefix("fns-")).toBe("FNS");
 	});
 
 	it("matches prefixes case- and separator-insensitively", () => {
@@ -31,5 +41,31 @@ describe("faleno", () => {
 		expect(matchesFalenoPrefix("FSDSS-001", ["FNS", "FSDSS"])).toBe(true);
 		expect(matchesFalenoPrefix("ABP-123", ["FNS"])).toBe(false);
 		expect(matchesFalenoPrefix("FNS-263", [])).toBe(false);
+		expect(matchesFalenoPrefix("FNS-263", ["fns-"])).toBe(true);
+		expect(matchesFalenoPrefix("FNS-263", ["--"])).toBe(false);
+	});
+});
+
+describe("parseFalenoWorksHtml", () => {
+	it("parses the real FNS-263 page fixture", () => {
+		const data = parseFalenoWorksHtml(fns263Fixture);
+		expect(data).not.toBeNull();
+		expect(data!.previewUrl).toBe(
+			"https://cdn.faleno.net/top/wp-content/uploads/2026/09/FNS-263_PR.mp4",
+		);
+		expect(data!.coverUrl).toBe(
+			"https://cdn.faleno.net/top/wp-content/uploads/2026/09/FNS-263_1200.jpg?output-quality=60",
+		);
+		expect(data!.shortTitle).toBe(
+			"【汗・潮・淫汁・お漏らし】柏木【雫】を搾り尽くす体液ダダ洩れアクメ覚醒SEX 柏木雫",
+		);
+		expect(data!.title).toBe(
+			"撮影を重ねるごとにエロくなっていく柏木雫ちゃんの汗、潮、マ〇汁、更にはヨダレ、涙まで全てを搾り尽くして味わい尽くす1本！スレンダーなピュアボディがドロドロの体液まみれでイキ狂う姿をお楽しみください。",
+		);
+	});
+
+	it("returns null for empty or unrelated HTML", () => {
+		expect(parseFalenoWorksHtml("")).toBeNull();
+		expect(parseFalenoWorksHtml("<html><body>404 Not Found</body></html>")).toBeNull();
 	});
 });

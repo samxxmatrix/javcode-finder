@@ -21,6 +21,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@wxt-dev/module-react": "^1.2.2",
