@@ -25,6 +25,7 @@ import {
 import type { SupportedLocale } from "../../../src/lib/types";
 import { classifyWebdavVerify, type WebdavVerifyResult } from "../../../src/lib/favorites";
 import { formatUsage, type FallbackService } from "../../../src/lib/translate";
+import { normalizePrefix } from "../../../src/lib/faleno";
 
 interface SettingsViewProps {
 	locale: SupportedLocale;
@@ -112,6 +113,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
+	const [falenoPrefixes, setFalenoPrefixes] = useState<string[]>([]);
+	const [newPrefixInput, setNewPrefixInput] = useState("");
 	const [customRegex, setCustomRegex] = useState("");
 	const [regexError, setRegexError] = useState<string | null>(null);
 	const [previewVolume, setPreviewVolume] = useState(DEFAULT_SETTINGS.previewVolume);
@@ -238,6 +241,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		void refreshTranslateUsage(current.translateApiUrl, current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
+		setFalenoPrefixes(current.falenoPrefixes);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
 		setPreviewVolume(current.previewVolume);
 	}, []);
@@ -264,6 +268,19 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 
 	const handleRemoveHost = (hostToRemove: string) => {
 		setExcludedHosts(excludedHosts.filter((h) => h !== hostToRemove));
+	};
+
+	const handleAddPrefix = () => {
+		const norm = normalizePrefix(newPrefixInput);
+		if (!norm) return;
+		if (!falenoPrefixes.includes(norm)) {
+			setFalenoPrefixes([...falenoPrefixes, norm]);
+		}
+		setNewPrefixInput("");
+	};
+
+	const handleRemovePrefix = (prefixToRemove: string) => {
+		setFalenoPrefixes(falenoPrefixes.filter((p) => p !== prefixToRemove));
 	};
 
 	const handleRegexChange = (val: string) => {
@@ -367,6 +384,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			dmmApiUrl,
 			dmmApiKey,
 			dmmEnabled,
+			falenoPrefixes,
 		});
 		// 保存后立即用新配置刷新用量
 		void refreshTranslateUsage(translateUrl, deeplApiKey);
@@ -414,6 +432,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setDmmEnabled(false);
 		setDmmVerifyError(null);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
+		setFalenoPrefixes([...DEFAULT_SETTINGS.falenoPrefixes]);
+		setNewPrefixInput("");
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
 		setPreviewVolume(DEFAULT_SETTINGS.previewVolume);
@@ -769,6 +789,62 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 					/>
 				</div>
 			</div>
+
+					<div className="settings-field">
+						<label className="settings-field__label">
+							{t.falenoPrefixesLabel}
+						</label>
+						<p className="settings-field__hint">{t.falenoPrefixesDesc}</p>
+						{falenoPrefixes.length > 0 && (
+							<div className="excluded-hosts-list">
+								{falenoPrefixes.map((prefix) => (
+									<span key={prefix} className="excluded-host-chip">
+										<span className="excluded-host-chip__name">{prefix}</span>
+										<button
+											type="button"
+											className="excluded-host-chip__remove"
+											onClick={() => handleRemovePrefix(prefix)}
+											title={`${t.removeSite}: ${prefix}`}
+											aria-label={`${t.removeSite}: ${prefix}`}
+										>
+											&times;
+										</button>
+									</span>
+								))}
+							</div>
+						)}
+						<div className="excluded-hosts-add-row">
+							<div className="settings-field__input-wrap">
+								<input
+									type="text"
+									className="settings-field__input excluded-hosts-input"
+									value={newPrefixInput}
+									onChange={(e) => setNewPrefixInput(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === "Enter") {
+											e.preventDefault();
+											handleAddPrefix();
+										}
+									}}
+									placeholder={t.falenoPrefixPlaceholder}
+									spellCheck={false}
+									autoComplete="off"
+								/>
+								<ClearButton
+									show={Boolean(newPrefixInput)}
+									onClick={() => setNewPrefixInput("")}
+									title={t.clearInput}
+								/>
+							</div>
+							<button
+								type="button"
+								className="popup-btn popup-btn--secondary excluded-hosts-add-btn"
+								onClick={handleAddPrefix}
+							>
+								{t.addSite}
+							</button>
+						</div>
+					</div>
 
 					<div className="settings-field__header-row">
 						<label className="settings-field__label" htmlFor="webdav-url">
