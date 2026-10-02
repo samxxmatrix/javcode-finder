@@ -191,8 +191,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmIncomplete: "请补全 DMM API 地址和 Key",
     falenoPrefixesLabel: "FALENO 番号头",
     falenoPrefixesDesc:
-      "番号以这些前缀开头时,DMM 与 JavTrailers 均查不到将回退 FALENO 官网。留空不启用。",
-    falenoPrefixPlaceholder: "输入前缀,如 FNS",
+      "番号以这些前缀开头时，若 DMM 与 JavTrailers 均查不到，将回退至 FALENO 官网。清空列表即不启用。",
+    falenoPrefixPlaceholder: "输入前缀，如 FNS",
     falenoSourceLabel: "FALENO",
   },
 
@@ -291,8 +291,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmIncomplete: "請補全 DMM API 位址與 Key",
     falenoPrefixesLabel: "FALENO 番號頭",
     falenoPrefixesDesc:
-      "番號以這些前綴開頭時,DMM 與 JavTrailers 均查不到將回退 FALENO 官網。留空不啟用。",
-    falenoPrefixPlaceholder: "輸入前綴,如 FNS",
+      "番號以這些前綴開頭時，若 DMM 與 JavTrailers 均查不到，將回退至 FALENO 官網。清空清單即不啟用。",
+    falenoPrefixPlaceholder: "輸入前綴，如 FNS",
     falenoSourceLabel: "FALENO",
   },
 
@@ -393,7 +393,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmIncomplete: "Fill in the DMM API URL and Key",
     falenoPrefixesLabel: "FALENO code prefixes",
     falenoPrefixesDesc:
-      "Codes starting with these prefixes fall back to the FALENO official site when both DMM and JavTrailers miss. Empty disables the fallback.",
+      "Codes starting with these prefixes fall back to the FALENO official site when both DMM and JavTrailers miss. An empty list disables the fallback.",
     falenoPrefixPlaceholder: "Prefix, e.g. FNS",
     falenoSourceLabel: "FALENO",
   },
