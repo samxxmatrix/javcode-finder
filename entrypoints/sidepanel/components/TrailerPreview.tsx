@@ -456,9 +456,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		onClose();
 	};
 
-	// 短标题行内容：dmm 商品名或 javtrailers 卡片标题；长标题行内容：仅 dmm 长文
+	// 短标题行内容：dmm 商品名、javtrailers 卡片标题，或 faleno 缺 alt 时的长标题；长标题行内容：仅 dmm 长文
 	const displayShortTitle =
-		media?.shortTitle || (media?.source === "javtrailers" ? media.title : null);
+		media?.shortTitle ||
+		(media?.source === "javtrailers" || media?.source === "faleno"
+			? media.title
+			: null);
 	const displayLongTitle = media?.shortTitle ? media.title : null;
 	const presentation = getPreviewPresentation({
 		resolution,

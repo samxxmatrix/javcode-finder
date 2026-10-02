@@ -238,6 +238,34 @@ describe("resolvePreview", () => {
 		});
 	});
 
+	it("does not request FALENO when DMM or JavTrailers resolves", async () => {
+		const dmmMedia: PreviewMedia = { ...media, source: "dmm", previewType: "mp4" };
+		const falenoLookup = vi.fn(async () => falenoMedia);
+		const dmmHit = await resolvePreview({
+			dmmEnabled: true,
+			dmmLookup: async () => dmmMedia,
+			javtrailersLookup: async () => media,
+			falenoLookup,
+		});
+
+		expect(dmmHit).toEqual({ status: "resolved", media: dmmMedia, errors: [] });
+		expect(falenoLookup).not.toHaveBeenCalled();
+
+		const javtrailersHit = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => media,
+			falenoLookup,
+		});
+
+		expect(javtrailersHit).toEqual({
+			status: "resolved",
+			media,
+			errors: [],
+		});
+		expect(falenoLookup).not.toHaveBeenCalled();
+	});
+
 	it("reports an error when JavTrailers throws and FALENO has no match", async () => {
 		const javtrailersError: PreviewLookupError = {
 			source: "javtrailers",
