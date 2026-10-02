@@ -13,6 +13,12 @@ import {
 	type DmmLookupData,
 } from "../src/lib/dmm";
 import { resolvePreview } from "../src/lib/resolve-preview";
+import {
+	buildFalenoWorksUrl,
+	matchesFalenoPrefix,
+	parseFalenoWorksHtml,
+	toFalenoCodeKey,
+} from "../src/lib/faleno";
 import type { PreviewLookupError, PreviewMedia } from "../src/lib/types";
 import {
 	buildBasicAuth,
@@ -147,6 +153,7 @@ export default defineBackground(() => {
 					dmmApiUrl?: string;
 					dmmApiKey?: string;
 					dmmEnabled?: boolean;
+					falenoPrefixes?: string[];
 				};
 
 				// 标题翻译：优先自建 Worker（开关开启且地址/Key 齐全）；
@@ -526,6 +533,9 @@ export default defineBackground(() => {
 
 				if (msg?.type !== "jt:resolve-detail" || !msg.code) return undefined;
 				const code = msg.code;
+				const falenoPrefixes = Array.isArray(msg.falenoPrefixes)
+					? msg.falenoPrefixes
+					: [];
 
 				void (async () => {
 					const dmmBase = (msg.dmmApiUrl || "").trim();
@@ -583,6 +593,49 @@ export default defineBackground(() => {
 								coverUrl: buildCoverUrlFromContentId(match.contentId),
 								previewUrl: buildTrailerUrlFromContentId(match.contentId),
 								previewType: "hls",
+							} satisfies PreviewMedia;
+						},
+						falenoLookup: async () => {
+							// 前缀不匹配则不触发兜底(返回 null = 跳过)
+							if (!matchesFalenoPrefix(code, falenoPrefixes)) {
+								return null;
+							}
+							const worksUrl = buildFalenoWorksUrl(code);
+							if (!worksUrl) return null;
+							let res: Response;
+							try {
+								res = await fetch(worksUrl, {
+									signal: AbortSignal.timeout(5000),
+								});
+							} catch (error) {
+								throw {
+									source: "faleno",
+									kind:
+										error instanceof Error &&
+										error.name === "TimeoutError"
+											? "timeout"
+											: "network",
+								} satisfies PreviewLookupError;
+							}
+							if (!res.ok) {
+								throw {
+									source: "faleno",
+									kind: "http",
+									status: res.status,
+								} satisfies PreviewLookupError;
+							}
+							const html = await res.text();
+							const data = parseFalenoWorksHtml(html);
+							if (!data) return null;
+							return {
+								source: "faleno",
+								detailUrl: worksUrl,
+								contentId: toFalenoCodeKey(code),
+								title: data.title,
+								shortTitle: data.shortTitle,
+								coverUrl: data.coverUrl,
+								previewUrl: data.previewUrl,
+								previewType: "mp4",
 							} satisfies PreviewMedia;
 						},
 					});

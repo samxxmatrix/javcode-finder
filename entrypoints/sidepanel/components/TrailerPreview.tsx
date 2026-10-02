@@ -177,6 +177,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				dmmEnabled: settings.dmmEnabled,
 				dmmApiUrl: settings.dmmApiUrl,
 				dmmApiKey: settings.dmmApiKey,
+				falenoPrefixes: settings.falenoPrefixes,
 			})) as PreviewResolution | undefined;
 			if (requestId !== resolutionRequestRef.current) return;
 			setResolution(
@@ -382,8 +383,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		video.volume = getSettings().previewVolume / 100;
 
 		setStatus("loading");
-		// dmm 源：mp4 直链直接播放，无需 hls.js 与 CORS 处理
-		if (media?.source === "dmm" && trailerUrl) {
+		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm 与 faleno 均为 mp4 直链)
+		if (
+			(media?.source === "dmm" || media?.source === "faleno") &&
+			trailerUrl
+		) {
 			video.src = trailerUrl;
 			void video.play().then(
 				() => {
@@ -452,9 +456,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		onClose();
 	};
 
-	// 短标题行内容：dmm 商品名或 javtrailers 卡片标题；长标题行内容：仅 dmm 长文
+	// 短标题行内容：dmm 商品名、javtrailers 卡片标题，或 faleno 缺 alt 时的长标题；长标题行内容：仅 dmm 长文
 	const displayShortTitle =
-		media?.shortTitle || (media?.source === "javtrailers" ? media.title : null);
+		media?.shortTitle ||
+		(media?.source === "javtrailers" || media?.source === "faleno"
+			? media.title
+			: null);
 	const displayLongTitle = media?.shortTitle ? media.title : null;
 	const presentation = getPreviewPresentation({
 		resolution,
@@ -465,7 +472,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	});
 	const formatLookupError = (error: PreviewLookupError) => {
 		const sourceLabel =
-			error.source === "dmm" ? t.dmmSourceLabel : t.javtrailersSourceLabel;
+			error.source === "dmm"
+				? t.dmmSourceLabel
+				: error.source === "faleno"
+					? t.falenoSourceLabel
+					: t.javtrailersSourceLabel;
 		const code = error.code === undefined ? "" : String(error.code);
 		const detail =
 			error.kind === "timeout"

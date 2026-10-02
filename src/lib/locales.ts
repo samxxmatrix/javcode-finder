@@ -90,6 +90,10 @@ export interface LocaleMessages {
 	dmmApiKeyLabel: string;
 	dmmEnableLabel: string;
 	dmmIncomplete: string;
+	falenoPrefixesLabel: string;
+	falenoPrefixesDesc: string;
+	falenoPrefixPlaceholder: string;
+	falenoSourceLabel: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -185,6 +189,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "启用 DMM 查询（预览/详情优先官方数据）",
     dmmIncomplete: "请补全 DMM API 地址和 Key",
+    falenoPrefixesLabel: "FALENO 番号前缀复查",
+    falenoPrefixesDesc:
+      "番号前缀以设置开头的，若普通查询无结果将至 FALENO 官网查询。清空即不启用。",
+    falenoPrefixPlaceholder: "输入前缀，如 FNS",
+    falenoSourceLabel: "FALENO",
   },
 
   "zh-hant": {
@@ -280,6 +289,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "啟用 DMM 查詢（預覽/詳情優先官方資料）",
     dmmIncomplete: "請補全 DMM API 位址與 Key",
+    falenoPrefixesLabel: "FALENO 番號頭",
+    falenoPrefixesDesc:
+      "番號以這些前綴開頭時，若 DMM 與 JavTrailers 均查不到，將回退至 FALENO 官網。清空清單即不啟用。",
+    falenoPrefixPlaceholder: "輸入前綴，如 FNS",
+    falenoSourceLabel: "FALENO",
   },
 
   en: {
@@ -362,7 +376,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "Add to favorites",
     removeFavorite: "Remove from favorites",
     cloudSyncLabel: "Cloud Sync (WebDAV)",
-    webdavUrlPlaceholder:"WebDAV URL, e.g. https://dav.jianguoyun.com/dav/",
+    webdavUrlPlaceholder: "WebDAV URL, e.g. https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "Username (email)",
     webdavPassPlaceholder: "Password",
     webdavConnected: "Connected",
@@ -377,6 +391,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "Enable DMM lookup (official data first)",
     dmmIncomplete: "Fill in the DMM API URL and Key",
+    falenoPrefixesLabel: "FALENO code prefixes",
+    falenoPrefixesDesc:
+      "Codes starting with these prefixes fall back to the FALENO official site when both DMM and JavTrailers miss. An empty list disables the fallback.",
+    falenoPrefixPlaceholder: "Prefix, e.g. FNS",
+    falenoSourceLabel: "FALENO",
   },
 };
 

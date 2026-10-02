@@ -14,7 +14,7 @@ export type PopupStatus =
 	| "excluded_site"
 	| "error";
 
-export type PreviewLookupSource = "dmm" | "javtrailers";
+export type PreviewLookupSource = "dmm" | "javtrailers" | "faleno";
 
 export type PreviewPlaybackStatus =
 	| "idle"

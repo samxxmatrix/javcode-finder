@@ -340,4 +340,37 @@ describe("settings", () => {
 			expect(reset.customRegex).toBe(DEFAULT_SETTINGS.customRegex);
 		});
 	});
+
+	it("defaults FALENO prefixes to FNS", () => {
+		expect(DEFAULT_SETTINGS.falenoPrefixes).toEqual(["FNS"]);
+		expect(getSettings().falenoPrefixes).toEqual(["FNS"]);
+	});
+
+	it("normalizes and dedupes FALENO prefixes on save", () => {
+		saveSettings({ falenoPrefixes: ["fns ", "FNS", "fsdss-", ""] });
+		expect(getSettings().falenoPrefixes).toEqual(["FNS", "FSDSS"]);
+	});
+
+	it("keeps FALENO prefixes empty when explicitly cleared (disables fallback)", () => {
+		saveSettings({ falenoPrefixes: [] });
+		expect(getSettings().falenoPrefixes).toEqual([]);
+	});
+
+	it("falls back to the default FALENO prefixes when stored value is not an array", () => {
+		// 旧存储无该字段 → 补默认 ["FNS"]
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({});
+		expect(getSettings().falenoPrefixes).toEqual(["FNS"]);
+
+		// 字段被外部改成非数组 → 同样回退默认，不能崩溃
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+			falenoPrefixes: "FNS",
+		});
+		expect(getSettings().falenoPrefixes).toEqual(["FNS"]);
+
+		// 数组内非字符串元素被丢弃，合法前缀照常归一化
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+			falenoPrefixes: [123, null, "fns "],
+		});
+		expect(getSettings().falenoPrefixes).toEqual(["FNS"]);
+	});
 });

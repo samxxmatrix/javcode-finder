@@ -22,6 +22,17 @@ const dmmError: PreviewLookupError = {
 	message: "API Key is missing.",
 };
 
+const falenoMedia: PreviewMedia = {
+	source: "faleno",
+	detailUrl: "https://faleno.jp/top/works/fns263",
+	contentId: "fns263",
+	title: "長い説明",
+	shortTitle: "短いタイトル",
+	coverUrl: "https://cdn.faleno.net/cover.jpg",
+	previewUrl: "https://cdn.faleno.net/trailer.mp4",
+	previewType: "mp4",
+};
+
 describe("resolvePreview", () => {
 	it("returns JavTrailers media and retains a DMM error", async () => {
 		const result = await resolvePreview({
@@ -152,5 +163,128 @@ describe("resolvePreview", () => {
 
 		expect(javtrailersLookup).toHaveBeenCalledOnce();
 		expect(result).toEqual({ status: "not_found", media: null, errors: [] });
+	});
+
+	it("falls back to FALENO when DMM and JavTrailers both miss", async () => {
+		const result = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => null,
+			falenoLookup: async () => falenoMedia,
+		});
+
+		expect(result).toEqual({
+			status: "resolved",
+			media: falenoMedia,
+			errors: [],
+		});
+	});
+
+	it("resolves via FALENO and retains the JavTrailers failure", async () => {
+		const javtrailersError: PreviewLookupError = {
+			source: "javtrailers",
+			kind: "http",
+			status: 503,
+		};
+		const result = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => {
+				throw javtrailersError;
+			},
+			falenoLookup: async () => falenoMedia,
+		});
+
+		expect(result).toEqual({
+			status: "resolved",
+			media: falenoMedia,
+			errors: [javtrailersError],
+		});
+	});
+
+	it("reports an error when FALENO also fails after both sources miss", async () => {
+		const falenoError: PreviewLookupError = {
+			source: "faleno",
+			kind: "network",
+		};
+		const result = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => null,
+			falenoLookup: async () => {
+				throw falenoError;
+			},
+		});
+
+		expect(result).toEqual({
+			status: "error",
+			media: null,
+			errors: [falenoError],
+		});
+	});
+
+	it("reports not_found when FALENO also has no match", async () => {
+		const result = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => null,
+			falenoLookup: async () => null,
+		});
+
+		expect(result).toEqual({
+			status: "not_found",
+			media: null,
+			errors: [],
+		});
+	});
+
+	it("does not request FALENO when DMM or JavTrailers resolves", async () => {
+		const dmmMedia: PreviewMedia = { ...media, source: "dmm", previewType: "mp4" };
+		const falenoLookup = vi.fn(async () => falenoMedia);
+		const dmmHit = await resolvePreview({
+			dmmEnabled: true,
+			dmmLookup: async () => dmmMedia,
+			javtrailersLookup: async () => media,
+			falenoLookup,
+		});
+
+		expect(dmmHit).toEqual({ status: "resolved", media: dmmMedia, errors: [] });
+		expect(falenoLookup).not.toHaveBeenCalled();
+
+		const javtrailersHit = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => media,
+			falenoLookup,
+		});
+
+		expect(javtrailersHit).toEqual({
+			status: "resolved",
+			media,
+			errors: [],
+		});
+		expect(falenoLookup).not.toHaveBeenCalled();
+	});
+
+	it("reports an error when JavTrailers throws and FALENO has no match", async () => {
+		const javtrailersError: PreviewLookupError = {
+			source: "javtrailers",
+			kind: "http",
+			status: 503,
+		};
+		const result = await resolvePreview({
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => {
+				throw javtrailersError;
+			},
+			falenoLookup: async () => null,
+		});
+
+		expect(result).toEqual({
+			status: "error",
+			media: null,
+			errors: [javtrailersError],
+		});
 	});
 });
