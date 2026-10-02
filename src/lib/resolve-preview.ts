@@ -10,6 +10,8 @@ export interface ResolvePreviewOptions {
 	dmmEnabled: boolean;
 	dmmLookup: () => Promise<PreviewMedia | null>;
 	javtrailersLookup: () => Promise<PreviewMedia | null>;
+	// FALENO 兜底:调用方仅在番号前缀命中时提供实现;未提供时保持原有两级链路
+	falenoLookup?: () => Promise<PreviewMedia | null>;
 }
 
 function isLookupErrorKind(value: unknown): value is PreviewLookupErrorKind {
@@ -59,12 +61,14 @@ function normalizeLookupError(
 
 /**
  * Resolves preview data in source priority order without losing lookup failures.
- * A DMM miss is not an error; a DMM failure is retained while JavTrailers runs.
+ * 链路:DMM(启用时)→ JavTrailers → FALENO(可选兜底)。
+ * 前级未命中或抛错都继续下一级;DMM 查无不算错误,DMM 抛错保留在 errors。
  */
 export async function resolvePreview({
 	dmmEnabled,
 	dmmLookup,
 	javtrailersLookup,
+	falenoLookup,
 }: ResolvePreviewOptions): Promise<PreviewResolution> {
 	const errors: PreviewLookupError[] = [];
 
@@ -80,14 +84,32 @@ export async function resolvePreview({
 		}
 	}
 
+	// failed 记录 javtrailers/faleno 是否抛错:兜底后仍未命中时据此报 error 而非 not_found
+	let failed = false;
+
 	try {
 		const javtrailersMedia = await javtrailersLookup();
 		if (javtrailersMedia) {
 			return { status: "resolved", media: javtrailersMedia, errors };
 		}
-		return { status: "not_found", media: null, errors };
 	} catch (error) {
+		failed = true;
 		errors.push(normalizeLookupError("javtrailers", error));
-		return { status: "error", media: null, errors };
 	}
+
+	if (falenoLookup) {
+		try {
+			const falenoMedia = await falenoLookup();
+			if (falenoMedia) {
+				return { status: "resolved", media: falenoMedia, errors };
+			}
+		} catch (error) {
+			failed = true;
+			errors.push(normalizeLookupError("faleno", error));
+		}
+	}
+
+	return failed
+		? { status: "error", media: null, errors }
+		: { status: "not_found", media: null, errors };
 }
