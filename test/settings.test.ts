@@ -340,4 +340,19 @@ describe("settings", () => {
 			expect(reset.customRegex).toBe(DEFAULT_SETTINGS.customRegex);
 		});
 	});
+
+	it("defaults FALENO prefixes to FNS", () => {
+		expect(DEFAULT_SETTINGS.falenoPrefixes).toEqual(["FNS"]);
+		expect(getSettings().falenoPrefixes).toEqual(["FNS"]);
+	});
+
+	it("normalizes and dedupes FALENO prefixes on save", () => {
+		saveSettings({ falenoPrefixes: ["fns ", "FNS", "fsdss-", ""] });
+		expect(getSettings().falenoPrefixes).toEqual(["FNS", "FSDSS"]);
+	});
+
+	it("keeps FALENO prefixes empty when explicitly cleared (disables fallback)", () => {
+		saveSettings({ falenoPrefixes: [] });
+		expect(getSettings().falenoPrefixes).toEqual([]);
+	});
 });
