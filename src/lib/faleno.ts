@@ -27,7 +27,7 @@ export function normalizePrefix(input: string): string {
 }
 
 /**
- * 番号是否命中任一 FALENO 番号头:两侧均转 comparison key 比较,
+ * 番号是否命中任一 FALENO 番号前缀:两侧均转 comparison key 比较,
  * 大小写与分隔符通吃。空番号或空前缀列表均不命中。
  */
 export function matchesFalenoPrefix(code: string, prefixes: string[]): boolean {
