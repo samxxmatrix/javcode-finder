@@ -107,6 +107,7 @@ export interface LocaleMessages {
 	falenoPrefixesDesc: string;
 	falenoPrefixPlaceholder: string;
 	falenoSourceLabel: string;
+	fc2SourceLabel: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -220,6 +221,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "番号前缀以设置开头的，若普通查询无结果将至 FALENO 官网查询。清空即不启用。",
     falenoPrefixPlaceholder: "输入前缀，如 FNS",
     falenoSourceLabel: "FALENO",
+    fc2SourceLabel: "FC2",
   },
 
   "zh-hant": {
@@ -333,6 +335,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "番號前綴以設定開頭的，若普通查詢無結果將至 FALENO 官網查詢。清空即不啟用。",
     falenoPrefixPlaceholder: "輸入前綴，如 FNS",
     falenoSourceLabel: "FALENO",
+    fc2SourceLabel: "FC2",
   },
 
   en: {
@@ -449,6 +452,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "Codes whose prefixes match the settings fall back to the FALENO official site when the normal lookup finds nothing. Clearing the list disables it.",
     falenoPrefixPlaceholder: "Prefix, e.g. FNS",
     falenoSourceLabel: "FALENO",
+    fc2SourceLabel: "FC2",
   },
 };
 
