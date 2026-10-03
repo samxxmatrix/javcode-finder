@@ -1,4 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
+import {
+	embyRegexKey,
+	embyServerKey,
+	isEmbyIndexFresh,
+	matchEmbyCodes,
+} from "../../src/lib/emby";
+import { browserEmbyStore, loadEmbyIndex } from "../../src/lib/emby-index";
 import { extractCandidatesInTab } from "../../src/lib/extract-codes";
 import {
 	FAVORITES_STORAGE_KEY,
@@ -11,6 +18,7 @@ import {
 } from "../../src/lib/favorites";
 import { messages } from "../../src/lib/locales";
 import { markCodesForTab } from "../../src/lib/mark-codes";
+import { normalizeCode } from "../../src/lib/normalize-code";
 import {
 	DEFAULT_CODE_REGEX,
 	getEffectiveLocale,
@@ -53,11 +61,15 @@ export const App: React.FC = () => {
 	const settingsRef = useRef<SettingsViewHandle>(null);
 	// 收藏的番号列表（本地 storage 为准，云端为镜像）
 	const [favorites, setFavorites] = useState<string[]>([]);
+	// 已在 Emby 库中的番号（归一化形式），空集合 = 不显示任何标识
+	const [inLibrary, setInLibrary] = useState<Set<string>>(() => new Set());
 	// 云端推送防抖计时器（合并连续收藏操作，降低请求频率）
 	const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// 导航完成后延迟扫描计时器（等待新文档稳定）与空结果补扫计时器
 	const navScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// Emby 刷新请求序号：新一轮扫描递增，迟到的旧刷新据此放弃写入（防止覆盖新图标）
+	const embyRefreshIdRef = useRef(0);
 
 	// 获取面板目标的标签页：优先绑定 tab，否则当前窗口活动 tab
 	const getTargetTab = async (): Promise<
@@ -154,12 +166,86 @@ export const App: React.FC = () => {
 		}
 	};
 
+	// 当前生效的番号正则（与扫描用的一致，决定索引键口径）
+	const activeRegex = (): string => {
+		const settings = getSettings();
+		return settings.customRegex || DEFAULT_CODE_REGEX;
+	};
+
+	// Emby：TTL 内复用索引；需要时让 background 同步（由 background 落盘），再本地匹配
+	const refreshEmbyIndex = async (codes: string[]): Promise<void> => {
+		// 本轮刷新序号：任何 await 之后发现已有更新的一轮（或扫描已作废本轮）就放弃写入
+		const requestId = ++embyRefreshIdRef.current;
+		const settings = getSettings();
+		if (!settings.embyEnabled || codes.length === 0) {
+			setInLibrary(new Set());
+			return;
+		}
+		const regex = activeRegex();
+		const regexKey = embyRegexKey(regex);
+		// serverKey 参与新鲜度判定：换服务器/改 Key 后旧索引立即失效，不会拿旧库的图标
+		const serverKey = embyServerKey(settings.embyUrl, settings.embyApiKey);
+		let index = await loadEmbyIndex(browserEmbyStore());
+		if (requestId !== embyRefreshIdRef.current) return;
+		if (!isEmbyIndexFresh(index, Date.now(), serverKey, regexKey)) {
+			try {
+				const res = (await browser.runtime.sendMessage({
+					type: "jt:emby-sync",
+					embyUrl: settings.embyUrl,
+					embyApiKey: settings.embyApiKey,
+					regex,
+				})) as
+					| {
+							ok?: boolean;
+							mode?: string;
+							serverKey?: string;
+							syncedAt?: number;
+							total?: number;
+							keys?: string[];
+					  }
+					| undefined;
+				if (requestId !== embyRefreshIdRef.current) return;
+				if (res?.ok && res.mode === "too-large") {
+					// 库太大：放弃全量索引，改逐条查询（并发 4，background 内复核）
+					const checked = (await browser.runtime.sendMessage({
+						type: "jt:emby-check",
+						embyUrl: settings.embyUrl,
+						embyApiKey: settings.embyApiKey,
+						regex,
+						codes,
+					})) as { ok?: boolean; matched?: string[] } | undefined;
+					if (requestId !== embyRefreshIdRef.current) return;
+					setInLibrary(new Set(checked?.matched ?? []));
+					return;
+				}
+				if (res?.ok && Array.isArray(res.keys)) {
+					// background 已把同一份索引写入 storage.local，这里只用于本次匹配
+					index = {
+						v: 1,
+						serverKey: res.serverKey ?? "",
+						regexKey,
+						syncedAt: res.syncedAt ?? Date.now(),
+						total: res.total ?? res.keys.length,
+						keys: res.keys,
+					};
+				}
+			} catch {
+				// 同步失败：沿用旧索引（宁可略旧，也不要把在库判成不在库）
+			}
+		}
+		if (requestId !== embyRefreshIdRef.current) return;
+		setInLibrary(index ? matchEmbyCodes(index.keys, codes) : new Set());
+	};
+
 	const runScan = async (isRescan = false) => {
 		setStatus("loading");
 		setErrorMessage(null);
 		setCandidates([]);
 		setTruncated(false);
 		setPreviewCode(null);
+		// 清掉上一页的在库标识（并作废仍在途的 Emby 刷新，避免旧结果回填）
+		embyRefreshIdRef.current++;
+		setInLibrary(new Set());
 		// 新一轮扫描作废未执行的延迟/补扫计时器
 		if (navScanTimerRef.current) clearTimeout(navScanTimerRef.current);
 		if (rescanTimerRef.current) clearTimeout(rescanTimerRef.current);
@@ -204,6 +290,8 @@ export const App: React.FC = () => {
 
 			setTruncated(extraction.truncated);
 			setCandidates(extraction.candidates);
+			// 在库判定不阻塞列表渲染：先出结果，命中后补图标
+			void refreshEmbyIndex(extraction.candidates);
 
 			setStatus(
 				extraction.candidates.length === 0 ? "no_candidates" : "results",
@@ -575,6 +663,7 @@ export const App: React.FC = () => {
 						onClose={() => setPreviewCode(null)}
 						isFavorite={favorites.includes(previewCode)}
 						onToggleFavorite={() => handleToggleFavorite(previewCode)}
+						inLibrary={inLibrary.has(normalizeCode(previewCode))}
 					/>
 				)}
 				{showSettings ? (
@@ -681,6 +770,7 @@ export const App: React.FC = () => {
 									onPreview={setPreviewCode}
 									favorites={favorites}
 									onToggleFavorite={handleToggleFavorite}
+									inLibrary={inLibrary}
 								/>
 							</div>
 						)}

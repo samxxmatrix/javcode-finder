@@ -21,7 +21,7 @@ interface CodeListProps {
 	onPreview: (code: string) => void;
 	favorites: string[];
 	onToggleFavorite: (code: string) => void;
-	inLibrary?: Set<string>;
+	inLibrary: Set<string>;
 }
 
 export const CodeList: React.FC<CodeListProps> = ({
@@ -32,7 +32,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 	onPreview,
 	favorites,
 	onToggleFavorite,
-	inLibrary = new Set<string>(),
+	inLibrary,
 }) => {
 	if (candidates.length === 0) return null;
 
@@ -142,13 +142,13 @@ export const CodeList: React.FC<CodeListProps> = ({
 									<FavoriteIcon active />
 								</button>
 							)}
-							{/* 已在 Emby 库：纯标识，位于收藏图标右侧，位置不随收藏状态变化 */}
+							{/* 已在 Emby 库：纯标识，始终排在收藏图标之后；收藏图标按状态条件渲染，故横向位置随收藏状态变化，仅先后顺序稳定 */}
 							{inLibrary.has(code) && (
 								<span
 									className="unmatched-item__in-library"
 									role="img"
 									title={t.embyInLibrary}
-									aria-label={t.embyInLibrary}
+									aria-label={`${t.embyInLibrary}: ${code}`}
 								>
 									<EmbyBadge />
 								</span>

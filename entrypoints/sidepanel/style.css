@@ -1012,6 +1012,14 @@ button:focus-visible {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	/* 省略号由容器绘制，取金色与番号文字一致（否则继承标题的次要色） */
+	color: var(--accent-gold-text);
+}
+
+/* 番号容器 overflow:hidden 会裁掉 UA 焦点环，改为内缩的自绘焦点环 */
+.trailer-preview__code:focus-visible {
+	outline: 2px solid var(--accent-gold);
+	outline-offset: -2px;
 }
 
 .trailer-preview__code {
@@ -1278,7 +1286,6 @@ button:focus-visible {
 	flex: 0 0 auto;
 	vertical-align: middle;
 	padding: 1px 3px;
-	margin-left: 6px;
 	border-radius: 4px;
 	line-height: 1;
 }

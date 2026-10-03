@@ -31,7 +31,7 @@ interface TrailerPreviewProps {
 	onClose: () => void;
 	isFavorite: boolean;
 	onToggleFavorite: () => void;
-	inLibrary?: boolean;
+	inLibrary: boolean;
 }
 
 type PlayerStatus = "idle" | "loading" | "playing" | "failed";
@@ -44,7 +44,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	onClose,
 	isFavorite,
 	onToggleFavorite,
-	inLibrary = false,
+	inLibrary,
 }) => {
 	const [coverError, setCoverError] = useState(false);
 	// 主媒体 404 时从详情页兜底的备用媒体（null = 未拉取；对象 = 已拉取，字段可为 null）
