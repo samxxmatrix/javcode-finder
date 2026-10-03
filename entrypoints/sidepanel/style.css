@@ -631,6 +631,12 @@ button:focus-visible {
 	line-height: 1.4;
 }
 
+/* 字段行右端的附属说明（与左侧标签两端对齐；换行后仍靠右） */
+.settings-field__hint--end {
+	margin-left: auto;
+	text-align: right;
+}
+
 .settings-field__reset-link {
 	background: none;
 	border: none;

@@ -1014,6 +1014,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							<label className="settings-field__label" htmlFor="emby-api-key">
 								{t.embyApiKeyLabel}
 							</label>
+							{embyIndexInfo.syncedAt !== null && (
+								<span className="settings-field__hint settings-field__hint--end">
+									{t.embyItemCountLabel(embyIndexInfo.total)}
+								</span>
+							)}
 						</div>
 						<div className="settings-field__input-wrap">
 							<input
@@ -1055,11 +1060,6 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								{t.embySyncNow}
 							</button>
 						</div>
-						{embyIndexInfo.syncedAt !== null && (
-							<p className="settings-field__hint">
-								{t.embyItemCountLabel(embyIndexInfo.total)}
-							</p>
-						)}
 						{embyTooLarge && (
 							<p className="settings-field__hint">{t.embyTooLarge}</p>
 						)}
