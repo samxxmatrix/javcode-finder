@@ -324,6 +324,8 @@ export function isEmbyIndexFresh(
 	serverKey: string,
 	regexKey: string,
 ): boolean {
+	// 空指纹 fail closed：索引里的空 serverKey 不得与「未配置」的调用方互相匹配
+	if (!serverKey) return false;
 	if (!index) return false;
 	if (index.serverKey !== serverKey) return false;
 	if (index.regexKey !== regexKey) return false;
@@ -342,6 +344,8 @@ export function needsEmbyFullSync(
 	serverKey: string,
 	regexKey: string,
 ): boolean {
+	// 空指纹 fail closed：未配置服务器时一律要求全量重建（而不是复用空索引）
+	if (!serverKey) return true;
 	if (!index) return true;
 	if (index.serverKey !== serverKey) return true;
 	if (index.regexKey !== regexKey) return true;
