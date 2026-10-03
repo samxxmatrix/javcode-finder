@@ -234,6 +234,10 @@ describe("番号键", () => {
 		expect(codeKeyB("JUL00769")).toBe("JUL769");
 	});
 
+	it("键只用于比较、不得回灌：前缀自带 0 时去零结果不再等价", () => {
+		expect(codeKeyB("A0-123")).toBe("A0123");
+	});
+
 	it("keyA 与 keyB 相同时只返回一个键", () => {
 		expect(keysForCode("JUL-769")).toEqual(["JUL769"]);
 		expect(keysForCode("HEYZO-0406").sort()).toEqual(["HEYZO0406", "HEYZO406"]);
@@ -242,21 +246,75 @@ describe("番号键", () => {
 	it("超过 64 字符或空值的候选不生成键", () => {
 		expect(keysForCode("A".repeat(70))).toEqual([]);
 		expect(keysForCode("   ")).toEqual([]);
+		// 归一后为空串（纯分隔符）也不生成键
+		expect(keysForCode("-")).toEqual([]);
 	});
 });
 
 describe("extractKeysFromItem", () => {
-	it("逐字段抽取：Name/FileName/Path 上的号都能取到", () => {
+	it("逐字段抽取：三个字段各自的番号都能取到", () => {
 		const keys = extractKeysFromItem({
-			Name: "JUL-769 意志坚强…",
-			FileName: "jul-769-C.mp4",
-			Path: "/mnt/media/TV/_pikpak/jul-769-C.mp4",
+			Name: "AAA-100 甲",
+			FileName: "bbb-200.mp4",
+			Path: "/mnt/media/TV/ccc-300.mp4",
 		});
-		expect(keys).toContain("JUL769");
+		expect(keys).toContain("AAA100");
+		expect(keys).toContain("BBB200");
+		expect(keys).toContain("CCC300");
+	});
+
+	it("非字符串字段（数字/数组）直接跳过，不抛异常", () => {
+		expect(extractKeysFromItem({ Name: 123 as unknown as string })).toEqual(
+			[],
+		);
+		expect(
+			extractKeysFromItem({ Path: ["/x"] as unknown as string }),
+		).toEqual([]);
+	});
+
+	it("自定义正则生效：默认正则抽不到的短数字段也能命中", () => {
+		const pattern = String.raw`\b[A-Z]{3}-\d{2}\b`;
+		expect(extractKeysFromItem({ Name: "ABC-12" }, pattern)).toEqual([
+			"ABC12",
+		]);
+		expect(extractKeysFromItem({ Name: "ABC-12" })).toEqual([]);
+	});
+
+	it("空白正则回退默认正则", () => {
+		expect(extractKeysFromItem({ Name: "JUL-769" }, "   ")).toEqual(
+			extractKeysFromItem({ Name: "JUL-769" }),
+		);
+	});
+
+	it("非法正则回退默认正则", () => {
+		expect(extractKeysFromItem({ Name: "JUL-769" }, "([unclosed")).toEqual(
+			extractKeysFromItem({ Name: "JUL-769" }),
+		);
+	});
+
+	it("同一番号在多个字段重复出现时只返回一次（去重）", () => {
+		expect(
+			extractKeysFromItem({
+				Name: "JUL-769 甲",
+				FileName: "jul-769-C.mp4",
+				Path: "/mnt/media/TV/jul_769-C.mp4",
+			}),
+		).toEqual(["JUL769"]);
 	});
 
 	it("下划线先归一为连字符才可被正则命中", () => {
 		expect(extractKeysFromItem({ Name: "ABC_123" })).toContain("ABC123");
+	});
+
+	it("路径中的下划线目录名也能命中（含短伪键的已知代价）", () => {
+		expect(
+			extractKeysFromItem({ Path: "/mnt/media/TV/abc_123/x.mp4" }),
+		).toContain("ABC123");
+		// 注意：这套改写也可能从 "Season_01/ep_005/…" 造出 EP005 这类短伪键，
+		// 规格把它当作低概率假键接受。
+		expect(
+			extractKeysFromItem({ Path: "/mnt/media/TV/Season_01/ep_005/x.mp4" }),
+		).toContain("EP005");
 	});
 
 	it("多字段不得产生跨字段伪键（正反对照）", () => {
