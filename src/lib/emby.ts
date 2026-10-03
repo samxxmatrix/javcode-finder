@@ -1,9 +1,11 @@
-import { MAX_CANDIDATE_LENGTH } from "./extract-codes";
+import { MAX_CANDIDATE_LENGTH, extractCandidatesFromText } from "./extract-codes";
+import { normalizeCode } from "./normalize-code";
+import { DEFAULT_CODE_REGEX } from "./settings";
 
 /**
  * Emby 媒体库「已在库」判定的纯逻辑层。
- * 本轮：地址规范化、条目查询 URL 构造、响应解析。
- * 后续任务在此模块补充：番号键生成、候选匹配、同步策略判定。
+ * 本轮：地址规范化、条目查询 URL 构造、响应解析、索引键生成。
+ * 后续任务在此模块补充：候选匹配、同步策略判定。
  * 全部为纯函数（不碰浏览器 API），网络请求在 background 执行。
  */
 
@@ -54,7 +56,10 @@ export function normalizeEmbyBaseUrl(raw: string): string {
 	try {
 		const url = new URL(withScheme);
 		if (!isHostValid(url.hostname)) return "";
-		return `${url.protocol}//${url.host}`;
+		// 输出规范化后的主机名：去掉一个尾点，保证 "emby.local." 与 "emby.local" 同一 origin
+		const hostname = url.hostname.replace(/\.$/, "");
+		const host = url.port ? `${hostname}:${url.port}` : hostname;
+		return `${url.protocol}//${host}`;
 	} catch {
 		return "";
 	}
@@ -76,10 +81,12 @@ export function buildEmbyItemsUrl(
 	const base = normalizeEmbyBaseUrl(baseUrl);
 	const key = (apiKey || "").trim();
 	if (!base || !key) return "";
+	// 超过 EMBY_INDEX_LIMIT 的请求视为非法（一次拉完不现实），回退分页大小
 	const limit =
 		typeof query.limit === "number" &&
 		Number.isInteger(query.limit) &&
-		query.limit > 0
+		query.limit > 0 &&
+		query.limit <= EMBY_INDEX_LIMIT
 			? query.limit
 			: EMBY_PAGE_SIZE;
 	const startIndex =
@@ -142,10 +149,76 @@ export function parseEmbyItems(payload: unknown): EmbyItemsPage | null {
 		(item): item is EmbyItemLike =>
 			typeof item === "object" && item !== null && !Array.isArray(item),
 	);
+	// 只有非负整数才可用；其余（含缺失/负数/小数/NaN）记为未知
 	const total =
 		typeof raw.TotalRecordCount === "number" &&
-		Number.isFinite(raw.TotalRecordCount)
+		Number.isInteger(raw.TotalRecordCount) &&
+		raw.TotalRecordCount >= 0
 			? raw.TotalRecordCount
 			: null;
 	return { items, total };
+}
+
+/** 每个数字串去掉前导零（保留分隔符形态）——必须在去分隔符之前做 */
+export function stripNumericLeadingZeros(code: string): string {
+	return code.replace(/(?<!\d)0+(?=\d)/g, "");
+}
+
+/** 主键：归一化后去掉分隔符（JUL-769 → JUL769） */
+export function codeKeyA(code: string): string {
+	return normalizeCode(code).replace(/[\s_—–-]+/g, "");
+}
+
+/** 副键：归一化后按数字串去前导零，再去分隔符（HEYZO-0406 → HEYZO406） */
+export function codeKeyB(code: string): string {
+	return stripNumericLeadingZeros(normalizeCode(code)).replace(
+		/[\s_—–-]+/g,
+		"",
+	);
+}
+
+/** 一个写法的全部键（keyB 与 keyA 相同则只返回一个）；超长/空值返回空数组 */
+export function keysForCode(code: string): string[] {
+	const normalized = normalizeCode(code);
+	if (!normalized || normalized.length > EMBY_MAX_CODE_LENGTH) return [];
+	const a = codeKeyA(normalized);
+	if (!a) return [];
+	const b = codeKeyB(normalized);
+	return a === b ? [a] : [a, b];
+}
+
+/**
+ * 抽取单个条目上的全部键。
+ * 必须逐字段跑正则再合并：把多字段拼成一个大串会在边界造出伪键
+ * （实测会产生 CARIB-091326、NIA-489155 等并不存在的番号）。
+ * 抽取前把 "_" 归一为 "-"：面板正则的分隔符类不含下划线。
+ */
+export function extractKeysFromItem(
+	item: EmbyItemLike,
+	regex?: string,
+): string[] {
+	const keys: string[] = [];
+	for (const field of [item.Name, item.FileName, item.Path]) {
+		if (!field) continue;
+		const { candidates } = extractCandidatesFromText(
+			field.replace(/_/g, "-"),
+			regex && regex.trim() ? regex : DEFAULT_CODE_REGEX,
+		);
+		for (const candidate of candidates) {
+			keys.push(...keysForCode(candidate));
+		}
+	}
+	return keys;
+}
+
+/** 把条目数组汇总成去重后的键集合 */
+export function buildEmbyIndexKeys(
+	items: EmbyItemLike[],
+	regex?: string,
+): string[] {
+	const keys = new Set<string>();
+	for (const item of items) {
+		for (const key of extractKeysFromItem(item, regex)) keys.add(key);
+	}
+	return [...keys];
 }

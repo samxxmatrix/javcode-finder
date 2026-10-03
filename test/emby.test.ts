@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+	EMBY_INDEX_LIMIT,
 	EMBY_PAGE_SIZE,
+	buildEmbyIndexKeys,
 	buildEmbyItemsUrl,
 	buildEmbySearchUrl,
+	codeKeyA,
+	codeKeyB,
+	extractKeysFromItem,
+	keysForCode,
 	normalizeEmbyBaseUrl,
 	parseEmbyItems,
 } from "../src/lib/emby";
@@ -61,6 +67,16 @@ describe("normalizeEmbyBaseUrl", () => {
 	it("纯空白输入返回空串", () => {
 		expect(normalizeEmbyBaseUrl("   ")).toBe("");
 	});
+
+	it("去掉主机名尾点，保证带点与不带点是同一个 origin", () => {
+		expect(normalizeEmbyBaseUrl("emby.local.")).toBe("http://emby.local");
+		expect(normalizeEmbyBaseUrl("http://emby.local.:8096/")).toBe(
+			"http://emby.local:8096",
+		);
+		expect(normalizeEmbyBaseUrl("emby.local.")).toBe(
+			normalizeEmbyBaseUrl("emby.local"),
+		);
+	});
 });
 
 describe("buildEmbyItemsUrl", () => {
@@ -111,6 +127,17 @@ describe("buildEmbyItemsUrl", () => {
 		expect(withQuery({ startIndex: -5 }).searchParams.get("StartIndex")).toBe(
 			"0",
 		);
+	});
+
+	it("limit 超过索引上限视为非法并回退分页大小", () => {
+		const withQuery = (query: { limit?: number }): URL =>
+			new URL(buildEmbyItemsUrl("http://h:8096", "K", query));
+		expect(
+			withQuery({ limit: EMBY_INDEX_LIMIT }).searchParams.get("Limit"),
+		).toBe(String(EMBY_INDEX_LIMIT));
+		expect(
+			withQuery({ limit: EMBY_INDEX_LIMIT + 1 }).searchParams.get("Limit"),
+		).toBe(String(EMBY_PAGE_SIZE));
 	});
 });
 
@@ -168,5 +195,94 @@ describe("parseEmbyItems", () => {
 			items: [],
 			total: null,
 		});
+	});
+
+	it("TotalRecordCount 为负数或非整数时记为 null（只有非负整数才采用）", () => {
+		expect(parseEmbyItems({ Items: [], TotalRecordCount: -5 })).toEqual({
+			items: [],
+			total: null,
+		});
+		expect(parseEmbyItems({ Items: [], TotalRecordCount: 1.5 })).toEqual({
+			items: [],
+			total: null,
+		});
+	});
+});
+
+describe("番号键", () => {
+	it("keyA 去分隔符，keyB 按数字串去前导零", () => {
+		expect(codeKeyA("jul_769")).toBe("JUL769");
+		expect(codeKeyB("jul_769")).toBe("JUL769");
+
+		expect(codeKeyA("HEYZO-0406")).toBe("HEYZO0406");
+		expect(codeKeyB("HEYZO-0406")).toBe("HEYZO406");
+		expect(codeKeyB("HEYZO-406")).toBe("HEYZO406");
+
+		// 前缀自带数字：S2M-033
+		expect(codeKeyA("S2M-033")).toBe("S2M033");
+		expect(codeKeyB("S2M-033")).toBe("S2M33");
+		expect(codeKeyB("S2M-33")).toBe("S2M33");
+
+		// 多数字段：T38-072
+		expect(codeKeyA("T38-072")).toBe("T38072");
+		expect(codeKeyB("T38-072")).toBe("T3872");
+		expect(codeKeyB("T38-72")).toBe("T3872");
+
+		// 无分隔符写法
+		expect(codeKeyB("JUL00769")).toBe("JUL769");
+	});
+
+	it("keyA 与 keyB 相同时只返回一个键", () => {
+		expect(keysForCode("JUL-769")).toEqual(["JUL769"]);
+		expect(keysForCode("HEYZO-0406").sort()).toEqual(["HEYZO0406", "HEYZO406"]);
+	});
+
+	it("超过 64 字符或空值的候选不生成键", () => {
+		expect(keysForCode("A".repeat(70))).toEqual([]);
+		expect(keysForCode("   ")).toEqual([]);
+	});
+});
+
+describe("extractKeysFromItem", () => {
+	it("逐字段抽取：Name/FileName/Path 上的号都能取到", () => {
+		const keys = extractKeysFromItem({
+			Name: "JUL-769 意志坚强…",
+			FileName: "jul-769-C.mp4",
+			Path: "/mnt/media/TV/_pikpak/jul-769-C.mp4",
+		});
+		expect(keys).toContain("JUL769");
+	});
+
+	it("下划线先归一为连字符才可被正则命中", () => {
+		expect(extractKeysFromItem({ Name: "ABC_123" })).toContain("ABC123");
+	});
+
+	it("多字段不得产生跨字段伪键", () => {
+		const keys = extractKeysFromItem({
+			Name: "091326-001 Centurion Soap",
+			FileName: "4k688.com@091326-001-CARIB.mp4",
+			Path: "/mnt/media/completed/091326-001-CARIB/4k688.com@091326-001-CARIB.mp4",
+		});
+		expect(keys).not.toContain("CARIB091326");
+	});
+
+	it("数字开头 / 数字段不足 3 位 / 含字母的番号抽不到（已知限制）", () => {
+		expect(extractKeysFromItem({ Name: "091926-001-CARIB" })).toEqual([]);
+		expect(extractKeysFromItem({ Name: "SHD-13 小峰由衣" })).toEqual([]);
+		expect(extractKeysFromItem({ Name: "MK-S89 KIRARI 89" })).toEqual([]);
+	});
+});
+
+describe("buildEmbyIndexKeys", () => {
+	it("合并去重", () => {
+		const keys = buildEmbyIndexKeys([
+			{ Name: "JUL-769 甲" },
+			{ Name: "jul-769 乙" },
+			{ Name: "HEYZO-0406 丙" },
+		]);
+		expect(keys).toContain("JUL769");
+		expect(keys).toContain("HEYZO0406");
+		expect(keys).toContain("HEYZO406");
+		expect(new Set(keys).size).toBe(keys.length);
 	});
 });
