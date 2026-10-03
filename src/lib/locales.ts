@@ -108,6 +108,7 @@ export interface LocaleMessages {
 	falenoPrefixPlaceholder: string;
 	falenoSourceLabel: string;
 	fc2SourceLabel: string;
+	loadingTrailer: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -222,6 +223,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     falenoPrefixPlaceholder: "输入前缀，如 FNS",
     falenoSourceLabel: "FALENO",
     fc2SourceLabel: "FC2",
+    loadingTrailer: "正在加载预告片…",
   },
 
   "zh-hant": {
@@ -336,6 +338,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     falenoPrefixPlaceholder: "輸入前綴，如 FNS",
     falenoSourceLabel: "FALENO",
     fc2SourceLabel: "FC2",
+    loadingTrailer: "正在載入預告片…",
   },
 
   en: {
@@ -453,6 +456,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     falenoPrefixPlaceholder: "Prefix, e.g. FNS",
     falenoSourceLabel: "FALENO",
     fc2SourceLabel: "FC2",
+    loadingTrailer: "Loading trailer…",
   },
 };
 

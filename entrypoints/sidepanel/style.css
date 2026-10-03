@@ -1204,6 +1204,27 @@ button:focus-visible {
 	margin-bottom: 0;
 }
 
+/* 播放加载态：压暗封面 + 明确文案。
+   实测首帧要 ~7 s（大 mp4 经网关），只放一个 28px 细环会被满幅封面吃掉、
+   看起来像"卡住"。这里铺一层暗底并把文案摆出来。 */
+.trailer-preview__loading--playback {
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	background: rgba(0, 0, 0, 0.55);
+}
+
+.trailer-preview__loading-text {
+	color: #ffffff;
+	font-size: 12.5px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
 /* 音量配置行 */
 .settings-field__volume-row {
 	display: flex;
