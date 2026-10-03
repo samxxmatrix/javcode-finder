@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildFc2CoverThumbUrl,
 	buildFc2DetailUrl,
 	buildFc2EmbedUrl,
 	buildFc2SampleUrl,
@@ -46,6 +47,39 @@ describe("FC2 url builders", () => {
 	});
 });
 
+describe("buildFc2CoverThumbUrl", () => {
+	const png =
+		"https://storage201000.contents.fc2.com/file/381/38031442/1787814402.31.png";
+
+	it("rewrites an FC2 storage url through the thumbnail proxy at w480", () => {
+		expect(buildFc2CoverThumbUrl(png)).toBe(
+			"https://contents-thumbnail2.fc2.com/w480/storage201000.contents.fc2.com/file/381/38031442/1787814402.31.png",
+		);
+		expect(
+			buildFc2CoverThumbUrl(
+				"https://storage201000.contents.fc2.com/file/394/39375031/1784532659.2.jpg",
+			),
+		).toBe(
+			"https://contents-thumbnail2.fc2.com/w480/storage201000.contents.fc2.com/file/394/39375031/1784532659.2.jpg",
+		);
+	});
+
+	it("honours an explicit width", () => {
+		expect(buildFc2CoverThumbUrl(png, 640)).toContain("/w640/");
+		expect(buildFc2CoverThumbUrl(png, 320)).toContain("/w320/");
+	});
+
+	it("leaves non-storage hosts and empty input untouched", () => {
+		expect(
+			buildFc2CoverThumbUrl("https://adult.contents.fc2.com/api/v2/videos/1"),
+		).toBe("https://adult.contents.fc2.com/api/v2/videos/1");
+		expect(buildFc2CoverThumbUrl("https://example.com/a.png")).toBe(
+			"https://example.com/a.png",
+		);
+		expect(buildFc2CoverThumbUrl("")).toBe("");
+	});
+});
+
 describe("parseFc2SampleResponse", () => {
 	const ok = {
 		path: "https://vip-videoprem44000.fc2.com/up/202607/08/V/z/11e4d0d9e0975ad0.mp4?mid=abc",
@@ -53,10 +87,11 @@ describe("parseFc2SampleResponse", () => {
 		code: 200,
 	};
 
-	it("accepts a code=200 payload with an https path", () => {
+	it("accepts a code=200 payload and returns the cover via the thumbnail proxy", () => {
 		expect(parseFc2SampleResponse(ok)).toEqual({
 			previewUrl: ok.path,
-			coverUrl: ok.poster_image_path,
+			coverUrl:
+				"https://contents-thumbnail2.fc2.com/w480/storage201000.contents.fc2.com/file/a.jpg",
 		});
 	});
 

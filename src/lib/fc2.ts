@@ -41,6 +41,32 @@ export function buildFc2DetailUrl(articleId: string): string {
 	return `${FC2_ORIGIN}/article/${encodeURIComponent(articleId)}/`;
 }
 
+/**
+ * 面板封面渲染宽度：站点自己的图库就用 w480。实测（2026-10-04）
+ * png 原图 1280x720 / 732 KB → w480 261 KB；jpg 原图 1280x853 / 215 KB → w480 19 KB。
+ * 不要用 w800：该宽度下 png 仍有 638 KB，几乎没省。
+ */
+export const FC2_COVER_THUMB_WIDTH = 480;
+
+/**
+ * FC2 原图地址 → 缩略图代理地址（站点自己也是这么用的）：
+ *   `https://storage201000.contents.fc2.com/file/...`
+ *   → `https://contents-thumbnail2.fc2.com/w480/storage201000.contents.fc2.com/file/...`
+ *
+ * 只改写 `storage*.contents.fc2.com` 这一族主机；其他来源（含 FC2 自己的接口地址）
+ * 原样返回 —— 不猜、不改写未知来源。
+ */
+export function buildFc2CoverThumbUrl(
+	coverUrl: string,
+	width: number = FC2_COVER_THUMB_WIDTH,
+): string {
+	const match = /^https:\/\/(storage[a-z0-9-]*\.contents\.fc2\.com)\/(.+)$/i.exec(
+		coverUrl,
+	);
+	if (!match) return coverUrl;
+	return `https://contents-thumbnail2.fc2.com/w${width}/${match[1]}/${match[2]}`;
+}
+
 export interface Fc2Sample {
 	previewUrl: string;
 	coverUrl: string | null;
@@ -52,8 +78,10 @@ function isHttpsUrl(value: unknown): value is string {
 
 /**
  * 校验 `/sample` 响应。只有 `code === 200` 且 `path` 是 https 才认；
- * 其余情况（400 无此片、字段缺失、脏地址）一律返回 null —— fail closed，
- * 绝不把不可信地址交给 `<video>` / `<img>`。封面非法只丢封面，不影响预览。
+ * 其余情况（400 无此片、200 + `{path:501}` 哨兵值、字段缺失、脏地址）一律返回 null ——
+ * fail closed，绝不把不可信地址交给 `<video>` / `<img>`。
+ * 封面一律转缩略图代理：面板封面只渲染到几百 px，原图 700+ KB 是纯浪费。
+ * 封面非法只丢封面，不影响预览。
  */
 export function parseFc2SampleResponse(data: unknown): Fc2Sample | null {
 	if (typeof data !== "object" || data === null) return null;
@@ -62,7 +90,9 @@ export function parseFc2SampleResponse(data: unknown): Fc2Sample | null {
 	if (!isHttpsUrl(d.path)) return null;
 	return {
 		previewUrl: d.path,
-		coverUrl: isHttpsUrl(d.poster_image_path) ? d.poster_image_path : null,
+		coverUrl: isHttpsUrl(d.poster_image_path)
+			? buildFc2CoverThumbUrl(d.poster_image_path)
+			: null,
 	};
 }
 
