@@ -684,16 +684,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 								</>
 							)}
 							{status === "loading" ? (
-								// 实测首帧要 ~7 s（大 mp4 + 网关）：细环叠在满幅封面上几乎看不见。
-								// 必须压暗封面 + 给文案，否则等待期看起来就是"卡住"。
+								// 实测首帧要 ~7 s（大 mp4 + 网关）：细环叠在满幅封面上几乎看不见，
+								// 所以先压暗封面（--playback）再放转圈。不加文案。
 								<span
 									className="trailer-preview__loading trailer-preview__loading--playback"
-									role="status"
+									aria-hidden="true"
 								>
 									<span className="spinner" />
-									<span className="trailer-preview__loading-text">
-										{t.loadingTrailer}
-									</span>
 								</span>
 							) : presentation.showPlayButton ? (
 								<button
