@@ -53,6 +53,42 @@ export function transitionPreviewNotice(
 	return event === "dismiss";
 }
 
+/** `<video>.readyState` 达到此值表示已有当前帧数据（HAVE_CURRENT_DATA） */
+export const HAVE_CURRENT_DATA = 2;
+
+export interface FirstFrameTarget {
+	readyState: number;
+	addEventListener(
+		type: "loadeddata",
+		listener: () => void,
+		options: { once: true },
+	): void;
+}
+
+/**
+ * 首帧就绪后才进入播放态。
+ *
+ * 起因（已复现的用户症状）：原先 `video.play().then(() => 显示 video)` —— `play()` 在首帧
+ * 解码之前就 resolve，`<video controls>` 一显示，浏览器会先画自己的半透明中央播放按钮，
+ * 直到首帧数据到达才消失，看起来就是"播放按钮卡住、等视频加载完才消失"。
+ * 改为等 `loadeddata`（`readyState >= 2`）再切播放态，等待期间保持面板自己的 loading spinner。
+ *
+ * 重播场景元素已有帧数据，`loadeddata` 不会再触发，故先判 readyState 立即切。
+ *
+ * @returns true = 已立即就绪；false = 已挂好一次性监听
+ */
+export function armPlayingOnFirstFrame(
+	video: FirstFrameTarget,
+	onReady: () => void,
+): boolean {
+	if (video.readyState >= HAVE_CURRENT_DATA) {
+		onReady();
+		return true;
+	}
+	video.addEventListener("loadeddata", onReady, { once: true });
+	return false;
+}
+
 export function getPreviewPresentation(
 	input: PreviewPresentationInput,
 ): PreviewPresentation {

@@ -5,6 +5,7 @@ import {
 	destroyHlsInstance,
 } from "../../../src/lib/hls-instance";
 import {
+	armPlayingOnFirstFrame,
 	getPreviewPresentation,
 	transitionPreviewNotice,
 } from "../../../src/lib/preview-state";
@@ -367,14 +368,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		}
 		video.src = fb.trailerUrl;
 		setStatus("loading");
-		void video.play().then(
-			() => {
-				if (requestId === playbackRequestRef.current) setStatus("playing");
-			},
-			() => {
-				if (requestId === playbackRequestRef.current) setStatus("failed");
-			},
-		);
+		// 首帧就绪才切播放态：否则 <video controls> 会先画浏览器原生的半透明中央播放按钮
+		armPlayingOnFirstFrame(video, () => {
+			if (requestId === playbackRequestRef.current) setStatus("playing");
+		});
+		void video.play().catch(() => {
+			if (requestId === playbackRequestRef.current) setStatus("failed");
+		});
 	};
 
 	const handlePlay = async () => {
@@ -394,14 +394,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 均为 mp4 直链)
 		if (isDirectMp4Source(media?.source) && trailerUrl) {
 			video.src = trailerUrl;
-			void video.play().then(
-				() => {
-					if (requestId === playbackRequestRef.current) setStatus("playing");
-				},
-				() => {
-					if (requestId === playbackRequestRef.current) setStatus("failed");
-				},
-			);
+			// 首帧就绪才切播放态：否则浏览器原生控件会先画出半透明中央播放按钮（"按钮卡住"）
+			armPlayingOnFirstFrame(video, () => {
+				if (requestId === playbackRequestRef.current) setStatus("playing");
+			});
+			void video.play().catch(() => {
+				if (requestId === playbackRequestRef.current) setStatus("failed");
+			});
 			return;
 		}
 		try {
@@ -415,7 +414,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				hls.attachMedia(video);
 				hls.on(Hls.Events.MANIFEST_PARSED, () => {
 					if (requestId !== playbackRequestRef.current) return;
-					setStatus("playing");
+					// 首帧就绪才切播放态（同 mp4 路径，避免原生中央播放按钮闪出）
+					armPlayingOnFirstFrame(video, () => {
+						if (requestId === playbackRequestRef.current) setStatus("playing");
+					});
 					// 处于用户点击手势内，不会被自动播放策略拦截
 					void video.play().catch(() => {
 						if (requestId !== playbackRequestRef.current) return;
@@ -438,14 +440,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
 				// Safari 原生支持 HLS，无需 hls.js
 				video.src = trailerUrl;
-				void video.play().then(
-					() => {
-						if (requestId === playbackRequestRef.current) setStatus("playing");
-					},
-					() => {
-						if (requestId === playbackRequestRef.current) setStatus("failed");
-					},
-				);
+				armPlayingOnFirstFrame(video, () => {
+					if (requestId === playbackRequestRef.current) setStatus("playing");
+				});
+				void video.play().catch(() => {
+					if (requestId === playbackRequestRef.current) setStatus("failed");
+				});
 			} else {
 				setStatus("failed");
 			}

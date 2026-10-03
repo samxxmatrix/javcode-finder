@@ -1,13 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+	armPlayingOnFirstFrame,
 	getPreviewPresentation,
 	transitionPreviewNotice,
+	type FirstFrameTarget,
 } from "../src/lib/preview-state";
 import type {
 	PreviewLookupError,
 	PreviewMedia,
 	PreviewResolution,
 } from "../src/lib/types";
+
+describe("armPlayingOnFirstFrame", () => {
+	it("switches immediately when frame data already exists (replay case)", () => {
+		const onReady = vi.fn();
+		const addEventListener = vi.fn();
+		const video: FirstFrameTarget = { readyState: 2, addEventListener };
+
+		expect(armPlayingOnFirstFrame(video, onReady)).toBe(true);
+		expect(onReady).toHaveBeenCalledTimes(1);
+		// 已有帧数据时 loadeddata 不会再触发，必须立即切，否则 spinner 永远停住
+		expect(addEventListener).not.toHaveBeenCalled();
+	});
+
+	it("waits for loadeddata when no frame is available yet", () => {
+		const onReady = vi.fn();
+		let listener: (() => void) | undefined;
+		const video: FirstFrameTarget = {
+			readyState: 0,
+			addEventListener: (type, cb, options) => {
+				expect(type).toBe("loadeddata");
+				expect(options).toEqual({ once: true });
+				listener = cb;
+			},
+		};
+
+		expect(armPlayingOnFirstFrame(video, onReady)).toBe(false);
+		// 首帧未到：播放态不能切（否则浏览器原生控件会画出"卡住"的中央播放按钮）
+		expect(onReady).not.toHaveBeenCalled();
+
+		listener!();
+		expect(onReady).toHaveBeenCalledTimes(1);
+	});
+});
 
 const media: PreviewMedia = {
 	source: "javtrailers",
