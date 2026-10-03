@@ -38,6 +38,14 @@ export function parseEmbyIndex(raw: unknown): EmbyIndex | null {
 		serverKey: candidate.serverKey,
 		regexKey: candidate.regexKey,
 		syncedAt: candidate.syncedAt,
+		// 旧版（v1 早期）索引没有 fullSyncedAt：回退到 syncedAt，
+		// 等价于「上次同步视为一次全量」，避免老数据被无限判为需要全量
+		fullSyncedAt:
+			typeof candidate.fullSyncedAt === "number" &&
+			Number.isFinite(candidate.fullSyncedAt) &&
+			candidate.fullSyncedAt >= 0
+				? candidate.fullSyncedAt
+				: candidate.syncedAt,
 		total:
 			typeof candidate.total === "number" &&
 			Number.isFinite(candidate.total) &&

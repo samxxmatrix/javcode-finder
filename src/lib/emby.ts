@@ -246,8 +246,14 @@ export interface EmbyIndex {
 	serverKey: string;
 	/** 生效正则的指纹：变化即重建，避免键口径漂移 */
 	regexKey: string;
-	/** 最近一次成功同步时间 */
+	/** 最近一次成功同步时间（增量也更新） */
 	syncedAt: number;
+	/**
+	 * 最近一次全量同步时间；增量不更新它。
+	 * 24 小时校准必须看它，否则活跃用户每 10 分钟一次的增量同步
+	 * 会一直把时钟重置，删除/改名永远得不到对账。
+	 */
+	fullSyncedAt: number;
 	/** 参与索引的条目数 */
 	total: number;
 	/** keyA + keyB 合并去重 */
@@ -336,7 +342,8 @@ export function isEmbyIndexFresh(
 
 /**
  * 是否需要全量重建索引：缺失、服务器+Key 或正则指纹变化、
- * 年龄非法（NaN/Infinity/负数）或超过 24 小时校准周期。
+ * 距离上次「全量」同步的年龄非法（NaN/Infinity/负数）或超过 24 小时校准周期。
+ * 只看 fullSyncedAt：增量同步会刷新 syncedAt，用它做年龄会让校准永不触发。
  */
 export function needsEmbyFullSync(
 	index: EmbyIndex | null,
@@ -349,7 +356,7 @@ export function needsEmbyFullSync(
 	if (!index) return true;
 	if (index.serverKey !== serverKey) return true;
 	if (index.regexKey !== regexKey) return true;
-	const age = now - index.syncedAt;
+	const age = now - index.fullSyncedAt;
 	if (!Number.isFinite(age) || age < 0) return true;
 	return age >= EMBY_FULL_SYNC_INTERVAL_MS;
 }

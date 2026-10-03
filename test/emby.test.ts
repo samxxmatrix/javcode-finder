@@ -416,6 +416,7 @@ describe("同步策略判定", () => {
 		serverKey: "aaa",
 		regexKey: "bbb",
 		syncedAt: 1_000_000,
+		fullSyncedAt: 1_000_000,
 		total: 282,
 		keys: ["JUL769"],
 	};
@@ -442,7 +443,11 @@ describe("同步策略判定", () => {
 	});
 
 	it("年龄为 NaN 或未来时间 => 不新鲜且必须全量重建（不得走增量路径）", () => {
-		const nanIndex: EmbyIndex = { ...base, syncedAt: Number.NaN };
+		const nanIndex: EmbyIndex = {
+			...base,
+			syncedAt: Number.NaN,
+			fullSyncedAt: Number.NaN,
+		};
 		expect(isEmbyIndexFresh(nanIndex, 1_000_000, "aaa", "bbb")).toBe(false);
 		expect(needsEmbyFullSync(nanIndex, 1_000_000, "aaa", "bbb")).toBe(true);
 
@@ -450,9 +455,45 @@ describe("同步策略判定", () => {
 		const futureIndex: EmbyIndex = {
 			...base,
 			syncedAt: 1_000_000 + 365 * 24 * 60 * 60 * 1000,
+			fullSyncedAt: 1_000_000 + 365 * 24 * 60 * 60 * 1000,
 		};
 		expect(isEmbyIndexFresh(futureIndex, 1_000_000, "aaa", "bbb")).toBe(false);
 		expect(needsEmbyFullSync(futureIndex, 1_000_000, "aaa", "bbb")).toBe(true);
+	});
+
+	it("全量校准看 fullSyncedAt：活跃用户的增量同步不得把 24h 时钟重置", () => {
+		const now = 1_000_000_000_000;
+		const active: EmbyIndex = {
+			...base,
+			syncedAt: now - 60_000, // 1 分钟前刚做过增量
+			fullSyncedAt: now - 25 * 60 * 60 * 1000, // 上次全量已是 25 小时前
+		};
+		expect(isEmbyIndexFresh(active, now, "aaa", "bbb")).toBe(true);
+		expect(needsEmbyFullSync(active, now, "aaa", "bbb")).toBe(true);
+
+		const recentFull: EmbyIndex = {
+			...active,
+			fullSyncedAt: now - 60 * 60 * 1000, // 上次全量 1 小时前
+		};
+		expect(isEmbyIndexFresh(recentFull, now, "aaa", "bbb")).toBe(true);
+		expect(needsEmbyFullSync(recentFull, now, "aaa", "bbb")).toBe(false);
+	});
+
+	it("fullSyncedAt 非有限值或为负 => 必须全量重建", () => {
+		const now = 1_000_000_000_000;
+		for (const bad of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			-1,
+		]) {
+			const broken: EmbyIndex = {
+				...base,
+				syncedAt: now - 60_000,
+				fullSyncedAt: bad,
+			};
+			expect(needsEmbyFullSync(broken, now, "aaa", "bbb")).toBe(true);
+		}
 	});
 
 	it("超过 24 小时、无索引或指纹变化 => 需要全量", () => {

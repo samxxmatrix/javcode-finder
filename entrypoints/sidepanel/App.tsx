@@ -209,6 +209,7 @@ export const App: React.FC = () => {
 							mode?: string;
 							serverKey?: string;
 							syncedAt?: number;
+							fullSyncedAt?: number;
 							total?: number;
 							keys?: string[];
 					  }
@@ -240,6 +241,7 @@ export const App: React.FC = () => {
 						serverKey: res.serverKey ?? "",
 						regexKey,
 						syncedAt: res.syncedAt ?? Date.now(),
+						fullSyncedAt: res.fullSyncedAt ?? res.syncedAt ?? Date.now(),
 						total: res.total ?? res.keys.length,
 						keys: res.keys,
 					};
@@ -250,8 +252,13 @@ export const App: React.FC = () => {
 			}
 		}
 		if (!stillCurrent()) return;
-		// fail closed：空指纹或索引来自别的服务器时一律不匹配，避免显示旧库的标识
-		if (!serverKey || !index || index.serverKey !== serverKey) {
+		// fail closed：空指纹、索引来自别的服务器、或生效正则已变（键口径漂移）时一律不匹配
+		if (
+			!serverKey ||
+			!index ||
+			index.serverKey !== serverKey ||
+			index.regexKey !== regexKey
+		) {
 			setInLibrary(new Set());
 			return;
 		}

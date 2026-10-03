@@ -19,6 +19,7 @@ const INDEX: EmbyIndex = {
 	serverKey: "aaa",
 	regexKey: "bbb",
 	syncedAt: 1_700_000_000_000,
+	fullSyncedAt: 1_700_000_000_000,
 	total: 282,
 	keys: ["JUL769", "HEYZO406"],
 };
@@ -84,6 +85,35 @@ describe("parseEmbyIndex", () => {
 	it("过滤 keys 中的非字符串项", () => {
 		const parsed = parseEmbyIndex({ ...INDEX, keys: ["A", 1, null] });
 		expect(parsed?.keys).toEqual(["A"]);
+	});
+
+	it("旧 blob 没有 fullSyncedAt 时回退到 syncedAt（老索引继续可用）", () => {
+		const { fullSyncedAt: _omitted, ...legacy } = INDEX;
+		const parsed = parseEmbyIndex(legacy);
+		expect(parsed).not.toBeNull();
+		expect(parsed?.fullSyncedAt).toBe(INDEX.syncedAt);
+	});
+
+	it("fullSyncedAt 非有限值或为负时回退到 syncedAt", () => {
+		for (const bad of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			-1,
+			"x",
+			undefined,
+		]) {
+			const parsed = parseEmbyIndex({ ...INDEX, fullSyncedAt: bad });
+			expect(parsed).not.toBeNull();
+			expect(parsed?.fullSyncedAt).toBe(INDEX.syncedAt);
+		}
+	});
+
+	it("合法 fullSyncedAt（含 0）被原样保留，可与 syncedAt 不同", () => {
+		expect(parseEmbyIndex({ ...INDEX, fullSyncedAt: 1_600_000_000_000 })?.fullSyncedAt).toBe(
+			1_600_000_000_000,
+		);
+		expect(parseEmbyIndex({ ...INDEX, fullSyncedAt: 0 })?.fullSyncedAt).toBe(0);
 	});
 });
 

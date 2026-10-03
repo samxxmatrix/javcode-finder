@@ -103,6 +103,8 @@ export default defineBackground(() => {
 		mode?: "full" | "incremental" | "too-large";
 		serverKey?: string;
 		syncedAt?: number;
+		/** 最近一次全量同步时间；面板据此判定是否需要重建索引 */
+		fullSyncedAt?: number;
 		total?: number;
 		keys?: string[];
 		/** 索引是否真的落盘；false 表示 storage 写入失败（本次结果仍可用） */
@@ -240,11 +242,14 @@ export default defineBackground(() => {
 		const keys = full
 			? incoming
 			: [...new Set([...(usable?.keys ?? []), ...incoming])];
+		// syncedAt 与 fullSyncedAt 用同一个时刻：增量不得把全量校准的时钟一起推进
+		const now = Date.now();
 		const index: EmbyIndex = {
 			v: 1,
 			serverKey,
 			regexKey,
-			syncedAt: Date.now(),
+			syncedAt: now,
+			fullSyncedAt: full ? now : (usable?.fullSyncedAt ?? usable?.syncedAt ?? now),
 			// 增量模式拿不到全库总数，沿用上次的近似值（界面只作参考）
 			total: full ? collected.length : (usable?.total ?? 0),
 			keys,
@@ -255,6 +260,7 @@ export default defineBackground(() => {
 			mode: full ? "full" : "incremental",
 			serverKey,
 			syncedAt: index.syncedAt,
+			fullSyncedAt: index.fullSyncedAt,
 			total: index.total,
 			// 落盘失败也要把键回给面板：本次仍能正确显示图标，只是下次要重新同步
 			keys,
