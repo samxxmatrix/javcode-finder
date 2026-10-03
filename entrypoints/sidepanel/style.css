@@ -1000,6 +1000,7 @@ button:focus-visible {
 	color: var(--text-secondary);
 	display: inline-flex;
 	align-items: center;
+	gap: 4px;
 	max-width: 100%;
 	min-width: 0;
 }
@@ -1274,6 +1275,7 @@ button:focus-visible {
 	cursor: pointer;
 	display: inline-flex;
 	align-items: center;
+	flex: 0 0 auto;
 	vertical-align: middle;
 	padding: 1px 3px;
 	margin-left: 6px;
@@ -1313,12 +1315,6 @@ button:focus-visible {
 	display: inline-flex;
 	align-items: center;
 	flex: 0 0 auto;
-	margin-left: 4px;
-}
-
-.trailer-preview__in-library {
-	margin-left: 6px;
-	vertical-align: middle;
 }
 
 /* 云盘密码输入行：输入框 + 显示/隐藏按钮 */

@@ -2,8 +2,8 @@ import React from "react";
 
 /**
  * 「已在 Emby 库中」标识：绿色星形 + 白色播放三角，纯标识、不可点击。
- * 第二条 path 含两个子路径（星形外框 + 播放三角），必须用 evenodd 才会把三角挖空；
- * 用默认 nonzero 会渲染成一块纯绿菱形（三角与白垫底都被盖住）。
+ * 第二条 path 含两个子路径（星形外框 + 播放三角），三角子路径绕向与星形相反；
+ * 因此 nonzero 与 evenodd 都会把三角挖空，显式写 evenodd 只是自证意图、对未来改动更稳。
  * viewBox 裁到图形实际外接框（155→869），16px 下才与收藏书签视觉等大。
  */
 export const EmbyBadge: React.FC = () => (

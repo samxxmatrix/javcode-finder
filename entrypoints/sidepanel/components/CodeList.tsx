@@ -10,6 +10,7 @@ import {
 	resolveSupjavUrl,
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
+import { EmbyBadge } from "./EmbyBadge";
 import { FavoriteIcon } from "./FavoriteIcon";
 
 interface CodeListProps {
@@ -20,6 +21,7 @@ interface CodeListProps {
 	onPreview: (code: string) => void;
 	favorites: string[];
 	onToggleFavorite: (code: string) => void;
+	inLibrary?: Set<string>;
 }
 
 export const CodeList: React.FC<CodeListProps> = ({
@@ -30,6 +32,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 	onPreview,
 	favorites,
 	onToggleFavorite,
+	inLibrary = new Set<string>(),
 }) => {
 	if (candidates.length === 0) return null;
 
@@ -138,6 +141,17 @@ export const CodeList: React.FC<CodeListProps> = ({
 								>
 									<FavoriteIcon active />
 								</button>
+							)}
+							{/* 已在 Emby 库：纯标识，位于收藏图标右侧，位置不随收藏状态变化 */}
+							{inLibrary.has(code) && (
+								<span
+									className="unmatched-item__in-library"
+									role="img"
+									title={t.embyInLibrary}
+									aria-label={t.embyInLibrary}
+								>
+									<EmbyBadge />
+								</span>
 							)}
 							<div className="unmatched-item__links">
 								<button

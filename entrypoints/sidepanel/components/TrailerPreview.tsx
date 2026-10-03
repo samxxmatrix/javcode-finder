@@ -21,6 +21,7 @@ import type {
 	PreviewResolution,
 	SupportedLocale,
 } from "../../../src/lib/types";
+import { EmbyBadge } from "./EmbyBadge";
 import { FavoriteIcon } from "./FavoriteIcon";
 
 interface TrailerPreviewProps {
@@ -30,6 +31,7 @@ interface TrailerPreviewProps {
 	onClose: () => void;
 	isFavorite: boolean;
 	onToggleFavorite: () => void;
+	inLibrary?: boolean;
 }
 
 type PlayerStatus = "idle" | "loading" | "playing" | "failed";
@@ -42,6 +44,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	onClose,
 	isFavorite,
 	onToggleFavorite,
+	inLibrary = false,
 }) => {
 	const [coverError, setCoverError] = useState(false);
 	// 主媒体 404 时从详情页兜底的备用媒体（null = 未拉取；对象 = 已拉取，字段可为 null）
@@ -540,20 +543,22 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			<header className="trailer-preview__header">
 				<h3 className="trailer-preview__title">
 					{t.previewTitle}{" "}
-					<span
-						className="trailer-preview__code"
-						onClick={handleReload}
-						title={t.reloadPreview}
-						role="button"
-						tabIndex={0}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" || e.key === " ") {
-								e.preventDefault();
-								handleReload();
-							}
-						}}
-					>
-						{code}
+					<span className="trailer-preview__code-wrap">
+						<span
+							className="trailer-preview__code"
+							onClick={handleReload}
+							title={t.reloadPreview}
+							role="button"
+							tabIndex={0}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" || e.key === " ") {
+									e.preventDefault();
+									handleReload();
+								}
+							}}
+						>
+							{code}
+						</span>
 					</span>
 					<button
 						type="button"
@@ -564,6 +569,16 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					>
 						<FavoriteIcon active={isFavorite} />
 					</button>
+					{inLibrary && (
+						<span
+							className="trailer-preview__in-library"
+							role="img"
+							title={t.embyInLibrary}
+							aria-label={t.embyInLibrary}
+						>
+							<EmbyBadge />
+						</span>
+					)}
 				</h3>
 				<button
 					type="button"
