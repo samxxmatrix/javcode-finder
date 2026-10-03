@@ -51,18 +51,24 @@ import { withRetry } from "../src/lib/retry";
 import { messages } from "../src/lib/locales";
 import type { SupportedLocale } from "../src/lib/types";
 
-// 反代查询（CF 入口 → 东京 Vercel）统一超时与重试次数：
-// 冷启动实测可达 4.4 s，原来的 5 s 太贴边，容易误判超时并静默降级到下一级数据源。
-const PROXY_LOOKUP_TIMEOUT_MS = 8000;
+// 反代查询（CF 入口 → 东京 Vercel）超时策略：
+// 首次 8 s 覆盖冷启动（实测 4.4 s）；失败后的第二次只给 5 s —— 此时实例已被首次请求唤醒，
+// 正常耗时 0.7-1.8 s，不需要再等满 8 s。最坏 13 s 后降级到下一级数据源。
+const PROXY_LOOKUP_FIRST_TIMEOUT_MS = 8000;
+const PROXY_LOOKUP_RETRY_TIMEOUT_MS = 5000;
 const PROXY_LOOKUP_ATTEMPTS = 2;
 
-/**
- * 反代查询统一入口：8 s 超时 + 一次重试。
- * 首次请求本身会唤醒冷实例，失败后立刻重试通常就命中热路径（实测冷 4.4 s / 热 0.7-1.8 s）。
- */
+/** 反代查询统一入口：首次 8 s，失败后重试一次（5 s） */
 const fetchProxyWithRetry = (url: string): Promise<Response> =>
 	withRetry(
-		() => fetch(url, { signal: AbortSignal.timeout(PROXY_LOOKUP_TIMEOUT_MS) }),
+		(attempt) =>
+			fetch(url, {
+				signal: AbortSignal.timeout(
+					attempt === 1
+						? PROXY_LOOKUP_FIRST_TIMEOUT_MS
+						: PROXY_LOOKUP_RETRY_TIMEOUT_MS,
+				),
+			}),
 		{ attempts: PROXY_LOOKUP_ATTEMPTS },
 	);
 
