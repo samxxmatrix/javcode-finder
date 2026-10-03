@@ -185,8 +185,17 @@ export const App: React.FC = () => {
 		const regexKey = embyRegexKey(regex);
 		// serverKey 参与新鲜度判定：换服务器/改 Key 后旧索引立即失效，不会拿旧库的图标
 		const serverKey = embyServerKey(settings.embyUrl, settings.embyApiKey);
+		// 在途期间设置可能被改动：await 之后既要比请求号，也要比当前服务器指纹
+		const stillCurrent = (): boolean => {
+			if (requestId !== embyRefreshIdRef.current) return false;
+			const latest = getSettings();
+			return (
+				latest.embyEnabled &&
+				embyServerKey(latest.embyUrl, latest.embyApiKey) === serverKey
+			);
+		};
 		let index = await loadEmbyIndex(browserEmbyStore());
-		if (requestId !== embyRefreshIdRef.current) return;
+		if (!stillCurrent()) return;
 		if (!isEmbyIndexFresh(index, Date.now(), serverKey, regexKey)) {
 			try {
 				const res = (await browser.runtime.sendMessage({
@@ -204,7 +213,7 @@ export const App: React.FC = () => {
 							keys?: string[];
 					  }
 					| undefined;
-				if (requestId !== embyRefreshIdRef.current) return;
+				if (!stillCurrent()) return;
 				if (res?.ok && res.mode === "too-large") {
 					// 库太大：放弃全量索引，改逐条查询（并发 4，background 内复核）
 					const checked = (await browser.runtime.sendMessage({
@@ -214,11 +223,14 @@ export const App: React.FC = () => {
 						regex,
 						codes,
 					})) as { ok?: boolean; matched?: string[] } | undefined;
-					if (requestId !== embyRefreshIdRef.current) return;
-					// background 回传的是面板发出的原始候选写法，这里统一归一化后再入库
-					setInLibrary(
-						new Set((checked?.matched ?? []).map((code) => normalizeCode(code))),
-					);
+					if (!stillCurrent()) return;
+					if (checked?.ok === true && Array.isArray(checked.matched)) {
+						// background 回传的是面板发出的原始候选写法，这里统一归一化后再入库
+						setInLibrary(
+							new Set(checked.matched.map((code) => normalizeCode(code))),
+						);
+					}
+					// 逐条查询失败：保留现有标识，不因为一次抖动清空
 					return;
 				}
 				if (res?.ok && Array.isArray(res.keys)) {
@@ -232,12 +244,18 @@ export const App: React.FC = () => {
 						keys: res.keys,
 					};
 				}
-			} catch {
+			} catch (err) {
 				// 同步失败：沿用旧索引（宁可略旧，也不要把在库判成不在库）
+				console.warn("[JavCode Finder] Emby 同步失败:", err);
 			}
 		}
-		if (requestId !== embyRefreshIdRef.current) return;
-		setInLibrary(index ? matchEmbyCodes(index.keys, codes) : new Set());
+		if (!stillCurrent()) return;
+		// fail closed：空指纹或索引来自别的服务器时一律不匹配，避免显示旧库的标识
+		if (!serverKey || !index || index.serverKey !== serverKey) {
+			setInLibrary(new Set());
+			return;
+		}
+		setInLibrary(matchEmbyCodes(index.keys, codes));
 	};
 
 	const runScan = async (isRescan = false) => {
@@ -322,7 +340,7 @@ export const App: React.FC = () => {
 	const handleSearch = () => {
 		const code = searchInput.trim();
 		if (!code) return;
-		setPreviewCode(code);
+		setPreviewCode(normalizeCode(code));
 	};
 
 	// 从云端拉取收藏并覆盖本地（仅本地为空时调用，避免覆盖较新的本地数据）；
