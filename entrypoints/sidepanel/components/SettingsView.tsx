@@ -93,6 +93,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		syncedAt: number | null;
 		total: number;
 	}>({ syncedAt: null, total: 0 });
+	// 库条目超过上限：background 走逐个番号查询且不落盘索引
+	const [embyTooLarge, setEmbyTooLarge] = useState(false);
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -200,6 +202,46 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}
 	};
 
+	// 立即同步：强制走一次 background 同步并刷新索引信息
+	const handleEmbySyncNow = async () => {
+		setEmbyVerifyError(null);
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:emby-sync",
+				embyUrl: embyUrl.trim(),
+				embyApiKey: embyApiKey.trim(),
+				regex: customRegex || DEFAULT_CODE_REGEX,
+			})) as
+				| {
+						ok?: boolean;
+						mode?: string;
+						syncedAt?: number;
+						total?: number;
+						error?: string;
+				  }
+				| undefined;
+			if (!res?.ok) {
+				setEmbyVerifyError(
+					`${t.embySyncFailed}：${res?.error || t.unknownError}`,
+				);
+				return;
+			}
+			// 超额降级：background 不落盘索引（只有逐个番号查询），
+			// 所以只提示改用逐个查询，保留原有 syncedAt/total，不伪造一次刚同步的状态
+			if (res.mode === "too-large") {
+				setEmbyTooLarge(true);
+				return;
+			}
+			setEmbyTooLarge(false);
+			setEmbyIndexInfo({
+				syncedAt: res.syncedAt ?? Date.now(),
+				total: res.total ?? 0,
+			});
+		} catch {
+			setEmbyVerifyError(`${t.embySyncFailed}：${t.networkError}`);
+		}
+	};
+
 	// Emby 开关：打开时先验证地址与 Key（拉 1 条确认权限），失败回弹关闭
 	const handleToggleEmby = async (checked: boolean) => {
 		setEmbyVerifyError(null);
@@ -235,43 +277,6 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}
 	};
 
-	// 立即同步：强制走一次 background 同步并刷新索引信息
-	const handleEmbySyncNow = async () => {
-		setEmbyVerifyError(null);
-		try {
-			const res = (await browser.runtime.sendMessage({
-				type: "jt:emby-sync",
-				embyUrl: embyUrl.trim(),
-				embyApiKey: embyApiKey.trim(),
-				regex: customRegex || DEFAULT_CODE_REGEX,
-			})) as
-				| {
-						ok?: boolean;
-						mode?: string;
-						syncedAt?: number;
-						total?: number;
-						error?: string;
-				  }
-				| undefined;
-			if (!res?.ok) {
-				setEmbyVerifyError(
-					`${t.verifyFailed}：${res?.error || t.unknownError}`,
-				);
-				return;
-			}
-			if (res.mode === "too-large") {
-				setEmbyIndexInfo({ syncedAt: Date.now(), total: res.total ?? 0 });
-				return;
-			}
-			setEmbyIndexInfo({
-				syncedAt: res.syncedAt ?? Date.now(),
-				total: res.total ?? 0,
-			});
-		} catch {
-			setEmbyVerifyError(`${t.verifyFailed}：${t.networkError}`);
-		}
-	};
-
 	useEffect(() => {
 		const current = getSettings();
 		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
@@ -295,8 +300,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setEmbyUrl(current.embyUrl);
 		setEmbyApiKey(current.embyApiKey);
 		setEmbyEnabled(current.embyEnabled);
+		// 设置页可能在索引读取完成前关闭，卸载后写 state 已无意义
+		let cancelled = false;
 		void (async () => {
 			const index = await loadEmbyIndex(browserEmbyStore());
+			if (cancelled) return;
 			setEmbyIndexInfo({
 				syncedAt: index?.syncedAt ?? null,
 				total: index?.total ?? 0,
@@ -309,6 +317,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setFalenoPrefixes(current.falenoPrefixes);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
 		setPreviewVolume(current.previewVolume);
+		return () => {
+			cancelled = true;
+		};
 	}, []);
 
 	const handleLocaleSelect = (val: LocaleOption) => {
@@ -504,6 +515,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setEmbyEnabled(DEFAULT_SETTINGS.embyEnabled);
 		setEmbyVerifyError(null);
 		setEmbyIndexInfo({ syncedAt: null, total: 0 });
+		setEmbyTooLarge(false);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setFalenoPrefixes([...DEFAULT_SETTINGS.falenoPrefixes]);
 		setNewPrefixInput("");
@@ -1022,6 +1034,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							<p className="settings-field__hint">
 								{t.embyItemCountLabel(embyIndexInfo.total)}
 							</p>
+						)}
+						{embyTooLarge && (
+							<p className="settings-field__hint">{t.embyTooLarge}</p>
 						)}
 					</div>
 

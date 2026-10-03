@@ -100,6 +100,8 @@ export interface LocaleMessages {
 	embySyncedAtLabel: (time: string) => string;
 	embyItemCountLabel: (count: number) => string;
 	embyNotSynced: string;
+	embySyncFailed: string;
+	embyTooLarge: string;
 	dmmIncomplete: string;
 	falenoPrefixesLabel: string;
 	falenoPrefixesDesc: string;
@@ -210,6 +212,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncedAtLabel: (time) => `上次同步：${time}`,
     embyItemCountLabel: (count) => `已索引 ${count} 条`,
     embyNotSynced: "尚未同步",
+    embySyncFailed: "同步失败（索引未更新）",
+    embyTooLarge: "库条目超过 3 万，已改为逐个番号查询（不缓存索引）",
     dmmIncomplete: "请补全 DMM API 地址和 Key",
     falenoPrefixesLabel: "FALENO 番号前缀复查",
     falenoPrefixesDesc:
@@ -321,6 +325,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncedAtLabel: (time) => `上次同步：${time}`,
     embyItemCountLabel: (count) => `已索引 ${count} 條`,
     embyNotSynced: "尚未同步",
+    embySyncFailed: "同步失敗（索引未更新）",
+    embyTooLarge: "庫條目超過 3 萬，已改為逐個番號查詢（不建立索引）",
     dmmIncomplete: "請補全 DMM API 位址與 Key",
     falenoPrefixesLabel: "FALENO 番號前綴複查",
     falenoPrefixesDesc:
@@ -434,6 +440,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncedAtLabel: (time) => `Last synced: ${time}`,
     embyItemCountLabel: (count) => `${count} items indexed`,
     embyNotSynced: "Not synced yet",
+    embySyncFailed: "Sync failed (index not updated)",
+    embyTooLarge:
+      "Library has over 30,000 items; using per-code lookup instead of a cached index",
     dmmIncomplete: "Fill in the DMM API URL and Key",
     falenoPrefixesLabel: "FALENO code prefix check",
     falenoPrefixesDesc:
