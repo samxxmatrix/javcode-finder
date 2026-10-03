@@ -49,6 +49,28 @@ import {
 import { clearCodeMarksForTab } from "../src/lib/mark-codes";
 import { withRetry } from "../src/lib/retry";
 import { messages } from "../src/lib/locales";
+import {
+	EMBY_INDEX_LIMIT,
+	EMBY_SEARCH_CONCURRENCY,
+	buildEmbyIndexKeys,
+	buildEmbyItemsUrl,
+	buildEmbySearchUrl,
+	embyRegexKey,
+	embyServerKey,
+	incrementalSince,
+	normalizeEmbyBaseUrl,
+	needsEmbyFullSync,
+	parseEmbyItems,
+	verifyEmbySearchItems,
+	type EmbyIndex,
+	type EmbyItemLike,
+} from "../src/lib/emby";
+import {
+	browserEmbyStore,
+	clearEmbyIndex,
+	loadEmbyIndex,
+	saveEmbyIndex,
+} from "../src/lib/emby-index";
 import type { SupportedLocale } from "../src/lib/types";
 
 // 反代查询（CF 入口 → 东京 Vercel）超时策略：
@@ -73,6 +95,143 @@ const fetchProxyWithRetry = (url: string): Promise<Response> =>
 	);
 
 export default defineBackground(() => {
+	// —— Emby 媒体库索引同步 ——
+	// 面板不能直连内网 Emby（CORS 不可控），统一由 background 发请求（有 host permission）。
+	// 索引写入 storage.local；面板读索引后本地匹配，所以这里只回键数组。
+	interface EmbySyncResult {
+		ok: boolean;
+		mode?: "full" | "incremental" | "too-large";
+		serverKey?: string;
+		syncedAt?: number;
+		total?: number;
+		keys?: string[];
+		error?: string;
+	}
+
+	// 同一服务器+模式只跑一次：多个面板同时打开时不会重复拉全量
+	const embySyncInFlight = new Map<string, Promise<EmbySyncResult>>();
+
+	/** 取 JSON；非 2xx、超时、非 JSON 一律返回 null（调用方按失败处理） */
+	const fetchEmbyJson = async (url: string): Promise<unknown | null> => {
+		try {
+			const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+			if (!res.ok) return null;
+			return (await res.json()) as unknown;
+		} catch {
+			return null;
+		}
+	};
+
+	const runEmbySync = async (
+		embyUrl: string,
+		embyApiKey: string,
+		regex: string,
+	): Promise<EmbySyncResult> => {
+		const base = normalizeEmbyBaseUrl(embyUrl);
+		const key = embyApiKey.trim();
+		if (!base || !key) return { ok: false, error: "incomplete" };
+
+		const serverKey = embyServerKey(base, key);
+		const regexKey = embyRegexKey(regex);
+		const store = browserEmbyStore();
+		const previous = await loadEmbyIndex(store);
+		// 换服务器/改 Key 后旧索引无意义，直接清掉重建
+		if (previous && previous.serverKey !== serverKey) {
+			await clearEmbyIndex(store);
+		}
+		const usable = previous && previous.serverKey === serverKey ? previous : null;
+		const full = needsEmbyFullSync(usable, Date.now(), serverKey, regexKey);
+
+		// 先探一页，拿到服务端总数（可能为 null = 未知）以决定是否放弃全量索引
+		const first = parseEmbyItems(
+			await fetchEmbyJson(
+				buildEmbyItemsUrl(base, key, {
+					startIndex: 0,
+					minDateLastSaved: full ? null : incrementalSince(usable!.syncedAt),
+				}),
+			),
+		);
+		if (!first) return { ok: false, error: "bad-response" };
+
+		const serverTotal = first.total;
+		if (full && serverTotal !== null && serverTotal > EMBY_INDEX_LIMIT) {
+			return { ok: true, mode: "too-large", serverKey, total: serverTotal };
+		}
+
+		const collected: EmbyItemLike[] = [...first.items];
+		let offset = first.items.length;
+		// 总数未知（null）时不能把页长当上限，改为翻到空页为止，仅受 EMBY_INDEX_LIMIT 约束
+		while (
+			full &&
+			offset < EMBY_INDEX_LIMIT &&
+			(serverTotal === null || offset < serverTotal)
+		) {
+			const page = parseEmbyItems(
+				await fetchEmbyJson(buildEmbyItemsUrl(base, key, { startIndex: offset })),
+			);
+			if (!page || page.items.length === 0) break;
+			collected.push(...page.items);
+			offset += page.items.length;
+		}
+
+		const incoming = buildEmbyIndexKeys(collected, regex);
+		const keys = full
+			? incoming
+			: [...new Set([...(usable?.keys ?? []), ...incoming])];
+		const index: EmbyIndex = {
+			v: 1,
+			serverKey,
+			regexKey,
+			syncedAt: Date.now(),
+			// 增量模式拿不到全库总数，沿用上次的近似值（界面只作参考）
+			total: full ? collected.length : (usable?.total ?? 0),
+			keys,
+		};
+		const saved = await saveEmbyIndex(store, index);
+		return {
+			ok: true,
+			mode: full ? "full" : "incremental",
+			serverKey,
+			syncedAt: index.syncedAt,
+			total: index.total,
+			// 落盘失败也要把键回给面板：本次仍能正确显示图标，只是下次要重新同步
+			keys: saved ? keys : keys,
+		};
+	};
+
+	/** 逐条兜底（索引超过 EMBY_INDEX_LIMIT 时使用）：并发 4，命中后本地复核 */
+	const runEmbyCheck = async (
+		embyUrl: string,
+		embyApiKey: string,
+		regex: string,
+		codes: string[],
+	): Promise<{ ok: boolean; matched?: string[]; error?: string }> => {
+		const base = normalizeEmbyBaseUrl(embyUrl);
+		const key = embyApiKey.trim();
+		if (!base || !key) return { ok: false, error: "incomplete" };
+		const matched: string[] = [];
+		let cursor = 0;
+		const worker = async () => {
+			while (cursor < codes.length) {
+				const code = codes[cursor++];
+				if (!code) continue;
+				const page = parseEmbyItems(
+					await fetchEmbyJson(buildEmbySearchUrl(base, key, code)),
+				);
+				if (page && verifyEmbySearchItems(page.items, code, regex)) {
+					matched.push(code);
+				}
+			}
+		};
+		await Promise.all(
+			Array.from(
+				{ length: Math.min(EMBY_SEARCH_CONCURRENCY, codes.length) },
+				() => worker(),
+			),
+		);
+		return { ok: true, matched };
+	};
+
 	// 给 media.javtrailers.com 响应注入 CORS 头，使扩展面板内的 hls.js 能跨域拉取 HLS 预告片流。
 	// 仅 Chromium 的 declarativeNetRequest 支持修改响应头；Firefox 上跳过（播放侧走失败降级）。
 	const setupTrailerCors = () => {
@@ -171,6 +330,10 @@ export default defineBackground(() => {
 					webdavUrl?: string;
 					webdavUser?: string;
 					webdavPass?: string;
+					embyUrl?: string;
+					embyApiKey?: string;
+					regex?: string;
+					codes?: string[];
 					body?: string;
 					contentId?: string;
 					dmmApiUrl?: string;
@@ -598,6 +761,68 @@ export default defineBackground(() => {
 							sendResponse({ coverUrl: null, trailerUrl: null });
 						}
 					})();
+					return true;
+				}
+
+				// Emby：地址/Key 连通性与权限校验（设置页"测试连接"与开关验证）
+				if (msg?.type === "jt:emby-test") {
+					const base = normalizeEmbyBaseUrl(msg.embyUrl || "");
+					const key = (msg.embyApiKey || "").trim();
+					void (async () => {
+						if (!base || !key) {
+							sendResponse({ ok: false, error: "incomplete" });
+							return;
+						}
+						try {
+							const parsed = parseEmbyItems(
+								await fetchEmbyJson(
+									buildEmbyItemsUrl(base, key, { startIndex: 0, limit: 1 }),
+								),
+							);
+							if (!parsed) {
+								sendResponse({ ok: false, error: "http" });
+								return;
+							}
+							sendResponse({ ok: true, total: parsed.total });
+						} catch {
+							sendResponse({ ok: false, error: "unexpected" });
+						}
+					})();
+					return true;
+				}
+
+				// Emby：同步索引（全量/增量/超额降级），返回键数组
+				if (msg?.type === "jt:emby-sync") {
+					const embyUrl = msg.embyUrl || "";
+					const embyApiKey = msg.embyApiKey || "";
+					const regex = typeof msg.regex === "string" ? msg.regex : "";
+					const requestKey = `${embyServerKey(embyUrl, embyApiKey)}|sync`;
+					const inFlight = embySyncInFlight.get(requestKey);
+					const task =
+						inFlight ??
+						runEmbySync(embyUrl, embyApiKey, regex)
+							.catch((): EmbySyncResult => ({ ok: false, error: "unexpected" }))
+							.finally(() => {
+								embySyncInFlight.delete(requestKey);
+							});
+					if (!inFlight) embySyncInFlight.set(requestKey, task);
+					void task.then((result) => sendResponse(result));
+					return true;
+				}
+
+				// Emby：逐条兜底查询（索引超额时）
+				if (msg?.type === "jt:emby-check") {
+					const codes = Array.isArray(msg.codes)
+						? msg.codes.filter((c): c is string => typeof c === "string")
+						: [];
+					void runEmbyCheck(
+						msg.embyUrl || "",
+						msg.embyApiKey || "",
+						typeof msg.regex === "string" ? msg.regex : "",
+						codes,
+					)
+						.catch(() => ({ ok: false, error: "unexpected" }))
+						.then((result) => sendResponse(result));
 					return true;
 				}
 
