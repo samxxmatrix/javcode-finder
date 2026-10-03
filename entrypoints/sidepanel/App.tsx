@@ -215,7 +215,10 @@ export const App: React.FC = () => {
 						codes,
 					})) as { ok?: boolean; matched?: string[] } | undefined;
 					if (requestId !== embyRefreshIdRef.current) return;
-					setInLibrary(new Set(checked?.matched ?? []));
+					// background 回传的是面板发出的原始候选写法，这里统一归一化后再入库
+					setInLibrary(
+						new Set((checked?.matched ?? []).map((code) => normalizeCode(code))),
+					);
 					return;
 				}
 				if (res?.ok && Array.isArray(res.keys)) {
