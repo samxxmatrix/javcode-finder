@@ -12,6 +12,8 @@ import {
 	normalizeEmbyBaseUrl,
 	parseEmbyItems,
 } from "../src/lib/emby";
+import { extractCandidatesFromText } from "../src/lib/extract-codes";
+import { DEFAULT_CODE_REGEX } from "../src/lib/settings";
 
 describe("normalizeEmbyBaseUrl", () => {
 	it("去掉尾斜杠与路径，只保留 origin", () => {
@@ -257,13 +259,19 @@ describe("extractKeysFromItem", () => {
 		expect(extractKeysFromItem({ Name: "ABC_123" })).toContain("ABC123");
 	});
 
-	it("多字段不得产生跨字段伪键", () => {
-		const keys = extractKeysFromItem({
-			Name: "091326-001 Centurion Soap",
-			FileName: "4k688.com@091326-001-CARIB.mp4",
-			Path: "/mnt/media/completed/091326-001-CARIB/4k688.com@091326-001-CARIB.mp4",
-		});
-		expect(keys).not.toContain("CARIB091326");
+	it("多字段不得产生跨字段伪键（正反对照）", () => {
+		// 真实条目形态：Folder 的 Name 与 FileName 同为 "091326-001-CARIB"
+		const folder = { Name: "091326-001-CARIB", FileName: "091326-001-CARIB" };
+
+		// 逐字段：数字开头，抽取层抽不到 → 无键（这是实现必须保持的行为）
+		expect(extractKeysFromItem(folder)).toEqual([]);
+
+		// 反向对照：把同一批字段拼成一个大串，边界处会造出并不存在的番号
+		const joined = extractCandidatesFromText(
+			`${folder.Name} ${folder.FileName}`.replace(/_/g, "-"),
+			DEFAULT_CODE_REGEX,
+		).candidates;
+		expect(joined.map(codeKeyA)).toContain("CARIB091326");
 	});
 
 	it("数字开头 / 数字段不足 3 位 / 含字母的番号抽不到（已知限制）", () => {
