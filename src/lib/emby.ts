@@ -6,6 +6,8 @@ import { DEFAULT_CODE_REGEX } from "./settings";
  * Emby 媒体库「已在库」判定的纯逻辑层。
  * 本轮：地址规范化、条目查询 URL 构造、响应解析、索引键生成、
  * 候选匹配、TTL/增量/全量判定与指纹。
+ * 判定同时校验服务器+Key 指纹：换地址或换 Key 后旧索引立即失效，
+ * 不会拿旧库的键渲染已经在库徽标。
  * 后续任务在此模块之外实现：后台同步与面板消费。
  * 全部为纯函数（不碰浏览器 API），网络请求在 background 执行。
  */
@@ -262,14 +264,29 @@ export function fingerprint(input: string): string {
 	return hash.toString(16).padStart(8, "0");
 }
 
-/** 服务器+Key 指纹（地址先规范化，尾斜杠/路径不影响） */
+/**
+ * 服务器+Key 指纹（地址先规范化，尾斜杠/路径不影响）。
+ * 地址或 Key 为空返回空串（fail closed）：未配置时不得产出可用指纹，
+ * 否则空指纹会与空索引互相"匹配"。
+ */
 export function embyServerKey(baseUrl: string, apiKey: string): string {
-	return fingerprint(`${normalizeEmbyBaseUrl(baseUrl)}\n${(apiKey || "").trim()}`);
+	const base = normalizeEmbyBaseUrl(baseUrl);
+	const key = (apiKey || "").trim();
+	if (!base || !key) return "";
+	return fingerprint(`${base}\n${key}`);
 }
 
-/** 生效正则指纹（空值回退默认正则） */
+/**
+ * 生效正则指纹：与抽取层保持同一回退口径，
+ * 空值/纯空白或语法非法都回退默认正则，避免把无效模式当成生效模式。
+ */
 export function embyRegexKey(pattern: string): string {
-	const active = (pattern || "").trim() || DEFAULT_CODE_REGEX;
+	let active = (pattern || "").trim() || DEFAULT_CODE_REGEX;
+	try {
+		new RegExp(active);
+	} catch {
+		active = DEFAULT_CODE_REGEX;
+	}
 	return fingerprint(active);
 }
 
@@ -296,31 +313,55 @@ export function matchEmbyCodes(
 	return matched;
 }
 
-/** 索引是否可直接复用：存在、正则指纹一致、且未超过 TTL */
+/**
+ * 索引是否可直接复用：存在、服务器+Key 指纹一致、正则指纹一致、
+ * 年龄合法（非负有限）且未超过 TTL。
+ * 年龄为 NaN/Infinity 或为负（时钟回拨/未来时间戳）一律判为不新鲜。
+ */
 export function isEmbyIndexFresh(
 	index: EmbyIndex | null,
 	now: number,
+	serverKey: string,
 	regexKey: string,
 ): boolean {
 	if (!index) return false;
+	if (index.serverKey !== serverKey) return false;
 	if (index.regexKey !== regexKey) return false;
-	return now - index.syncedAt < EMBY_INDEX_TTL_MS;
+	const age = now - index.syncedAt;
+	if (!Number.isFinite(age) || age < 0) return false;
+	return age < EMBY_INDEX_TTL_MS;
 }
 
-/** 是否需要全量重建索引（缺失、指纹变化、或超过 24 小时校准周期） */
+/**
+ * 是否需要全量重建索引：缺失、服务器+Key 或正则指纹变化、
+ * 年龄非法（NaN/Infinity/负数）或超过 24 小时校准周期。
+ */
 export function needsEmbyFullSync(
 	index: EmbyIndex | null,
 	now: number,
+	serverKey: string,
 	regexKey: string,
 ): boolean {
 	if (!index) return true;
+	if (index.serverKey !== serverKey) return true;
 	if (index.regexKey !== regexKey) return true;
-	return now - index.syncedAt >= EMBY_FULL_SYNC_INTERVAL_MS;
+	const age = now - index.syncedAt;
+	if (!Number.isFinite(age) || age < 0) return true;
+	return age >= EMBY_FULL_SYNC_INTERVAL_MS;
 }
 
-/** 增量查询起点：上次同步时间 − 重叠窗（容忍客户端时钟超前服务器） */
+/**
+ * 增量查询起点：上次同步时间 − 重叠窗（容忍客户端时钟超前服务器）。
+ * 时间非有限值（NaN/Infinity）或落在 Date 可表示范围之外时返回空串，
+ * 让 URL 省略 MinDateLastSaved，退化为一次全量拉取以修复索引，
+ * 而不是在增量路径上反复抛 RangeError。
+ */
 export function incrementalSince(syncedAt: number): string {
-	return new Date(syncedAt - EMBY_SYNC_OVERLAP_MS).toISOString();
+	const since = syncedAt - EMBY_SYNC_OVERLAP_MS;
+	if (!Number.isFinite(since)) return "";
+	const date = new Date(since);
+	if (Number.isNaN(date.getTime())) return "";
+	return date.toISOString();
 }
 
 /** 逐条兜底命中的复核：条目上抽出的键必须与候选键相交 */

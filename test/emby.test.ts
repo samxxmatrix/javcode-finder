@@ -420,21 +420,55 @@ describe("同步策略判定", () => {
 		keys: ["JUL769"],
 	};
 
-	it("TTL 内且正则指纹一致 => 索引新鲜", () => {
-		expect(isEmbyIndexFresh(base, 1_000_000 + EMBY_INDEX_TTL_MS - 1, "bbb")).toBe(true);
-		expect(isEmbyIndexFresh(base, 1_000_000 + EMBY_INDEX_TTL_MS, "bbb")).toBe(false);
+	it("TTL 内且指纹一致 => 索引新鲜", () => {
+		expect(
+			isEmbyIndexFresh(base, 1_000_000 + EMBY_INDEX_TTL_MS - 1, "aaa", "bbb"),
+		).toBe(true);
+		expect(
+			isEmbyIndexFresh(base, 1_000_000 + EMBY_INDEX_TTL_MS, "aaa", "bbb"),
+		).toBe(false);
 	});
 
-	it("无索引或正则指纹变化 => 不新鲜", () => {
-		expect(isEmbyIndexFresh(null, 1_000_000, "bbb")).toBe(false);
-		expect(isEmbyIndexFresh(base, 1_000_000, "other")).toBe(false);
+	it("无索引、服务器指纹或正则指纹变化 => 不新鲜", () => {
+		expect(isEmbyIndexFresh(null, 1_000_000, "aaa", "bbb")).toBe(false);
+		expect(isEmbyIndexFresh(base, 1_000_000, "other", "bbb")).toBe(false);
+		expect(isEmbyIndexFresh(base, 1_000_000, "aaa", "other")).toBe(false);
 	});
 
-	it("超过 24 小时、无索引或正则变化 => 需要全量", () => {
-		expect(needsEmbyFullSync(base, 1_000_000 + EMBY_FULL_SYNC_INTERVAL_MS - 1, "bbb")).toBe(false);
-		expect(needsEmbyFullSync(base, 1_000_000 + EMBY_FULL_SYNC_INTERVAL_MS, "bbb")).toBe(true);
-		expect(needsEmbyFullSync(null, 1_000_000, "bbb")).toBe(true);
-		expect(needsEmbyFullSync(base, 1_000_000, "other")).toBe(true);
+	it("换地址或换 Key 后旧索引既不算新鲜也必须全量重建", () => {
+		// 面板侧传入的是当前配置算出的 serverKey，索引里存的是旧服务器的
+		expect(isEmbyIndexFresh(base, 1_000_000, "foreign", "bbb")).toBe(false);
+		expect(needsEmbyFullSync(base, 1_000_000, "foreign", "bbb")).toBe(true);
+	});
+
+	it("年龄为 NaN 或未来时间 => 不新鲜且必须全量重建（不得走增量路径）", () => {
+		const nanIndex: EmbyIndex = { ...base, syncedAt: Number.NaN };
+		expect(isEmbyIndexFresh(nanIndex, 1_000_000, "aaa", "bbb")).toBe(false);
+		expect(needsEmbyFullSync(nanIndex, 1_000_000, "aaa", "bbb")).toBe(true);
+
+		// 时钟回拨 / NTP：syncedAt 在未来一年
+		const futureIndex: EmbyIndex = {
+			...base,
+			syncedAt: 1_000_000 + 365 * 24 * 60 * 60 * 1000,
+		};
+		expect(isEmbyIndexFresh(futureIndex, 1_000_000, "aaa", "bbb")).toBe(false);
+		expect(needsEmbyFullSync(futureIndex, 1_000_000, "aaa", "bbb")).toBe(true);
+	});
+
+	it("超过 24 小时、无索引或指纹变化 => 需要全量", () => {
+		expect(
+			needsEmbyFullSync(
+				base,
+				1_000_000 + EMBY_FULL_SYNC_INTERVAL_MS - 1,
+				"aaa",
+				"bbb",
+			),
+		).toBe(false);
+		expect(
+			needsEmbyFullSync(base, 1_000_000 + EMBY_FULL_SYNC_INTERVAL_MS, "aaa", "bbb"),
+		).toBe(true);
+		expect(needsEmbyFullSync(null, 1_000_000, "aaa", "bbb")).toBe(true);
+		expect(needsEmbyFullSync(base, 1_000_000, "aaa", "other")).toBe(true);
 	});
 });
 
@@ -454,9 +488,19 @@ describe("指纹", () => {
 		);
 	});
 
-	it("regexKey 对空值回退默认正则", () => {
+	it("serverKey 在地址或 Key 为空时返回空串（fail closed）", () => {
+		expect(embyServerKey("", "K")).toBe("");
+		expect(embyServerKey("http://h:8096", "  ")).toBe("");
+		expect(embyServerKey("   ", "K")).toBe("");
+		expect(embyServerKey("not a url", "K")).toBe("");
+	});
+
+	it("regexKey 对空值与非法模式都回退默认正则", () => {
 		expect(embyRegexKey("")).toBe(embyRegexKey("   "));
 		expect(embyRegexKey("x")).not.toBe(embyRegexKey(""));
+		// 抽取层把语法非法模式静默回退默认正则，指纹必须与之一致
+		expect(embyRegexKey("[")).toBe(embyRegexKey(""));
+		expect(embyRegexKey("([unclosed")).toBe(embyRegexKey(""));
 	});
 });
 
@@ -466,11 +510,26 @@ describe("增量起点与逐条兜底复核", () => {
 		expect(incrementalSince(syncedAt)).toBe("2026-10-03T11:00:00.000Z");
 	});
 
+	it("同步时间非有限值返回空串（退化为全量拉取，不抛 RangeError）", () => {
+		expect(incrementalSince(Number.NaN)).toBe("");
+		expect(incrementalSince(Number.POSITIVE_INFINITY)).toBe("");
+		expect(incrementalSince(Number.NEGATIVE_INFINITY)).toBe("");
+		// 有限但超出 Date 表示范围的值同样不得抛 RangeError
+		expect(incrementalSince(9e15)).toBe("");
+	});
+
 	it("逐条兜底结果必须本地复核后才算命中", () => {
 		const items = [{ Name: "JUL-769 甲乙" }];
 		expect(verifyEmbySearchItems(items, "JUL-769")).toBe(true);
 		expect(verifyEmbySearchItems(items, "jul_769")).toBe(true);
 		expect(verifyEmbySearchItems(items, "JUL-76")).toBe(false);
 		expect(verifyEmbySearchItems([], "JUL-769")).toBe(false);
+	});
+
+	it("复核使用传入的自定义正则：默认正则抽不到的短数字段也能命中", () => {
+		const items = [{ Name: "ABC-12" }];
+		const pattern = String.raw`\b[A-Z]{3}-\d{2}\b`;
+		expect(verifyEmbySearchItems(items, "ABC-12", pattern)).toBe(true);
+		expect(verifyEmbySearchItems(items, "ABC-12")).toBe(false);
 	});
 });
