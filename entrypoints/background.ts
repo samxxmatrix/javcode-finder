@@ -47,8 +47,24 @@ import {
 	type TranslateTarget,
 } from "../src/lib/translate";
 import { clearCodeMarksForTab } from "../src/lib/mark-codes";
+import { withRetry } from "../src/lib/retry";
 import { messages } from "../src/lib/locales";
 import type { SupportedLocale } from "../src/lib/types";
+
+// 反代查询（CF 入口 → 东京 Vercel）统一超时与重试次数：
+// 冷启动实测可达 4.4 s，原来的 5 s 太贴边，容易误判超时并静默降级到下一级数据源。
+const PROXY_LOOKUP_TIMEOUT_MS = 8000;
+const PROXY_LOOKUP_ATTEMPTS = 2;
+
+/**
+ * 反代查询统一入口：8 s 超时 + 一次重试。
+ * 首次请求本身会唤醒冷实例，失败后立刻重试通常就命中热路径（实测冷 4.4 s / 热 0.7-1.8 s）。
+ */
+const fetchProxyWithRetry = (url: string): Promise<Response> =>
+	withRetry(
+		() => fetch(url, { signal: AbortSignal.timeout(PROXY_LOOKUP_TIMEOUT_MS) }),
+		{ attempts: PROXY_LOOKUP_ATTEMPTS },
+	);
 
 export default defineBackground(() => {
 	// 给 media.javtrailers.com 响应注入 CORS 头，使扩展面板内的 hls.js 能跨域拉取 HLS 预告片流。
@@ -438,10 +454,11 @@ export default defineBackground(() => {
 							return;
 						}
 						try {
-							// BDSM-091 实测稳定存在，作为连通性探针
-							const res = await fetch(
+							// BDSM-091 实测稳定存在，作为连通性探针。
+							// 与查询同一条反代路径，同样用 8 s + 一次重试：
+							// 冷启动超时会把开关弹回关闭，等于让 DMM 静默失效。
+							const res = await fetchProxyWithRetry(
 								buildDmmHealthUrl(baseUrl, key, "BDSM-091"),
-								{ signal: AbortSignal.timeout(5000) },
 							);
 							if (!res.ok) {
 								let data: unknown = null;
@@ -476,9 +493,7 @@ export default defineBackground(() => {
 				): Promise<DmmLookupData | null> => {
 					let res: Response;
 					try {
-						res = await fetch(buildDmmLookupUrl(baseUrl, key, code), {
-							signal: AbortSignal.timeout(5000),
-						});
+						res = await fetchProxyWithRetry(buildDmmLookupUrl(baseUrl, key, code));
 					} catch (error) {
 						const kind =
 							error instanceof Error && error.name === "TimeoutError"
@@ -515,9 +530,8 @@ export default defineBackground(() => {
 				): Promise<DmmLookupData | null> => {
 					let res: Response;
 					try {
-						res = await fetch(
+						res = await fetchProxyWithRetry(
 							buildFalenoLookupUrl(baseUrl, apiKey, falenoCode),
-							{ signal: AbortSignal.timeout(5000) },
 						);
 					} catch (error) {
 						throw {
