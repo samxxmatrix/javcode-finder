@@ -4,7 +4,7 @@ import type { FallbackService } from "./translate";
 import type { SupportedLocale } from "./types";
 
 // String.raw 保持反斜杠字面：正则所见即所得（普通字符串中 \b 是退格符、\d 会丢反斜杠）
-export const DEFAULT_CODE_REGEX = String.raw`\b(?!(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[A-Z]+)?[- —–－\u00A0]+\d{4}\b)(?!\d{4}[- —–－\u00A0]\d{2}[- —–－\u00A0]\d{2}\b)(?<!\d)(?!FC2(?:[- —–－\u00A0]|$))[A-Z][A-Z0-9]{1,5}[- —–－\u00A0]+\d{3,6}(?![A-Z0-9])`;
+export const DEFAULT_CODE_REGEX = String.raw`\b(?!(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[A-Z]+)?[- —–－\u00A0]+\d{4}\b)(?!\d{4}[- —–－\u00A0]\d{2}[- —–－\u00A0]\d{2}\b)(?<!\d)(?:FC2[- —–－\u00A0]+\d{3,8}|FC2[- —–－\u00A0]+PPV[- —–－\u00A0]+\d{3,8}|FC2PPV[- —–－\u00A0]?\d{3,8}|[A-Z][A-Z0-9]{1,5}[- —–－\u00A0]+\d{3,6})(?![A-Z0-9])`;
 
 // supjav 官方搜索模板按语言区分：中文/繁中走 /zh/ 前缀，英文无前缀
 export const SUPJAV_ZH_TEMPLATE = "https://supjav.com/zh/?s={code}";

@@ -81,10 +81,11 @@ describe("extractCandidatesFromText", () => {
 	it("strictly enforces 2-6 letters on left and 3-6 digits on right", () => {
 		const text = `
 			Valid: ABP-123, SSIS-001, FSDSS-12345, ABCDEF-123456, AB-123
+			FC2 supported: FC2-1234567, FC2-PPV-1234567
 			Invalid letter length: ABCDEFG-123 (7 letters)
 			Invalid digit length: ABC-12 (2 digits), ABC-1234567 (7 digits)
 			Unspaced: SSIS001, LIUJIAYI1111, KAKA233333
-			Non-letter prefix: FC2-1234567, 259LUXU-123
+			Non-letter prefix: 259LUXU-123
 		`;
 
 		const { candidates } = extractCandidatesFromText(text);
@@ -94,6 +95,8 @@ describe("extractCandidatesFromText", () => {
 		expect(candidates).toContain("FSDSS-12345");
 		expect(candidates).toContain("ABCDEF-123456");
 		expect(candidates).toContain("AB-123");
+		expect(candidates).toContain("FC2-1234567");
+		expect(candidates).toContain("FC2-PPV-1234567");
 
 		expect(candidates).not.toContain("ABCDEFG-123");
 		expect(candidates).not.toContain("ABC-12");
@@ -101,7 +104,6 @@ describe("extractCandidatesFromText", () => {
 		expect(candidates).not.toContain("SSIS001");
 		expect(candidates).not.toContain("LIUJIAYI1111");
 		expect(candidates).not.toContain("KAKA233333");
-		expect(candidates).not.toContain("FC2-1234567");
 		expect(candidates).not.toContain("259LUXU-123");
 	});
 
