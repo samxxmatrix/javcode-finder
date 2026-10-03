@@ -1,16 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+	EMBY_FULL_SYNC_INTERVAL_MS,
 	EMBY_INDEX_LIMIT,
+	EMBY_INDEX_TTL_MS,
 	EMBY_PAGE_SIZE,
 	buildEmbyIndexKeys,
 	buildEmbyItemsUrl,
 	buildEmbySearchUrl,
 	codeKeyA,
 	codeKeyB,
+	embyRegexKey,
+	embyServerKey,
 	extractKeysFromItem,
+	fingerprint,
+	incrementalSince,
+	isEmbyIndexFresh,
 	keysForCode,
+	matchEmbyCodes,
+	needsEmbyFullSync,
 	normalizeEmbyBaseUrl,
 	parseEmbyItems,
+	verifyEmbySearchItems,
+	type EmbyIndex,
+	type EmbyItemLike,
 } from "../src/lib/emby";
 import { extractCandidatesFromText } from "../src/lib/extract-codes";
 import { DEFAULT_CODE_REGEX } from "../src/lib/settings";
@@ -272,6 +284,13 @@ describe("extractKeysFromItem", () => {
 		).toEqual([]);
 	});
 
+	it("null/undefined 条目直接返回空数组（响应里的异常条目不得打断同步）", () => {
+		expect(extractKeysFromItem(null as unknown as EmbyItemLike)).toEqual([]);
+		expect(extractKeysFromItem(undefined as unknown as EmbyItemLike)).toEqual(
+			[],
+		);
+	});
+
 	it("自定义正则生效：默认正则抽不到的短数字段也能命中", () => {
 		const pattern = String.raw`\b[A-Z]{3}-\d{2}\b`;
 		expect(extractKeysFromItem({ Name: "ABC-12" }, pattern)).toEqual([
@@ -311,10 +330,11 @@ describe("extractKeysFromItem", () => {
 			extractKeysFromItem({ Path: "/mnt/media/TV/abc_123/x.mp4" }),
 		).toContain("ABC123");
 		// 注意：这套改写也可能从 "Season_01/ep_005/…" 造出 EP005 这类短伪键，
-		// 规格把它当作低概率假键接受。
+		// 规格 §七.4 把这类低概率假键当作已知代价接受。
+		// 这里钉住实际结果：keyA=EP005，keyB 把 005 去零成 5 => EP5。
 		expect(
 			extractKeysFromItem({ Path: "/mnt/media/TV/Season_01/ep_005/x.mp4" }),
-		).toContain("EP005");
+		).toEqual(["EP005", "EP5"]);
 	});
 
 	it("多字段不得产生跨字段伪键（正反对照）", () => {
@@ -350,5 +370,107 @@ describe("buildEmbyIndexKeys", () => {
 		expect(keys).toContain("HEYZO0406");
 		expect(keys).toContain("HEYZO406");
 		expect(new Set(keys).size).toBe(keys.length);
+	});
+});
+
+describe("matchEmbyCodes", () => {
+	const keys = buildEmbyIndexKeys([
+		{ Name: "JUL-769 甲" },
+		{ Name: "HEYZO-0406 乙" },
+	]);
+
+	it("大小写/下划线/去零写法都能命中", () => {
+		expect(matchEmbyCodes(keys, ["JUL-769"])).toEqual(new Set(["JUL-769"]));
+		expect(matchEmbyCodes(keys, ["jul_769"])).toEqual(new Set(["JUL-769"]));
+		expect(matchEmbyCodes(keys, ["HEYZO-406"])).toEqual(new Set(["HEYZO-406"]));
+	});
+
+	it("前缀近似不误命中", () => {
+		expect(matchEmbyCodes(keys, ["JUL-76"])).toEqual(new Set());
+		expect(matchEmbyCodes(keys, ["SSIS-001"])).toEqual(new Set());
+	});
+
+	it("返回的是归一化番号（与列表显示一致）", () => {
+		expect(matchEmbyCodes(keys, [" jul-769 "])).toEqual(new Set(["JUL-769"]));
+	});
+
+	it("索引键以 Set 直接传入时结果一致（面板侧免去重复建集合）", () => {
+		expect(matchEmbyCodes(new Set(keys), ["JUL-769"])).toEqual(
+			new Set(["JUL-769"]),
+		);
+	});
+
+	it("空值、纯分隔符与超长候选被忽略，也不影响其他命中", () => {
+		expect(matchEmbyCodes(keys, ["   ", "-", "A".repeat(70)])).toEqual(
+			new Set(),
+		);
+		expect(matchEmbyCodes(keys, ["   ", "JUL-769"])).toEqual(
+			new Set(["JUL-769"]),
+		);
+	});
+});
+
+describe("同步策略判定", () => {
+	const base: EmbyIndex = {
+		v: 1,
+		serverKey: "aaa",
+		regexKey: "bbb",
+		syncedAt: 1_000_000,
+		total: 282,
+		keys: ["JUL769"],
+	};
+
+	it("TTL 内且正则指纹一致 => 索引新鲜", () => {
+		expect(isEmbyIndexFresh(base, 1_000_000 + EMBY_INDEX_TTL_MS - 1, "bbb")).toBe(true);
+		expect(isEmbyIndexFresh(base, 1_000_000 + EMBY_INDEX_TTL_MS, "bbb")).toBe(false);
+	});
+
+	it("无索引或正则指纹变化 => 不新鲜", () => {
+		expect(isEmbyIndexFresh(null, 1_000_000, "bbb")).toBe(false);
+		expect(isEmbyIndexFresh(base, 1_000_000, "other")).toBe(false);
+	});
+
+	it("超过 24 小时、无索引或正则变化 => 需要全量", () => {
+		expect(needsEmbyFullSync(base, 1_000_000 + EMBY_FULL_SYNC_INTERVAL_MS - 1, "bbb")).toBe(false);
+		expect(needsEmbyFullSync(base, 1_000_000 + EMBY_FULL_SYNC_INTERVAL_MS, "bbb")).toBe(true);
+		expect(needsEmbyFullSync(null, 1_000_000, "bbb")).toBe(true);
+		expect(needsEmbyFullSync(base, 1_000_000, "other")).toBe(true);
+	});
+});
+
+describe("指纹", () => {
+	it("同输入同值、不同输入不同值", () => {
+		expect(fingerprint("abc")).toBe(fingerprint("abc"));
+		expect(fingerprint("abc")).not.toBe(fingerprint("abd"));
+		expect(fingerprint("abc")).toMatch(/^[0-9a-f]{8}$/);
+	});
+
+	it("serverKey 对地址规范敏感：尾斜杠与路径不影响", () => {
+		expect(embyServerKey("http://h:8096/", "K")).toBe(embyServerKey("http://h:8096/web", "K"));
+		expect(embyServerKey("http://h:8096", "K")).not.toBe(embyServerKey("http://h:8096", "K2"));
+		// Key 两侧空白不参与指纹，避免粘贴时多出的空格把索引判成失效
+		expect(embyServerKey("http://h:8096", " K ")).toBe(
+			embyServerKey("http://h:8096", "K"),
+		);
+	});
+
+	it("regexKey 对空值回退默认正则", () => {
+		expect(embyRegexKey("")).toBe(embyRegexKey("   "));
+		expect(embyRegexKey("x")).not.toBe(embyRegexKey(""));
+	});
+});
+
+describe("增量起点与逐条兜底复核", () => {
+	it("增量起点 = 同步时间 − 60 分钟", () => {
+		const syncedAt = Date.parse("2026-10-03T12:00:00.000Z");
+		expect(incrementalSince(syncedAt)).toBe("2026-10-03T11:00:00.000Z");
+	});
+
+	it("逐条兜底结果必须本地复核后才算命中", () => {
+		const items = [{ Name: "JUL-769 甲乙" }];
+		expect(verifyEmbySearchItems(items, "JUL-769")).toBe(true);
+		expect(verifyEmbySearchItems(items, "jul_769")).toBe(true);
+		expect(verifyEmbySearchItems(items, "JUL-76")).toBe(false);
+		expect(verifyEmbySearchItems([], "JUL-769")).toBe(false);
 	});
 });

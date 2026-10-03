@@ -1,10 +1,12 @@
 import { MAX_CANDIDATE_LENGTH, extractCandidatesFromText } from "./extract-codes";
 import { normalizeCode, toComparisonKey } from "./normalize-code";
+import { DEFAULT_CODE_REGEX } from "./settings";
 
 /**
  * Emby 媒体库「已在库」判定的纯逻辑层。
- * 本轮：地址规范化、条目查询 URL 构造、响应解析、索引键生成。
- * 后续任务在此模块补充：候选匹配、同步策略判定。
+ * 本轮：地址规范化、条目查询 URL 构造、响应解析、索引键生成、
+ * 候选匹配、TTL/增量/全量判定与指纹。
+ * 后续任务在此模块之外实现：后台同步与面板消费。
  * 全部为纯函数（不碰浏览器 API），网络请求在 background 执行。
  */
 
@@ -195,16 +197,20 @@ export function keysForCode(code: string): string[] {
 }
 
 /**
- * 抽取单个条目上的全部键（去重后）。
+ * 抽取单个条目上的全部键（keyA/keyB，跨字段去重后）。
  * 必须逐字段跑正则再合并：把多字段拼成一个大串会在边界造出伪键
  * （实测会产生 CARIB-091326、NIA-489155 等并不存在的番号）。
  * 抽取前把 "_" 归一为 "-"：面板正则的分隔符类不含下划线。
- * 非字符串/空字段直接跳过，避免响应里的异常类型把同步整个打断。
+ * 注意该改写发生在跑正则之前，因此自定义正则里含 "_" 的写法永远匹配不到
+ * （例如 `[A-Z]{3}_\d{3}` 对 "ABC_123" 返回 []）。
+ * 非字符串/空字段直接跳过、null 条目返回空数组，
+ * 避免响应里的异常类型把同步整个打断。
  */
 export function extractKeysFromItem(
 	item: EmbyItemLike,
 	regex?: string,
 ): string[] {
+	if (!item) return [];
 	const keys = new Set<string>();
 	for (const field of [item.Name, item.FileName, item.Path]) {
 		if (typeof field !== "string" || !field) continue;
@@ -230,4 +236,105 @@ export function buildEmbyIndexKeys(
 		for (const key of extractKeysFromItem(item, regex)) keys.add(key);
 	}
 	return [...keys];
+}
+
+export interface EmbyIndex {
+	v: 1;
+	/** 服务器+Key 指纹：变化即索引失效 */
+	serverKey: string;
+	/** 生效正则的指纹：变化即重建，避免键口径漂移 */
+	regexKey: string;
+	/** 最近一次成功同步时间 */
+	syncedAt: number;
+	/** 参与索引的条目数 */
+	total: number;
+	/** keyA + keyB 合并去重 */
+	keys: string[];
+}
+
+/** FNV-1a 32 位哈希（仅用于指纹，不做加密用途） */
+export function fingerprint(input: string): string {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < input.length; i++) {
+		hash ^= input.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0");
+}
+
+/** 服务器+Key 指纹（地址先规范化，尾斜杠/路径不影响） */
+export function embyServerKey(baseUrl: string, apiKey: string): string {
+	return fingerprint(`${normalizeEmbyBaseUrl(baseUrl)}\n${(apiKey || "").trim()}`);
+}
+
+/** 生效正则指纹（空值回退默认正则） */
+export function embyRegexKey(pattern: string): string {
+	const active = (pattern || "").trim() || DEFAULT_CODE_REGEX;
+	return fingerprint(active);
+}
+
+/**
+ * 候选匹配：任一候选键（keyA/keyB）命中索引即视为在库。
+ * 返回命中番号的归一化形式（与 CodeList 的 uniqueCodes 一致）。
+ */
+export function matchEmbyCodes(
+	keys: Iterable<string>,
+	codes: string[],
+): Set<string> {
+	const index = keys instanceof Set ? keys : new Set(keys);
+	const matched = new Set<string>();
+	for (const code of codes) {
+		const normalized = normalizeCode(code);
+		if (!normalized) continue;
+		for (const key of keysForCode(normalized)) {
+			if (index.has(key)) {
+				matched.add(normalized);
+				break;
+			}
+		}
+	}
+	return matched;
+}
+
+/** 索引是否可直接复用：存在、正则指纹一致、且未超过 TTL */
+export function isEmbyIndexFresh(
+	index: EmbyIndex | null,
+	now: number,
+	regexKey: string,
+): boolean {
+	if (!index) return false;
+	if (index.regexKey !== regexKey) return false;
+	return now - index.syncedAt < EMBY_INDEX_TTL_MS;
+}
+
+/** 是否需要全量重建索引（缺失、指纹变化、或超过 24 小时校准周期） */
+export function needsEmbyFullSync(
+	index: EmbyIndex | null,
+	now: number,
+	regexKey: string,
+): boolean {
+	if (!index) return true;
+	if (index.regexKey !== regexKey) return true;
+	return now - index.syncedAt >= EMBY_FULL_SYNC_INTERVAL_MS;
+}
+
+/** 增量查询起点：上次同步时间 − 重叠窗（容忍客户端时钟超前服务器） */
+export function incrementalSince(syncedAt: number): string {
+	return new Date(syncedAt - EMBY_SYNC_OVERLAP_MS).toISOString();
+}
+
+/** 逐条兜底命中的复核：条目上抽出的键必须与候选键相交 */
+export function verifyEmbySearchItems(
+	items: EmbyItemLike[],
+	code: string,
+	regex?: string,
+): boolean {
+	const wanted = new Set(keysForCode(code));
+	if (wanted.size === 0) return false;
+	for (const item of items) {
+		for (const key of extractKeysFromItem(item, regex)) {
+			if (wanted.has(key)) return true;
+		}
+	}
+	return false;
 }
