@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	isEmbyIndexFresh,
 	needsEmbyFullSync,
@@ -143,8 +143,60 @@ describe("loadEmbyIndex / saveEmbyIndex / clearEmbyIndex", () => {
 	});
 });
 
+interface MemoryLocal {
+	get(key: string): Promise<Record<string, unknown>>;
+	set(items: Record<string, unknown>): Promise<void>;
+	remove(key: string): Promise<void>;
+}
+
+/** storage.local 的最小内存假实现：get 返回 {[key]: value}，与 chrome.storage.local 同形 */
+function createMemoryLocal(): { local: MemoryLocal; data: Map<string, unknown> } {
+	const data = new Map<string, unknown>();
+	return {
+		data,
+		local: {
+			get: async (key) => {
+				const result: Record<string, unknown> = {};
+				if (data.has(key)) result[key] = data.get(key);
+				return result;
+			},
+			set: async (items) => {
+				for (const [key, value] of Object.entries(items)) data.set(key, value);
+			},
+			remove: async (key) => {
+				data.delete(key);
+			},
+		},
+	};
+}
+
 describe("browserEmbyStore", () => {
-	it("没有 browser.storage 时返回 null", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("Chrome MV3 只有 chrome 全局时也能解析到 storage.local 并完成持久化", async () => {
+		const { local, data } = createMemoryLocal();
+		vi.stubGlobal("chrome", { storage: { local } });
+
+		const store = browserEmbyStore();
+		expect(store).not.toBeNull();
+
+		await expect(saveEmbyIndex(store, INDEX)).resolves.toBe(true);
+		expect(data.get(EMBY_INDEX_STORAGE_KEY)).toEqual(INDEX);
+		await expect(loadEmbyIndex(store)).resolves.toEqual(INDEX);
+
+		await clearEmbyIndex(store);
+		expect(data.has(EMBY_INDEX_STORAGE_KEY)).toBe(false);
+		await expect(loadEmbyIndex(store)).resolves.toBeNull();
+	});
+
+	it("storage.local 缺少 get/set/remove 时返回 null", () => {
+		vi.stubGlobal("chrome", { storage: { local: {} } });
+		expect(browserEmbyStore()).toBeNull();
+	});
+
+	it("没有任何 browser/chrome 全局时返回 null", () => {
 		expect(browserEmbyStore()).toBeNull();
 	});
 });
