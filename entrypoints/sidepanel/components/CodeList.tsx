@@ -2,7 +2,10 @@ import React, { useState } from "react";
 import { isFavorite } from "../../../src/lib/favorites";
 import { locateCodeInActiveTab } from "../../../src/lib/locate-code";
 import type { LocaleMessages } from "../../../src/lib/locales";
-import { normalizeCode } from "../../../src/lib/normalize-code";
+import {
+	normalizeCode,
+	toExternalSearchCode,
+} from "../../../src/lib/normalize-code";
 import {
 	DEFAULT_SETTINGS,
 	getSettings,
@@ -61,7 +64,11 @@ export const CodeList: React.FC<CodeListProps> = ({
 
 	// 直接按模板打开 supJAV 搜索页（无需解析）
 	const handleSupjavClick = async (code: string) => {
-		const url = resolveSupjavUrl(settings.supjavTemplate, code, locale);
+		const url = resolveSupjavUrl(
+			settings.supjavTemplate,
+			toExternalSearchCode(code),
+			locale,
+		);
 		try {
 			await browser.tabs.create({ url });
 		} catch {
@@ -96,7 +103,11 @@ export const CodeList: React.FC<CodeListProps> = ({
 
 			<ul className="unmatched-section__list">
 				{uniqueCodes.map((code) => {
-					const javdbUrl = resolveSearchUrl(settings.javbusTemplate, code);
+					// 跳转码与显示码分离：FC2 番号外部平台只认 FC2-PPV-<数字> 写法
+					const javdbUrl = resolveSearchUrl(
+						settings.javbusTemplate,
+						toExternalSearchCode(code),
+					);
 					const locateState = locateStates[code] || { status: "idle" };
 
 					const isSelected = code === selectedCode;
@@ -173,7 +184,10 @@ export const CodeList: React.FC<CodeListProps> = ({
 								</a>
 								{showCustom && (
 									<a
-										href={resolveSearchUrl(customTemplate, code)}
+										href={resolveSearchUrl(
+											customTemplate,
+											toExternalSearchCode(code),
+										)}
 										target="_blank"
 										rel="noopener noreferrer"
 										className="unmatched-item__link unmatched-item__link--custom"

@@ -14,6 +14,7 @@ import {
 	saveSettings,
 	SETTINGS_STORAGE_KEY,
 } from "../src/lib/settings";
+import { toExternalSearchCode } from "../src/lib/normalize-code";
 import type { FallbackService } from "../src/lib/translate";
 
 describe("settings", () => {
@@ -369,6 +370,42 @@ describe("settings", () => {
 		it("appends code when template has trailing equals", () => {
 			const url = resolveSearchUrl("https://example.com/search?k=", "FC2-123");
 			expect(url).toBe("https://example.com/search?k=FC2-123");
+		});
+	});
+
+	// 面板三个外部跳转按钮共同遵守的契约：显示码先经 toExternalSearchCode 再进模板
+	describe("external jump URL composition", () => {
+		it("JavDB jump uses the FC2-PPV form for FC2 codes", () => {
+			expect(
+				resolveSearchUrl(
+					"https://javdb.com/search?q={code}",
+					toExternalSearchCode("FC2-123456"),
+				),
+			).toBe("https://javdb.com/search?q=FC2-PPV-123456");
+		});
+
+		it("Supjav jump uses the FC2-PPV form for FC2 codes", () => {
+			expect(
+				resolveSupjavUrl("", toExternalSearchCode("FC2-123456"), "zh-hans"),
+			).toBe("https://supjav.com/zh/?s=FC2-PPV-123456");
+		});
+
+		it("custom template jump uses the FC2-PPV form for FC2 codes", () => {
+			expect(
+				resolveSearchUrl(
+					"https://mysite.example.com/search/",
+					toExternalSearchCode("FC2-123456"),
+				),
+			).toBe("https://mysite.example.com/search/FC2-PPV-123456");
+		});
+
+		it("non-FC2 codes pass through unchanged", () => {
+			expect(
+				resolveSearchUrl(
+					"https://javdb.com/search?q={code}",
+					toExternalSearchCode("ABP-123"),
+				),
+			).toBe("https://javdb.com/search?q=ABP-123");
 		});
 	});
 
