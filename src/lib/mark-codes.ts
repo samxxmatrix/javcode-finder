@@ -1,3 +1,7 @@
+// 仅供 markCodesForTab（扩展上下文）使用：注入进页面的 markCodesInTab / clearCodeMarksInTab
+// 会被序列化后执行，**不能**引用这个 import，归一化必须由调用方算好传进去。
+import { normalizeCode } from "./normalize-code";
+
 /**
  * Self-contained function executed in host page top-level document via scripting.executeScript.
  * Must not reference external closure variables.
@@ -40,6 +44,12 @@ export function markCodesInTab(
 	codes: string[],
 	perCodeLimit = 30,
 	favoriteCodes?: string[],
+	/**
+	 * 与 codes 同序的面板统一口径（归一化）番号。页面原文可能是 `FC2-PPV-4942266`
+	 * 而面板列表/收藏用的是 `FC2-4942266`；收藏判定与点击消息都必须用后者，
+	 * 否则这类番号漏收藏图标、点击后列表也不加选中边框。缺省时退化为原文串。
+	 */
+	canonicalCodes?: string[],
 ): void {
 	try {
 		// 先清理旧标记（逻辑内联：注入函数不能引用模块级函数或常量）
@@ -75,6 +85,21 @@ export function markCodesInTab(
 			}
 		}
 		if (unique.length === 0) return;
+
+		// 原文串（大写）→ 面板统一口径。收藏集合与点击消息都用归一化形式，
+		// 与 normalizeCode() 的结果一致（此处不能 import，只能由调用方传入）。
+		const canonicalByKey = new Map<string, string>();
+		if (canonicalCodes) {
+			for (let i = 0; i < codes.length; i += 1) {
+				const rawKey = String(codes[i] ?? "")
+					.trim()
+					.toUpperCase();
+				const canonical = String(canonicalCodes[i] ?? "").trim();
+				if (rawKey && canonical) canonicalByKey.set(rawKey, canonical);
+			}
+		}
+		const toCanonical = (code: string): string =>
+			canonicalByKey.get(code.toUpperCase()) ?? code;
 
 		// 与定位相同的宽松匹配：分隔符宽容（连字符/空格互替）+ FC2 PPV 变体
 		const buildPattern = (raw: string): string => {
@@ -298,7 +323,8 @@ export function markCodesInTab(
 								counts.set(key, (counts.get(key) ?? 0) + 1);
 								found.push({
 									end: match.index + match[0].length,
-									code,
+									// 用面板统一口径：书签判定与 jt:code-clicked 都基于它
+									code: toCanonical(code),
 									matchedLen: match[0].length,
 								});
 							}
@@ -347,10 +373,12 @@ export async function markCodesForTab(
 	favoriteCodes?: string[],
 ): Promise<void> {
 	try {
+		// 注入函数不能引用模块函数，所以归一化在这里算好，与 codes 同序传入
+		const canonicalCodes = codes.map((code) => normalizeCode(code));
 		await browser.scripting.executeScript({
 			target: { tabId },
 			func: markCodesInTab,
-			args: [codes, perCodeLimit, favoriteCodes],
+			args: [codes, perCodeLimit, favoriteCodes, canonicalCodes],
 		});
 	} catch (err) {
 		console.warn("Failed to mark codes in tab:", tabId, err);

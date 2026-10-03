@@ -224,6 +224,38 @@ describe("markCodesInTab", () => {
 		expect(stopPropagation).toHaveBeenCalled();
 	});
 
+	it("页面原文与面板形式不同时（FC2-PPV-xxxx），收藏命中且点击发送归一化番号", () => {
+		(globalThis as any).chrome = {
+			runtime: { sendMessage: vi.fn() },
+		};
+		// 页面原文是带 PPV 的写法，面板列表与收藏用的是归一化后的 FC2-4942266
+		const { handlers, createdSpans } = createMockDom([
+			{ text: "Check FC2-PPV-4942266 now" },
+		]);
+
+		markCodesInTab(
+			["FC2-PPV-4942266"],
+			30,
+			["FC2-4942266"],
+			["FC2-4942266"],
+		);
+
+		// 收藏命中 → 书签图标（<path>），而不是实心圆（<circle>）
+		expect(createdSpans[0]!.innerHTML).toContain("path");
+		expect(createdSpans[0]!.innerHTML).not.toContain("circle");
+
+		handlers.find((h) => h.type === "click")!.fn({
+			preventDefault: vi.fn(),
+			stopPropagation: vi.fn(),
+		});
+		// 面板的选中判定是 code === selectedCode（两者都是归一化形式），
+		// 所以消息必须带归一化番号，否则黄点点击后列表不会加边框
+		expect((globalThis as any).chrome.runtime.sendMessage).toHaveBeenCalledWith({
+			type: "jt:code-clicked",
+			code: "FC2-4942266",
+		});
+	});
+
 	it("点击圆点就地包裹番号为金底黑字标记", () => {
 		const { handlers, surroundCalls } = createMockDom([
 			{ text: "ABP-123 is here" },
