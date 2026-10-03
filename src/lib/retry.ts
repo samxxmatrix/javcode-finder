@@ -13,8 +13,11 @@ export interface RetryOptions {
 	attempts?: number;
 }
 
+/** 尝试序号从 1 开始，调用方据此为每次尝试配不同超时 */
+export type RetryOperation<T> = (attempt: number) => Promise<T>;
+
 export async function withRetry<T>(
-	operation: () => Promise<T>,
+	operation: RetryOperation<T>,
 	{ attempts = DEFAULT_RETRY_ATTEMPTS }: RetryOptions = {},
 ): Promise<T> {
 	const total = Number.isFinite(attempts)
@@ -24,7 +27,7 @@ export async function withRetry<T>(
 	let lastError: unknown;
 	for (let attempt = 1; attempt <= total; attempt += 1) {
 		try {
-			return await operation();
+			return await operation(attempt);
 		} catch (error) {
 			lastError = error;
 		}

@@ -54,4 +54,15 @@ describe("withRetry", () => {
 		await expect(withRetry(operation, { attempts: 0 })).rejects.toThrow("boom");
 		expect(operation).toHaveBeenCalledTimes(1);
 	});
+
+	it("passes the 1-based attempt number so callers can vary per-attempt timeouts", async () => {
+		const operation = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("boom"))
+			.mockResolvedValueOnce("ok");
+
+		await expect(withRetry(operation, { attempts: 2 })).resolves.toBe("ok");
+		expect(operation).toHaveBeenNthCalledWith(1, 1);
+		expect(operation).toHaveBeenNthCalledWith(2, 2);
+	});
 });
