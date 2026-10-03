@@ -7,6 +7,7 @@ import {
 import {
 	buildDmmHealthUrl,
 	buildDmmLookupUrl,
+	buildFalenoLookupUrl,
 	formatDmmError,
 	parseDmmLookupError,
 	readDmmLookupResponse,
@@ -505,6 +506,55 @@ export default defineBackground(() => {
 					return readDmmLookupResponse(res);
 				};
 
+				// FALENO 反代查询：与 lookupDmm 同一入口（东京出口 + 永久缓存）。
+				// 错误统一改标为 faleno 来源，错误行才显示 FALENO 而不是 DMM。
+				const lookupFalenoViaProxy = async (
+					baseUrl: string,
+					apiKey: string,
+					falenoCode: string,
+				): Promise<DmmLookupData | null> => {
+					let res: Response;
+					try {
+						res = await fetch(
+							buildFalenoLookupUrl(baseUrl, apiKey, falenoCode),
+							{ signal: AbortSignal.timeout(5000) },
+						);
+					} catch (error) {
+						throw {
+							source: "faleno",
+							kind:
+								error instanceof Error && error.name === "TimeoutError"
+									? "timeout"
+									: "network",
+							status: 0,
+						} satisfies PreviewLookupError;
+					}
+
+					// 上游 404 与 40401 都按查无处理（与直连分支语义一致）
+					if (res.status === 404) return null;
+					if (!res.ok) {
+						let data: unknown = null;
+						try {
+							data = await res.json();
+						} catch {
+							// 响应体不是 JSON 时仅用状态码
+						}
+						const parsed = parseDmmLookupError(res.status, data);
+						if (parsed.kind === "not_found") return null;
+						throw { source: "faleno", ...parsed } satisfies PreviewLookupError;
+					}
+
+					try {
+						return await readDmmLookupResponse(res);
+					} catch (error) {
+						// readDmmLookupResponse 抛的是 dmm 来源的结构化错误，这里换标签
+						throw {
+							...(error as PreviewLookupError),
+							source: "faleno",
+						} satisfies PreviewLookupError;
+					}
+				};
+
 				// 详情页兜底：主媒体服务 404 时，从详情页提取 mgstage 封面与 sample MP4
 				if (msg?.type === "jt:resolve-fallback") {
 					const contentId = (msg.contentId || "").trim();
@@ -599,6 +649,26 @@ export default defineBackground(() => {
 							// 前缀不匹配则不触发兜底(返回 null = 跳过)
 							if (!matchesFalenoPrefix(code, falenoPrefixes)) {
 								return null;
+							}
+							// DMM API 已启用（开关 + 地址 + Key）→ 复用同一反代：
+							// 东京出口不受地域拦截，且有永久缓存，用户侧不再直连 faleno.jp
+							if (msg.dmmEnabled === true && dmmBase && dmmKey) {
+								const proxied = await lookupFalenoViaProxy(
+									dmmBase,
+									dmmKey,
+									code,
+								);
+								if (!proxied) return null;
+								return {
+									source: "faleno",
+									detailUrl: proxied.detailUrl || buildFalenoWorksUrl(code),
+									contentId: proxied.cid || toFalenoCodeKey(code),
+									title: proxied.title,
+									shortTitle: proxied.shortTitle,
+									coverUrl: proxied.coverUrl,
+									previewUrl: proxied.previewUrl,
+									previewType: "mp4",
+								} satisfies PreviewMedia;
 							}
 							const worksUrl = buildFalenoWorksUrl(code);
 							if (!worksUrl) return null;
