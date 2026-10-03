@@ -13,7 +13,8 @@
     "zip:firefox": "wxt zip -b firefox",
     "prepare": "wxt prepare",
     "compile": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:proxy": "node docs/scripts/vercel-e2e.mjs"
   },
   "dependencies": {
     "hls.js": "^1.7.3",
