@@ -24,7 +24,7 @@ function isLookupErrorKind(value: unknown): value is PreviewLookupErrorKind {
 	);
 }
 
-function normalizeLookupError(
+export function normalizeLookupError(
 	source: PreviewLookupSource,
 	error: unknown,
 ): PreviewLookupError {

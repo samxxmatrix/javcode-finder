@@ -13,14 +13,28 @@ import {
 	readDmmLookupResponse,
 	type DmmLookupData,
 } from "../src/lib/dmm";
-import { resolvePreview } from "../src/lib/resolve-preview";
+import { normalizeLookupError, resolvePreview } from "../src/lib/resolve-preview";
+import {
+	buildFc2DetailUrl,
+	buildFc2EmbedUrl,
+	buildFc2SampleUrl,
+	fc2ArticleId,
+	parseFc2EmbedHtml,
+	parseFc2SampleResponse,
+	type Fc2EmbedData,
+	type Fc2Sample,
+} from "../src/lib/fc2";
 import {
 	buildFalenoWorksUrl,
 	matchesFalenoPrefix,
 	parseFalenoWorksHtml,
 	toFalenoCodeKey,
 } from "../src/lib/faleno";
-import type { PreviewLookupError, PreviewMedia } from "../src/lib/types";
+import type {
+	PreviewLookupError,
+	PreviewMedia,
+	PreviewResolution,
+} from "../src/lib/types";
 import {
 	buildBasicAuth,
 	joinWebdavUrl,
@@ -93,6 +107,110 @@ const fetchProxyWithRetry = (url: string): Promise<Response> =>
 			}),
 		{ attempts: PROXY_LOOKUP_ATTEMPTS },
 	);
+
+// FC2 预览源（adult.contents.fc2.com）超时策略：
+// `/sample` 决定成败：首次 8 s、失败重试一次 5 s（与反代查询同策略，覆盖偶发连接中断，
+// 实测该网络下撞到过"连接被意外关闭"）；`/embed` 只补标题，单次 5 s，失败即降级为 title=null。
+// 两个请求都只需要文章号 ⇒ 并行发：最坏 max(13 s, 5 s) = 13 s，而不是串行叠加的 18 s。
+const FC2_SAMPLE_FIRST_TIMEOUT_MS = 8000;
+const FC2_SAMPLE_RETRY_TIMEOUT_MS = 5000;
+const FC2_SAMPLE_ATTEMPTS = 2;
+const FC2_EMBED_TIMEOUT_MS = 5000;
+
+/**
+ * `/sample`：命中返回封面与预览地址；HTTP 400 = 明确"无此片"（返回 null，**不重试**——
+ * 老片被删很常见，重试只会让用户白等 13 s 再多发两个请求）；超时/连接失败重试一次；
+ * 其余非 2xx 抛 http 错误；响应不是 JSON 抛 api 错误。
+ */
+async function loadFc2Sample(articleId: string): Promise<Fc2Sample | null> {
+	let res: Response;
+	try {
+		res = await withRetry(
+			(attempt) =>
+				fetch(buildFc2SampleUrl(articleId), {
+					signal: AbortSignal.timeout(
+						attempt === 1
+							? FC2_SAMPLE_FIRST_TIMEOUT_MS
+							: FC2_SAMPLE_RETRY_TIMEOUT_MS,
+					),
+				}),
+			{ attempts: FC2_SAMPLE_ATTEMPTS },
+		);
+	} catch (error) {
+		throw {
+			source: "fc2",
+			kind:
+				error instanceof Error && error.name === "TimeoutError"
+					? "timeout"
+					: "network",
+		} satisfies PreviewLookupError;
+	}
+	if (res.status === 400) return null;
+	if (!res.ok) {
+		throw {
+			source: "fc2",
+			kind: "http",
+			status: res.status,
+		} satisfies PreviewLookupError;
+	}
+	let data: unknown;
+	try {
+		data = await res.json();
+	} catch {
+		throw {
+			source: "fc2",
+			kind: "api",
+			status: res.status,
+		} satisfies PreviewLookupError;
+	}
+	return parseFc2SampleResponse(data);
+}
+
+/** `/embed`：只补标题与 contentId；任何失败都返回 null，绝不影响预览可播 */
+async function loadFc2Embed(articleId: string): Promise<Fc2EmbedData | null> {
+	try {
+		const res = await fetch(buildFc2EmbedUrl(articleId), {
+			signal: AbortSignal.timeout(FC2_EMBED_TIMEOUT_MS),
+		});
+		if (!res.ok) return null;
+		return parseFc2EmbedHtml(await res.text());
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * FC2 号独占链路：只查 FC2 公开接口，未命中即 not_found，**不回退** DMM/JavTrailers/FALENO。
+ * shortTitle 留空：FC2 没有该字段，面板按来源白名单用 title 兜底显示（见 preview-source.ts）。
+ * previewUrl 每次重新解析，绝不缓存 —— `mid` 令牌会失效，缓存地址必然 403。
+ */
+async function resolveFc2Preview(articleId: string): Promise<PreviewResolution> {
+	const errors: PreviewLookupError[] = [];
+	// 先发 embed：它自身永不 reject，于是与 sample 并行，省掉一次串行等待
+	const embedPromise = loadFc2Embed(articleId);
+	try {
+		const sample = await loadFc2Sample(articleId);
+		if (!sample) return { status: "not_found", media: null, errors };
+		const embed = await embedPromise;
+		return {
+			status: "resolved",
+			media: {
+				source: "fc2",
+				detailUrl: buildFc2DetailUrl(articleId),
+				contentId: embed?.contentId ?? null,
+				title: embed?.title ?? null,
+				shortTitle: null,
+				coverUrl: sample.coverUrl,
+				previewUrl: sample.previewUrl,
+				previewType: "mp4",
+			} satisfies PreviewMedia,
+			errors,
+		};
+	} catch (error) {
+		errors.push(normalizeLookupError("fc2", error));
+		return { status: "error", media: null, errors };
+	}
+}
 
 export default defineBackground(() => {
 	// —— Emby 媒体库索引同步 ——
@@ -913,6 +1031,28 @@ export default defineBackground(() => {
 					: [];
 
 				void (async () => {
+					// 响应信封只此一处：FC2 独占分支与常规链路共用同一形状
+					const sendResolution = (resolution: PreviewResolution) =>
+						sendResponse({
+							...resolution,
+							...resolution.media,
+							source: resolution.media?.source ?? null,
+							detailUrl: resolution.media?.detailUrl ?? null,
+							contentId: resolution.media?.contentId ?? null,
+							title: resolution.media?.title ?? null,
+							shortTitle: resolution.media?.shortTitle ?? null,
+							coverUrl: resolution.media?.coverUrl ?? null,
+							previewUrl: resolution.media?.previewUrl ?? null,
+							previewType: resolution.media?.previewType ?? null,
+						});
+
+					// FC2 号独占链路：只查 FC2 公开 API，未命中即返回，不进入下面的多源回退
+					const fc2Id = fc2ArticleId(code);
+					if (fc2Id) {
+						sendResolution(await resolveFc2Preview(fc2Id));
+						return;
+					}
+
 					const dmmBase = (msg.dmmApiUrl || "").trim();
 					const dmmKey = (msg.dmmApiKey || "").trim();
 					const resolution = await resolvePreview({
@@ -1038,18 +1178,7 @@ export default defineBackground(() => {
 							} satisfies PreviewMedia;
 						},
 					});
-					sendResponse({
-						...resolution,
-						...resolution.media,
-						source: resolution.media?.source ?? null,
-						detailUrl: resolution.media?.detailUrl ?? null,
-						contentId: resolution.media?.contentId ?? null,
-						title: resolution.media?.title ?? null,
-						shortTitle: resolution.media?.shortTitle ?? null,
-						coverUrl: resolution.media?.coverUrl ?? null,
-						previewUrl: resolution.media?.previewUrl ?? null,
-						previewType: resolution.media?.previewType ?? null,
-					});
+					sendResolution(resolution);
 				})();
 
 				return true; // 保持消息通道直到 sendResponse 被调用

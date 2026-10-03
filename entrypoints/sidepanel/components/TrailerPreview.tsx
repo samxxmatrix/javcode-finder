@@ -9,6 +9,11 @@ import {
 	transitionPreviewNotice,
 } from "../../../src/lib/preview-state";
 import {
+	canUseTitleAsShortTitle,
+	isDirectMp4Source,
+	sourceLabelKey,
+} from "../../../src/lib/preview-source";
+import {
 	buildGoogleVerifyUrl,
 	buildMergedTranslateText,
 	splitMergedTranslation,
@@ -386,11 +391,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		video.volume = getSettings().previewVolume / 100;
 
 		setStatus("loading");
-		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm 与 faleno 均为 mp4 直链)
-		if (
-			(media?.source === "dmm" || media?.source === "faleno") &&
-			trailerUrl
-		) {
+		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 均为 mp4 直链)
+		if (isDirectMp4Source(media?.source) && trailerUrl) {
 			video.src = trailerUrl;
 			void video.play().then(
 				() => {
@@ -459,12 +461,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		onClose();
 	};
 
-	// 短标题行内容：dmm 商品名、javtrailers 卡片标题，或 faleno 缺 alt 时的长标题；长标题行内容：仅 dmm 长文
+	// 短标题行：dmm 商品名，或 javtrailers/faleno/fc2 的标题（这三个源没有独立短标题字段）；
+	// 长标题行：仅 dmm 长文。来源判定统一走 preview-source.ts，避免新增源漏登记。
 	const displayShortTitle =
 		media?.shortTitle ||
-		(media?.source === "javtrailers" || media?.source === "faleno"
-			? media.title
-			: null);
+		(media && canUseTitleAsShortTitle(media.source) ? media.title : null);
 	const displayLongTitle = media?.shortTitle ? media.title : null;
 	const presentation = getPreviewPresentation({
 		resolution,
@@ -474,12 +475,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		noticeDismissed,
 	});
 	const formatLookupError = (error: PreviewLookupError) => {
-		const sourceLabel =
-			error.source === "dmm"
-				? t.dmmSourceLabel
-				: error.source === "faleno"
-					? t.falenoSourceLabel
-					: t.javtrailersSourceLabel;
+		const sourceLabel = t[sourceLabelKey(error.source)];
 		const code = error.code === undefined ? "" : String(error.code);
 		const detail =
 			error.kind === "timeout"
