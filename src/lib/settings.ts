@@ -337,7 +337,11 @@ export function saveSettings(
 					? settings.translateEnabled
 					: current.translateEnabled,
 			fallbackService:
-				settings.fallbackService === "bing" ? "bing" : "google",
+				settings.fallbackService !== undefined
+					? settings.fallbackService === "bing"
+						? "bing"
+						: "google"
+					: current.fallbackService,
 			// 云端三项传入空字符串表示"关闭云端同步"，与未传字段区分处理
 			webdavUrl:
 				settings.webdavUrl !== undefined

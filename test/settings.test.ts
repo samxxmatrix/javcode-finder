@@ -14,6 +14,7 @@ import {
 	saveSettings,
 	SETTINGS_STORAGE_KEY,
 } from "../src/lib/settings";
+import type { FallbackService } from "../src/lib/translate";
 
 describe("settings", () => {
 	let storageMock: Record<string, string> = {};
@@ -227,6 +228,44 @@ describe("settings", () => {
 		saveSettings({ supjavName: "Y", embyUrl: null as unknown as string });
 		expect(getSettings().supjavName).toBe("Y");
 		expect(getSettings().embyUrl).toBe("http://keep:8096");
+	});
+
+	describe("fallbackService merging", () => {
+		it("keeps a stored bing fallback when a partial save omits the field", () => {
+			// 回归：Emby 开关只传 emby* 三项，不能把用户选过的 bing 静默重置为 google
+			saveSettings({ fallbackService: "bing" });
+			saveSettings({
+				embyUrl: "http://h:8096",
+				embyApiKey: "K",
+				embyEnabled: false,
+			});
+			expect(getSettings().fallbackService).toBe("bing");
+		});
+
+		it("saves bing and google, sanitising unknown values to google", () => {
+			saveSettings({ fallbackService: "bing" });
+			expect(getSettings().fallbackService).toBe("bing");
+
+			saveSettings({ fallbackService: "google" });
+			expect(getSettings().fallbackService).toBe("google");
+
+			saveSettings({ fallbackService: "bogus" as unknown as FallbackService });
+			expect(getSettings().fallbackService).toBe("google");
+		});
+
+		it("round-trips the Emby fields without touching the fallback service", () => {
+			saveSettings({ fallbackService: "bing" });
+			saveSettings({
+				embyUrl: "http://h:8096",
+				embyApiKey: "K",
+				embyEnabled: true,
+			});
+			const saved = getSettings();
+			expect(saved.fallbackService).toBe("bing");
+			expect(saved.embyUrl).toBe("http://h:8096");
+			expect(saved.embyApiKey).toBe("K");
+			expect(saved.embyEnabled).toBe(true);
+		});
 	});
 
 	it("resets to default settings", () => {
