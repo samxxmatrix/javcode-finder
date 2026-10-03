@@ -171,6 +171,56 @@ describe("settings", () => {
 		expect(getSettings().dmmApiKey).toBe("");
 	});
 
+	it("saves and restores Emby settings", () => {
+		saveSettings({
+			embyUrl: "  http://192.168.0.50:8096  ",
+			embyApiKey: "  key-123  ",
+			embyEnabled: true,
+		});
+		const saved = getSettings();
+		expect(saved.embyUrl).toBe("http://192.168.0.50:8096");
+		expect(saved.embyApiKey).toBe("key-123");
+		expect(saved.embyEnabled).toBe(true);
+	});
+
+	it("defaults Emby settings to disabled and empty", () => {
+		expect(DEFAULT_SETTINGS.embyUrl).toBe("");
+		expect(DEFAULT_SETTINGS.embyApiKey).toBe("");
+		expect(DEFAULT_SETTINGS.embyEnabled).toBe(false);
+		expect(getSettings().embyEnabled).toBe(false);
+	});
+
+	it("keeps Emby settings when other fields are saved", () => {
+		// 未传的 Emby 字段不应被覆盖
+		saveSettings({
+			embyUrl: "http://h:8096",
+			embyApiKey: "K",
+			embyEnabled: true,
+		});
+		saveSettings({ supjavName: "X" });
+		expect(getSettings().embyUrl).toBe("http://h:8096");
+		expect(getSettings().embyApiKey).toBe("K");
+		expect(getSettings().embyEnabled).toBe(true);
+	});
+
+	it("falls back to Emby defaults when stored values have wrong types", () => {
+		// 存储里类型错误 → 不崩溃并回退默认
+		localStorage.setItem(
+			SETTINGS_STORAGE_KEY,
+			JSON.stringify({ embyUrl: 123, embyApiKey: null, embyEnabled: "yes" }),
+		);
+		const saved = getSettings();
+		expect(saved.embyUrl).toBe("");
+		expect(saved.embyApiKey).toBe("");
+		expect(saved.embyEnabled).toBe(false);
+	});
+
+	it("can explicitly disable Emby", () => {
+		saveSettings({ embyEnabled: true });
+		saveSettings({ embyEnabled: false });
+		expect(getSettings().embyEnabled).toBe(false);
+	});
+
 	it("resets to default settings", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.org/{code}",

@@ -45,6 +45,10 @@ export interface ExtensionSettings {
 	dmmEnabled: boolean;
 	// FALENO 官方兜底番号头:番号以任一前缀开头时,DMM 与 JavTrailers 均查不到则回退 faleno.jp;空数组 = 不启用
 	falenoPrefixes: string[];
+	// Emby 媒体库（URL 与 API Key 均空 = 未配置，面板不显示在库标识）
+	embyUrl: string;
+	embyApiKey: string;
+	embyEnabled: boolean;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
@@ -79,6 +83,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	dmmApiKey: "",
 	dmmEnabled: false,
 	falenoPrefixes: ["FNS"],
+	embyUrl: "",
+	embyApiKey: "",
+	embyEnabled: false,
 };
 
 export function normalizeDomain(input: string): string {
@@ -246,6 +253,13 @@ export function getSettings(): ExtensionSettings {
 						)
 						.filter(Boolean)
 				: [...DEFAULT_SETTINGS.falenoPrefixes],
+			embyUrl: typeof parsed.embyUrl === "string" ? parsed.embyUrl.trim() : "",
+			embyApiKey:
+				typeof parsed.embyApiKey === "string" ? parsed.embyApiKey.trim() : "",
+			embyEnabled:
+				typeof parsed.embyEnabled === "boolean"
+					? parsed.embyEnabled
+					: DEFAULT_SETTINGS.embyEnabled,
 			excludedHosts:
 				excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 			customRegex:
@@ -353,6 +367,18 @@ export function saveSettings(
 				settings.dmmEnabled !== undefined
 					? settings.dmmEnabled
 					: current.dmmEnabled,
+			embyUrl:
+				settings.embyUrl !== undefined
+					? settings.embyUrl.trim()
+					: current.embyUrl,
+			embyApiKey:
+				settings.embyApiKey !== undefined
+					? settings.embyApiKey.trim()
+					: current.embyApiKey,
+			embyEnabled:
+				settings.embyEnabled !== undefined
+					? settings.embyEnabled
+					: current.embyEnabled,
 			falenoPrefixes:
 				settings.falenoPrefixes !== undefined
 					? Array.from(
