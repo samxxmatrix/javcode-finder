@@ -9,13 +9,15 @@ export function toFalenoCodeKey(code: string): string {
 }
 
 /**
- * 拼接 FALENO 作品页 URL:https://faleno.jp/top/works/{小写去连字符番号}。
- * 站点会自动重定向到带尾斜杠的正式地址,fetch 自动跟随。
+ * 拼接 FALENO 作品页 URL:https://faleno.jp/top/works/{小写去连字符番号}/。
+ * 尾斜杠是必需的:2026-10 实测站点对非日本出口只放行带斜杠的地址,
+ * 不带斜杠直接返回 XSERVER 403 拦截页(国内出口多批次 100% 403),
+ * 带斜杠多批次 100% 200;东京出口虽会 301 到带斜杠版本,但直连路径依赖这个形状。
  */
 export function buildFalenoWorksUrl(code: string): string {
 	const key = toFalenoCodeKey(code);
 	if (!key) return "";
-	return `https://faleno.jp/top/works/${key}`;
+	return `https://faleno.jp/top/works/${key}/`;
 }
 
 /**

@@ -19,9 +19,9 @@ describe("faleno", () => {
 		expect(toFalenoCodeKey("")).toBe("");
 	});
 
-	it("builds the works page URL", () => {
+	it("builds the works page URL with the required trailing slash", () => {
 		expect(buildFalenoWorksUrl("FNS-263")).toBe(
-			"https://faleno.jp/top/works/fns263",
+			"https://faleno.jp/top/works/fns263/",
 		);
 		expect(buildFalenoWorksUrl("")).toBe("");
 		expect(buildFalenoWorksUrl(" - ")).toBe("");
