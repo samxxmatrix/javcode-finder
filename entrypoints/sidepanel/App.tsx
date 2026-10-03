@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+	type EmbyIndex,
 	embyRegexKey,
 	embyServerKey,
 	isEmbyIndexFresh,
@@ -172,15 +173,30 @@ export const App: React.FC = () => {
 		return settings.customRegex || DEFAULT_CODE_REGEX;
 	};
 
-	// Emby：TTL 内复用索引；需要时让 background 同步（由 background 落盘），再本地匹配
-	const refreshEmbyIndex = async (codes: string[]): Promise<void> => {
+	// 取索引：TTL 内直接复用；否则让 background 同步（background 负责落盘）。
+	// 返回 null 表示「本轮不该写状态」：未启用 Emby，或被更新的一轮请求号作废（本轮已过期）。
+	// 返回 { index: null } 表示「索引不可用」（无索引/服务器或正则指纹不符/同步失败且无可用旧索引）：
+	// fail closed，调用方不得据此匹配；整页刷新据此清空旧标识。
+	// 返回 tooLarge = 媒体库过大无法建全量索引，由调用方按需发 jt:emby-check 逐条查询。
+	// newRound=true（整页刷新）开启新一轮请求号，作废在途的旧刷新，防止旧结果覆盖新图标；
+	// 补充查询（单个番号）传 false：它「只增不减」，不该把在途的整页刷新作废（否则列表标识会被吞掉）。
+	const loadOrSyncIndex = async (
+		newRound = true,
+	): Promise<
+		| {
+				index: EmbyIndex | null;
+				tooLarge: boolean;
+				/** 供调用方在自己的 await（额外的 jt:emby-check）之后再验一次本轮是否仍有效 */
+				stillCurrent: () => boolean;
+		  }
+		| null
+	> => {
 		// 本轮刷新序号：任何 await 之后发现已有更新的一轮（或扫描已作废本轮）就放弃写入
-		const requestId = ++embyRefreshIdRef.current;
+		const requestId = newRound
+			? ++embyRefreshIdRef.current
+			: embyRefreshIdRef.current;
 		const settings = getSettings();
-		if (!settings.embyEnabled || codes.length === 0) {
-			setInLibrary(new Set());
-			return;
-		}
+		if (!settings.embyEnabled) return null;
 		const regex = activeRegex();
 		const regexKey = embyRegexKey(regex);
 		// serverKey 参与新鲜度判定：换服务器/改 Key 后旧索引立即失效，不会拿旧库的图标
@@ -195,7 +211,7 @@ export const App: React.FC = () => {
 			);
 		};
 		let index = await loadEmbyIndex(browserEmbyStore());
-		if (!stillCurrent()) return;
+		if (!stillCurrent()) return null;
 		if (!isEmbyIndexFresh(index, Date.now(), serverKey, regexKey)) {
 			try {
 				const res = (await browser.runtime.sendMessage({
@@ -214,25 +230,11 @@ export const App: React.FC = () => {
 							keys?: string[];
 					  }
 					| undefined;
-				if (!stillCurrent()) return;
+				if (!stillCurrent()) return null;
 				if (res?.ok && res.mode === "too-large") {
-					// 库太大：放弃全量索引，改逐条查询（并发 4，background 内复核）
-					const checked = (await browser.runtime.sendMessage({
-						type: "jt:emby-check",
-						embyUrl: settings.embyUrl,
-						embyApiKey: settings.embyApiKey,
-						regex,
-						codes,
-					})) as { ok?: boolean; matched?: string[] } | undefined;
-					if (!stillCurrent()) return;
-					if (checked?.ok === true && Array.isArray(checked.matched)) {
-						// background 回传的是面板发出的原始候选写法，这里统一归一化后再入库
-						setInLibrary(
-							new Set(checked.matched.map((code) => normalizeCode(code))),
-						);
-					}
-					// 逐条查询失败：保留现有标识，不因为一次抖动清空
-					return;
+					// 库太大：放弃全量索引，改由调用方逐条查询（并发 4，background 内复核）。
+					// 这里不写 inLibrary：整页刷新与单番号查询的写入语义不同。
+					return { index: null, tooLarge: true, stillCurrent };
 				}
 				if (res?.ok && Array.isArray(res.keys)) {
 					// background 已把同一份索引写入 storage.local，这里只用于本次匹配
@@ -251,7 +253,7 @@ export const App: React.FC = () => {
 				console.warn("[JavCode Finder] Emby 同步失败:", err);
 			}
 		}
-		if (!stillCurrent()) return;
+		if (!stillCurrent()) return null;
 		// fail closed：空指纹、索引来自别的服务器、或生效正则已变（键口径漂移）时一律不匹配
 		if (
 			!serverKey ||
@@ -259,10 +261,76 @@ export const App: React.FC = () => {
 			index.serverKey !== serverKey ||
 			index.regexKey !== regexKey
 		) {
+			return { index: null, tooLarge: false, stillCurrent };
+		}
+		return { index, tooLarge: false, stillCurrent };
+	};
+
+	// 整页候选的在库判定：拿索引后整体替换标识集（未启用 Emby 或没有候选时清空）
+	const refreshEmbyIndex = async (codes: string[]): Promise<void> => {
+		const settings = getSettings();
+		if (!settings.embyEnabled || codes.length === 0) {
 			setInLibrary(new Set());
 			return;
 		}
-		setInLibrary(matchEmbyCodes(index.keys, codes));
+		const res = await loadOrSyncIndex();
+		// 本轮已被更新的刷新取代：什么都不写，交给新一轮
+		if (!res) return;
+		if (res.tooLarge) {
+			// 超大库：逐条查询（并发 4，background 内复核）
+			const checked = (await browser.runtime.sendMessage({
+				type: "jt:emby-check",
+				embyUrl: settings.embyUrl,
+				embyApiKey: settings.embyApiKey,
+				regex: activeRegex(),
+				codes,
+			})) as { ok?: boolean; matched?: string[] } | undefined;
+			if (!res.stillCurrent()) return;
+			if (checked?.ok === true && Array.isArray(checked.matched)) {
+				// background 回传的是面板发出的原始候选写法，这里统一归一化后再入库
+				setInLibrary(
+					new Set(checked.matched.map((code) => normalizeCode(code))),
+				);
+			}
+			// 逐条查询失败：保留现有标识，不因为一次抖动清空
+			return;
+		}
+		// index 为 null = fail closed（无可用索引）：清空标识，不保留上一轮的
+		setInLibrary(res.index ? matchEmbyCodes(res.index.keys, codes) : new Set());
+	};
+
+	// 顶部搜索框/手动查询的番号不在当前页候选里，单独按索引查一次（本地匹配，不额外联网）
+	const ensureEmbyCode = async (rawCode: string): Promise<void> => {
+		const settings = getSettings();
+		const code = normalizeCode(rawCode);
+		if (!settings.embyEnabled || !code) return;
+		// 已在集合里就不必再查（读的是本次渲染的闭包值；多查一次也只是本地匹配，无害）
+		if (inLibrary.has(code)) return;
+		// 补充查询不作废在途的整页刷新
+		const res = await loadOrSyncIndex(false);
+		if (!res) return;
+		if (res.tooLarge) {
+			// 超大库：只查这一个番号
+			const checked = (await browser.runtime.sendMessage({
+				type: "jt:emby-check",
+				embyUrl: settings.embyUrl,
+				embyApiKey: settings.embyApiKey,
+				regex: activeRegex(),
+				codes: [code],
+			})) as { ok?: boolean; matched?: string[] } | undefined;
+			if (!res.stillCurrent()) return;
+			if (
+				checked?.ok === true &&
+				(checked.matched ?? []).some((m) => normalizeCode(m) === code)
+			) {
+				setInLibrary((prev) => new Set(prev).add(code));
+			}
+			return;
+		}
+		if (res.index && matchEmbyCodes(res.index.keys, [code]).has(code)) {
+			// 只增不减：不要因为一次手动查询把列表已有的标识覆盖掉
+			setInLibrary((prev) => new Set(prev).add(code));
+		}
 	};
 
 	const runScan = async (isRescan = false) => {
@@ -448,6 +516,14 @@ export const App: React.FC = () => {
 			}
 		};
 	}, [boundTabId]);
+
+	// 预览的番号（搜索框手输/点列表/网页圆点）不一定在「当前页候选」里，
+	// 所以这里按预览番号单独补查一次在库状态；已在集合里的会在 ensureEmbyCode 内提前返回。
+	// 依赖只有 previewCode：inLibrary 不能进依赖，否则写入后重跑形成自激循环。
+	useEffect(() => {
+		if (!previewCode) return;
+		void ensureEmbyCode(previewCode);
+	}, [previewCode]);
 
 	useEffect(() => {
 		// Keep port open to notify background of sidepanel lifecycle for this tab
