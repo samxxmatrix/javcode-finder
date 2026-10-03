@@ -91,6 +91,15 @@ export interface LocaleMessages {
 	dmmApiUrlLabel: string;
 	dmmApiKeyLabel: string;
 	dmmEnableLabel: string;
+	embyUrlLabel: string;
+	embyApiKeyLabel: string;
+	embyEnableLabel: string;
+	embyIncomplete: string;
+	embyInLibrary: string;
+	embySyncNow: string;
+	embySyncedAtLabel: (time: string) => string;
+	embyItemCountLabel: (count: number) => string;
+	embyNotSynced: string;
 	dmmIncomplete: string;
 	falenoPrefixesLabel: string;
 	falenoPrefixesDesc: string;
@@ -192,6 +201,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiUrlLabel: "DMM API 地址",
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "启用 DMM 查询（预览/详情优先官方数据）",
+    embyUrlLabel: "Emby 地址",
+    embyApiKeyLabel: "Emby API Key",
+    embyEnableLabel: "启用 Emby 媒体库查询",
+    embyIncomplete: "请先填写 Emby 地址与 API Key",
+    embyInLibrary: "已在 Emby 库中",
+    embySyncNow: "立即同步",
+    embySyncedAtLabel: (time: string) => `上次同步：${time}`,
+    embyItemCountLabel: (count: number) => `已索引 ${count} 条`,
+    embyNotSynced: "尚未同步",
     dmmIncomplete: "请补全 DMM API 地址和 Key",
     falenoPrefixesLabel: "FALENO 番号前缀复查",
     falenoPrefixesDesc:
@@ -294,6 +312,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiUrlLabel: "DMM API 位址",
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "啟用 DMM 查詢（預覽/詳情優先官方資料）",
+    embyUrlLabel: "Emby 位址",
+    embyApiKeyLabel: "Emby API Key",
+    embyEnableLabel: "啟用 Emby 媒體庫查詢",
+    embyIncomplete: "請先填寫 Emby 位址與 API Key",
+    embyInLibrary: "已在 Emby 媒體庫中",
+    embySyncNow: "立即同步",
+    embySyncedAtLabel: (time: string) => `上次同步：${time}`,
+    embyItemCountLabel: (count: number) => `已索引 ${count} 條`,
+    embyNotSynced: "尚未同步",
     dmmIncomplete: "請補全 DMM API 位址與 Key",
     falenoPrefixesLabel: "FALENO 番號前綴複查",
     falenoPrefixesDesc:
@@ -398,6 +425,15 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiUrlLabel: "DMM API URL",
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "Enable DMM lookup (official data first)",
+    embyUrlLabel: "Emby address",
+    embyApiKeyLabel: "Emby API key",
+    embyEnableLabel: "Enable Emby library lookup",
+    embyIncomplete: "Enter the Emby address and API key first",
+    embyInLibrary: "In your Emby library",
+    embySyncNow: "Sync now",
+    embySyncedAtLabel: (time: string) => `Last synced: ${time}`,
+    embyItemCountLabel: (count: number) => `${count} items indexed`,
+    embyNotSynced: "Not synced yet",
     dmmIncomplete: "Fill in the DMM API URL and Key",
     falenoPrefixesLabel: "FALENO code prefix check",
     falenoPrefixesDesc:
