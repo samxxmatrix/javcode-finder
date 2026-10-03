@@ -624,7 +624,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				)}
 				{status !== "playing" &&
 					!presentation.showSpinner &&
-					(presentation.mediaMessage || coverError ? (
+					// 加载中一律给 loading 反馈：封面加载失败时也不能让等待期一片空白
+					(status !== "loading" && (presentation.mediaMessage || coverError) ? (
 						<div className="trailer-preview__media-message" role="status">
 							<span>
 								{presentation.mediaMessage === "no_number_information"

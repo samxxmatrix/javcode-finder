@@ -62,10 +62,15 @@ export const PLAYBACK_LOAD_TIMEOUT_MS = 20000;
 export interface FirstFrameTarget {
 	readyState: number;
 	addEventListener(
-		type: "loadeddata" | "playing",
+		type: "loadeddata",
 		listener: () => void,
 		options: { once: true },
 	): void;
+	/**
+	 * 可选（Chrome/Safari 支持）：回调在**新帧提交到合成器**时触发，是唯一能保证
+	 * "画面已经画出来了"的信号。`playing` / `play()` 的 promise 都早于首帧绘制。
+	 */
+	requestVideoFrameCallback?: (callback: () => void) => number;
 }
 
 export interface FirstFrameOptions {
@@ -74,21 +79,21 @@ export interface FirstFrameOptions {
 }
 
 /**
- * 首帧就绪后才进入播放态。
+ * 有画面了才进入播放态。
  *
- * 起因（用户症状）：原先 `video.play().then(() => 显示 video)` —— `play()` 在首帧解码之前
- * 就 resolve，`<video controls>` 一显示，浏览器会先画自己的半透明中央播放按钮，直到首帧数据
- * 到达才消失，看起来就是"播放按钮卡住、等视频加载完才消失"。
+ * 起因（用户症状）：原先 `video.play().then(() => 显示 video)` —— `play()` 在首帧绘制之前
+ * 就 resolve，`<video controls>` 一显示，浏览器先画自己的半透明中央播放按钮，直到首帧到达
+ * 才消失，看起来就是"播放按钮卡住"。
  *
- * 两个信号取先到者，缺一不可：
- * - `loadeddata`：首帧已解码（正常路径）；
- * - `playing`：`play()` 成功后必定触发。Chromium 会暂停 `display:none` 的 `<video>` 解码，
- *   此时 `loadeddata` 可能永不到来 —— 只等它会让 loading 永远转下去（实测踩过）。
+ * 信号选择（两轮实测教训）：
+ * - `playing` **不能用**：它同样早于首帧绘制，切过去就是黑底 + 原生控件；
+ * - 只等 `loadeddata` 也不行：`<video>` 若 `display:none`，Chromium 会暂停解码，该事件永远不来；
+ * - 因此：调用方保证 video 处于渲染状态 + 这里用 `requestVideoFrameCallback`（首帧提交到
+ *   合成器）为主信号，`loadeddata` 为兜底，另加超时上限。
  *
  * 重播场景元素已有帧数据，`loadeddata` 不会再触发，故先判 readyState 立即切。
- * 另可给超时上限：signal 一直不来时回调 `onTimeout`，把"卡住"变成"失败可重试"。
  *
- * @returns true = 已立即就绪；false = 已挂好一次性监听（可能含超时定时器）
+ * @returns true = 已立即就绪；false = 已挂好信号（可能含超时定时器）
  */
 export function armPlayingOnFirstFrame(
 	video: FirstFrameTarget,
@@ -110,7 +115,7 @@ export function armPlayingOnFirstFrame(
 	};
 
 	video.addEventListener("loadeddata", fire, { once: true });
-	video.addEventListener("playing", fire, { once: true });
+	video.requestVideoFrameCallback?.(fire);
 
 	if (timeoutMs !== undefined && timeoutMs > 0 && onTimeout) {
 		timer = setTimeout(() => {

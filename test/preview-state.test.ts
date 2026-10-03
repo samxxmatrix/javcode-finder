@@ -23,30 +23,37 @@ describe("armPlayingOnFirstFrame", () => {
 		expect(addEventListener).not.toHaveBeenCalled();
 	});
 
-	it("waits for the first-frame signal when none is available yet", () => {
+	it("waits for the presented frame signal when none is available yet", () => {
 		const onReady = vi.fn();
 		const listeners: Record<string, () => void> = {};
+		let frameCallback: (() => void) | undefined;
 		const video: FirstFrameTarget = {
 			readyState: 0,
 			addEventListener: (type, cb, options) => {
 				expect(options).toEqual({ once: true });
 				listeners[type] = cb;
 			},
+			requestVideoFrameCallback: (cb) => {
+				frameCallback = cb;
+				return 1;
+			},
 		};
 
 		expect(armPlayingOnFirstFrame(video, onReady)).toBe(false);
-		// 首帧未到：播放态不能切（否则浏览器原生控件会画出"卡住"的中央播放按钮）
+		// 首帧未到：播放态不能切（否则露出黑底 + 浏览器原生播放按钮）
 		expect(onReady).not.toHaveBeenCalled();
-		expect(Object.keys(listeners).sort()).toEqual(["loadeddata", "playing"]);
+		// 只挂 loadeddata：**不能**把 playing 当信号 —— 它在画面出来之前就触发
+		expect(Object.keys(listeners)).toEqual(["loadeddata"]);
+		expect(frameCallback).toBeTypeOf("function");
 
-		listeners["loadeddata"]!();
+		frameCallback!();
 		expect(onReady).toHaveBeenCalledTimes(1);
 		// 两个信号都到也只算一次
-		listeners["playing"]!();
+		listeners["loadeddata"]!();
 		expect(onReady).toHaveBeenCalledTimes(1);
 	});
 
-	it("wakes on playing even if loadeddata never fires (hidden <video> may be paused for decode)", () => {
+	it("falls back to loadeddata when requestVideoFrameCallback is unavailable", () => {
 		const onReady = vi.fn();
 		const listeners: Record<string, () => void> = {};
 		const video: FirstFrameTarget = {
@@ -57,9 +64,7 @@ describe("armPlayingOnFirstFrame", () => {
 		};
 
 		armPlayingOnFirstFrame(video, onReady);
-		// Chromium 会暂停 display:none 的 <video> 解码 → loadeddata 迟迟不来；
-		// play() 成功后 playing 必定触发，用它兜底，否则 loading 会永远转下去
-		listeners["playing"]!();
+		listeners["loadeddata"]!();
 		expect(onReady).toHaveBeenCalledTimes(1);
 	});
 
@@ -110,7 +115,7 @@ describe("armPlayingOnFirstFrame", () => {
 				timeoutMs: 5000,
 				onTimeout,
 			});
-			listeners["playing"]!();
+			listeners["loadeddata"]!();
 			expect(onReady).toHaveBeenCalledTimes(1);
 			vi.advanceTimersByTime(10000);
 			expect(onTimeout).not.toHaveBeenCalled();
