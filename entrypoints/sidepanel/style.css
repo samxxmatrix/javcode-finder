@@ -428,6 +428,11 @@ button:focus-visible {
 	border: 1px solid transparent;
 	padding: 1px 4px;
 	border-radius: 4px;
+	/* 超长番号（自定义正则最多 64 字符）截断，保证右侧图标不被挤出 */
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* 番号 hover 参考 JavDB hover 的边框结构，颜色保持金色 */
@@ -453,6 +458,7 @@ button:focus-visible {
 	display: flex;
 	gap: 8px;
 	margin-left: auto;
+	flex: 0 0 auto;
 }
 
 .unmatched-item__link {
@@ -992,6 +998,19 @@ button:focus-visible {
 	font-size: 13px;
 	font-weight: 700;
 	color: var(--text-secondary);
+	display: inline-flex;
+	align-items: center;
+	max-width: 100%;
+	min-width: 0;
+}
+
+/* 番号文字容器：超长时省略号截断，不影响右侧收藏/在库图标 */
+.trailer-preview__code-wrap {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .trailer-preview__code {
@@ -1281,6 +1300,25 @@ button:focus-visible {
 
 .unmatched-item__fav:hover {
 	background: var(--bg-surface-hover);
+}
+
+/* 「已在 Emby 库中」标识：纯标识不可点击，固定在收藏图标右侧 */
+.emby-badge {
+	display: block;
+	flex: 0 0 auto;
+}
+
+.unmatched-item__in-library,
+.trailer-preview__in-library {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	margin-left: 4px;
+}
+
+.trailer-preview__in-library {
+	margin-left: 6px;
+	vertical-align: middle;
 }
 
 /* 云盘密码输入行：输入框 + 显示/隐藏按钮 */
