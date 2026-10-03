@@ -23,24 +23,100 @@ describe("armPlayingOnFirstFrame", () => {
 		expect(addEventListener).not.toHaveBeenCalled();
 	});
 
-	it("waits for loadeddata when no frame is available yet", () => {
+	it("waits for the first-frame signal when none is available yet", () => {
 		const onReady = vi.fn();
-		let listener: (() => void) | undefined;
+		const listeners: Record<string, () => void> = {};
 		const video: FirstFrameTarget = {
 			readyState: 0,
 			addEventListener: (type, cb, options) => {
-				expect(type).toBe("loadeddata");
 				expect(options).toEqual({ once: true });
-				listener = cb;
+				listeners[type] = cb;
 			},
 		};
 
 		expect(armPlayingOnFirstFrame(video, onReady)).toBe(false);
 		// 首帧未到：播放态不能切（否则浏览器原生控件会画出"卡住"的中央播放按钮）
 		expect(onReady).not.toHaveBeenCalled();
+		expect(Object.keys(listeners).sort()).toEqual(["loadeddata", "playing"]);
 
-		listener!();
+		listeners["loadeddata"]!();
 		expect(onReady).toHaveBeenCalledTimes(1);
+		// 两个信号都到也只算一次
+		listeners["playing"]!();
+		expect(onReady).toHaveBeenCalledTimes(1);
+	});
+
+	it("wakes on playing even if loadeddata never fires (hidden <video> may be paused for decode)", () => {
+		const onReady = vi.fn();
+		const listeners: Record<string, () => void> = {};
+		const video: FirstFrameTarget = {
+			readyState: 0,
+			addEventListener: (type, cb) => {
+				listeners[type] = cb;
+			},
+		};
+
+		armPlayingOnFirstFrame(video, onReady);
+		// Chromium 会暂停 display:none 的 <video> 解码 → loadeddata 迟迟不来；
+		// play() 成功后 playing 必定触发，用它兜底，否则 loading 会永远转下去
+		listeners["playing"]!();
+		expect(onReady).toHaveBeenCalledTimes(1);
+	});
+
+	it("reports a timeout when no first-frame signal ever arrives", () => {
+		vi.useFakeTimers();
+		try {
+			const onReady = vi.fn();
+			const onTimeout = vi.fn();
+			const listeners: Record<string, () => void> = {};
+			const video: FirstFrameTarget = {
+				readyState: 0,
+				addEventListener: (type, cb) => {
+					listeners[type] = cb;
+				},
+			};
+
+			armPlayingOnFirstFrame(video, onReady, {
+				timeoutMs: 5000,
+				onTimeout,
+			});
+			vi.advanceTimersByTime(4999);
+			expect(onTimeout).not.toHaveBeenCalled();
+			vi.advanceTimersByTime(1);
+			expect(onTimeout).toHaveBeenCalledTimes(1);
+
+			// 超时后再来的信号不得把状态从失败拨回播放
+			listeners["loadeddata"]!();
+			expect(onReady).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("cancels the timeout once a signal arrives", () => {
+		vi.useFakeTimers();
+		try {
+			const onReady = vi.fn();
+			const onTimeout = vi.fn();
+			const listeners: Record<string, () => void> = {};
+			const video: FirstFrameTarget = {
+				readyState: 0,
+				addEventListener: (type, cb) => {
+					listeners[type] = cb;
+				},
+			};
+
+			armPlayingOnFirstFrame(video, onReady, {
+				timeoutMs: 5000,
+				onTimeout,
+			});
+			listeners["playing"]!();
+			expect(onReady).toHaveBeenCalledTimes(1);
+			vi.advanceTimersByTime(10000);
+			expect(onTimeout).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

@@ -1086,6 +1086,9 @@ button:focus-visible {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	/* 播放加载期间 <video> 已参与渲染（否则 Chromium 暂停解码，首帧信号不来），
+	   这层用不透明底把 video 与其原生控件一起遮住，直到首帧就绪 */
+	background: #000;
 }
 
 .trailer-preview__cover {

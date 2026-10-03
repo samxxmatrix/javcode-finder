@@ -5,6 +5,7 @@ import {
 	destroyHlsInstance,
 } from "../../../src/lib/hls-instance";
 import {
+	PLAYBACK_LOAD_TIMEOUT_MS,
 	armPlayingOnFirstFrame,
 	getPreviewPresentation,
 	transitionPreviewNotice,
@@ -352,6 +353,23 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		})();
 	};
 
+	// 所有播放起点统一入口：首帧就绪才切 playing（避免原生中央播放按钮闪出），
+	// 超时未就绪则判失败并可重试 —— 不会让 loading 无限转下去。
+	const startPlayback = (video: HTMLVideoElement, requestId: number) => {
+		armPlayingOnFirstFrame(
+			video,
+			() => {
+				if (requestId === playbackRequestRef.current) setStatus("playing");
+			},
+			{
+				timeoutMs: PLAYBACK_LOAD_TIMEOUT_MS,
+				onTimeout: () => {
+					if (requestId === playbackRequestRef.current) setStatus("failed");
+				},
+			},
+		);
+	};
+
 	// HLS 404 后的兜底（仅 javtrailers 源）：用详情页的 sample MP4 直连播放
 	const playFallbackTrailer = async (requestId: number) => {
 		const fb = await destroyHlsBefore(hlsRef, () =>
@@ -368,10 +386,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		}
 		video.src = fb.trailerUrl;
 		setStatus("loading");
-		// 首帧就绪才切播放态：否则 <video controls> 会先画浏览器原生的半透明中央播放按钮
-		armPlayingOnFirstFrame(video, () => {
-			if (requestId === playbackRequestRef.current) setStatus("playing");
-		});
+		startPlayback(video, requestId);
 		void video.play().catch(() => {
 			if (requestId === playbackRequestRef.current) setStatus("failed");
 		});
@@ -394,10 +409,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 均为 mp4 直链)
 		if (isDirectMp4Source(media?.source) && trailerUrl) {
 			video.src = trailerUrl;
-			// 首帧就绪才切播放态：否则浏览器原生控件会先画出半透明中央播放按钮（"按钮卡住"）
-			armPlayingOnFirstFrame(video, () => {
-				if (requestId === playbackRequestRef.current) setStatus("playing");
-			});
+			startPlayback(video, requestId);
 			void video.play().catch(() => {
 				if (requestId === playbackRequestRef.current) setStatus("failed");
 			});
@@ -414,10 +426,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				hls.attachMedia(video);
 				hls.on(Hls.Events.MANIFEST_PARSED, () => {
 					if (requestId !== playbackRequestRef.current) return;
-					// 首帧就绪才切播放态（同 mp4 路径，避免原生中央播放按钮闪出）
-					armPlayingOnFirstFrame(video, () => {
-						if (requestId === playbackRequestRef.current) setStatus("playing");
-					});
+					startPlayback(video, requestId);
 					// 处于用户点击手势内，不会被自动播放策略拦截
 					void video.play().catch(() => {
 						if (requestId !== playbackRequestRef.current) return;
@@ -440,9 +449,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
 				// Safari 原生支持 HLS，无需 hls.js
 				video.src = trailerUrl;
-				armPlayingOnFirstFrame(video, () => {
-					if (requestId === playbackRequestRef.current) setStatus("playing");
-				});
+				startPlayback(video, requestId);
 				void video.play().catch(() => {
 					if (requestId === playbackRequestRef.current) setStatus("failed");
 				});
@@ -595,7 +602,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					controls
 					playsInline
 					style={{
-						display: status === "playing" ? "block" : "none",
+						// loading 期间也要参与渲染：Chromium 会暂停 display:none 的 <video> 解码，
+						// 那样首帧信号永远不来（实测踩过）。此时画面被下面的封面层遮住。
+						display:
+							status === "playing" || status === "loading" ? "block" : "none",
 						height: status === "playing" && noticeText ? "calc(100% - 32px)" : undefined,
 					}}
 					onError={() => {
