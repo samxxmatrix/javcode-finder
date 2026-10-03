@@ -105,11 +105,17 @@ export default defineBackground(() => {
 		syncedAt?: number;
 		total?: number;
 		keys?: string[];
+		/** 索引是否真的落盘；false 表示 storage 写入失败（本次结果仍可用） */
+		persisted?: boolean;
 		error?: string;
 	}
 
 	// 同一服务器+模式只跑一次：多个面板同时打开时不会重复拉全量
 	const embySyncInFlight = new Map<string, Promise<EmbySyncResult>>();
+
+	// 逐条兜底结果缓存（background 生命周期内有效）：同一服务器同一番号只查一次，
+	// 避免 >30000 条媒体库每次打开面板都重打同样的 SearchTerm 请求。
+	const embyCheckCache = new Map<string, boolean>();
 
 	/** 取 JSON；非 2xx、超时、非 JSON 一律返回 null（调用方按失败处理） */
 	const fetchEmbyJson = async (url: string): Promise<unknown | null> => {
@@ -120,6 +126,30 @@ export default defineBackground(() => {
 		} catch {
 			return null;
 		}
+	};
+
+	/** 设置页连通性探测：区分鉴权失败、HTTP 错误、非 JSON 与网络不可达 */
+	const probeEmby = async (
+		url: string,
+	): Promise<{ ok: boolean; total?: number | null; error?: string }> => {
+		let res: Response;
+		try {
+			res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+		} catch {
+			return { ok: false, error: "network" };
+		}
+		if (res.status === 401 || res.status === 403) return { ok: false, error: "auth" };
+		if (!res.ok) return { ok: false, error: `http-${res.status}` };
+		// 解析单独包一层：响应体不是 JSON 与「连不上服务器」是两种不同的用户可修问题
+		let payload: unknown;
+		try {
+			payload = await res.json();
+		} catch {
+			return { ok: false, error: "bad-json" };
+		}
+		const parsed = parseEmbyItems(payload);
+		if (!parsed) return { ok: false, error: "bad-json" };
+		return { ok: true, total: parsed.total };
 	};
 
 	const runEmbySync = async (
@@ -142,12 +172,15 @@ export default defineBackground(() => {
 		const usable = previous && previous.serverKey === serverKey ? previous : null;
 		const full = needsEmbyFullSync(usable, Date.now(), serverKey, regexKey);
 
+		// 增量查询起点只算一次，之后每一页都用同一个时间窗，
+		// 否则翻页时页与页之间的边界会漂移。
+		const since = full ? null : incrementalSince(usable!.syncedAt);
 		// 先探一页，拿到服务端总数（可能为 null = 未知）以决定是否放弃全量索引
 		const first = parseEmbyItems(
 			await fetchEmbyJson(
 				buildEmbyItemsUrl(base, key, {
 					startIndex: 0,
-					minDateLastSaved: full ? null : incrementalSince(usable!.syncedAt),
+					minDateLastSaved: since,
 				}),
 			),
 		);
@@ -158,20 +191,44 @@ export default defineBackground(() => {
 			return { ok: true, mode: "too-large", serverKey, total: serverTotal };
 		}
 
+		// 首页就超过上限：不可能建全量索引，直接降级为逐条查询
+		if (first.items.length > EMBY_INDEX_LIMIT) {
+			return {
+				ok: true,
+				mode: "too-large",
+				serverKey,
+				total: serverTotal ?? first.items.length,
+			};
+		}
+
 		const collected: EmbyItemLike[] = [...first.items];
 		let offset = first.items.length;
-		// 总数未知（null）时不能把页长当上限，改为翻到空页为止，仅受 EMBY_INDEX_LIMIT 约束
-		while (
-			full &&
-			offset < EMBY_INDEX_LIMIT &&
-			(serverTotal === null || offset < serverTotal)
-		) {
+		let capReached = false;
+		// 全量与增量都要翻页：增量只取首页会把"超过一页的新增"误当作已同步
+		while (offset < EMBY_INDEX_LIMIT && first.items.length > 0) {
 			const page = parseEmbyItems(
-				await fetchEmbyJson(buildEmbyItemsUrl(base, key, { startIndex: offset })),
+				await fetchEmbyJson(
+					buildEmbyItemsUrl(base, key, {
+						startIndex: offset,
+						minDateLastSaved: full ? null : since,
+					}),
+				),
 			);
 			if (!page || page.items.length === 0) break;
 			collected.push(...page.items);
 			offset += page.items.length;
+			if (offset >= EMBY_INDEX_LIMIT) {
+				capReached = true;
+				break;
+			}
+		}
+		if (capReached || collected.length >= EMBY_INDEX_LIMIT) {
+			return {
+				ok: true,
+				mode: "too-large",
+				serverKey,
+				total: serverTotal ?? collected.length,
+			};
 		}
 
 		const incoming = buildEmbyIndexKeys(collected, regex);
@@ -195,7 +252,8 @@ export default defineBackground(() => {
 			syncedAt: index.syncedAt,
 			total: index.total,
 			// 落盘失败也要把键回给面板：本次仍能正确显示图标，只是下次要重新同步
-			keys: saved ? keys : keys,
+			keys,
+			persisted: saved,
 		};
 	};
 
@@ -209,18 +267,26 @@ export default defineBackground(() => {
 		const base = normalizeEmbyBaseUrl(embyUrl);
 		const key = embyApiKey.trim();
 		if (!base || !key) return { ok: false, error: "incomplete" };
+		const serverKey = embyServerKey(base, key);
 		const matched: string[] = [];
 		let cursor = 0;
 		const worker = async () => {
 			while (cursor < codes.length) {
 				const code = codes[cursor++];
 				if (!code) continue;
+				const cacheKey = `${serverKey}|${code}`;
+				if (embyCheckCache.has(cacheKey)) {
+					if (embyCheckCache.get(cacheKey)) matched.push(code);
+					continue;
+				}
 				const page = parseEmbyItems(
 					await fetchEmbyJson(buildEmbySearchUrl(base, key, code)),
 				);
-				if (page && verifyEmbySearchItems(page.items, code, regex)) {
-					matched.push(code);
-				}
+				// 请求失败不是「确认未命中」：不写缓存，避免把一次网络抖动固化成永久漏判
+				if (!page) continue;
+				const hit = verifyEmbySearchItems(page.items, code, regex);
+				embyCheckCache.set(cacheKey, hit);
+				if (hit) matched.push(code);
 			}
 		};
 		await Promise.all(
@@ -766,37 +832,38 @@ export default defineBackground(() => {
 
 				// Emby：地址/Key 连通性与权限校验（设置页"测试连接"与开关验证）
 				if (msg?.type === "jt:emby-test") {
-					const base = normalizeEmbyBaseUrl(msg.embyUrl || "");
-					const key = (msg.embyApiKey || "").trim();
+					// 消息来自面板，字段类型不可信（structured clone 会照传 number/object），
+					// 全部按字符串收敛，否则 normalize/trim 会在 respond 前同步抛错。
+					const embyUrl = typeof msg.embyUrl === "string" ? msg.embyUrl : "";
+					const embyApiKey =
+						typeof msg.embyApiKey === "string" ? msg.embyApiKey : "";
+					const url = buildEmbyItemsUrl(
+						normalizeEmbyBaseUrl(embyUrl),
+						embyApiKey.trim(),
+						{ startIndex: 0, limit: 1 },
+					);
 					void (async () => {
-						if (!base || !key) {
+						if (!url) {
 							sendResponse({ ok: false, error: "incomplete" });
 							return;
 						}
-						try {
-							const parsed = parseEmbyItems(
-								await fetchEmbyJson(
-									buildEmbyItemsUrl(base, key, { startIndex: 0, limit: 1 }),
-								),
-							);
-							if (!parsed) {
-								sendResponse({ ok: false, error: "http" });
-								return;
-							}
-							sendResponse({ ok: true, total: parsed.total });
-						} catch {
-							sendResponse({ ok: false, error: "unexpected" });
-						}
+						// probeEmby 内部已兜住所有异常；sendResponse 放在任何 try 之外，
+						// 防止它自己抛错时再发第二个响应
+						sendResponse(await probeEmby(url));
 					})();
 					return true;
 				}
 
 				// Emby：同步索引（全量/增量/超额降级），返回键数组
 				if (msg?.type === "jt:emby-sync") {
-					const embyUrl = msg.embyUrl || "";
-					const embyApiKey = msg.embyApiKey || "";
+					const embyUrl = typeof msg.embyUrl === "string" ? msg.embyUrl : "";
+					const embyApiKey =
+						typeof msg.embyApiKey === "string" ? msg.embyApiKey : "";
 					const regex = typeof msg.regex === "string" ? msg.regex : "";
-					const requestKey = `${embyServerKey(embyUrl, embyApiKey)}|sync`;
+					// 去重键必须带正则指纹：两个面板用不同正则时键口径不同，不能共用结果
+					const requestKey = `${embyServerKey(embyUrl, embyApiKey)}|${embyRegexKey(
+						regex,
+					)}|sync`;
 					const inFlight = embySyncInFlight.get(requestKey);
 					const task =
 						inFlight ??
@@ -816,8 +883,8 @@ export default defineBackground(() => {
 						? msg.codes.filter((c): c is string => typeof c === "string")
 						: [];
 					void runEmbyCheck(
-						msg.embyUrl || "",
-						msg.embyApiKey || "",
+						typeof msg.embyUrl === "string" ? msg.embyUrl : "",
+						typeof msg.embyApiKey === "string" ? msg.embyApiKey : "",
 						typeof msg.regex === "string" ? msg.regex : "",
 						codes,
 					)
