@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildDmmHealthUrl,
 	buildDmmLookupUrl,
+	buildFalenoLookupUrl,
 	formatDmmError,
 	parseDmmLookupError,
 	parseDmmLookupResponse,
@@ -34,6 +35,24 @@ describe("buildDmmHealthUrl", () => {
 		expect(
 			buildDmmHealthUrl("https://dmm.0045.kdns.fr/", "my-key", "BDSM-091"),
 		).toBe("https://dmm.0045.kdns.fr/cid/BDSM-091?key=my-key");
+	});
+});
+
+describe("buildFalenoLookupUrl", () => {
+	it("uses the faleno path segment and normalizes the trailing slash", () => {
+		expect(
+			buildFalenoLookupUrl("https://dmm.0045.kdns.fr/", "my-key", "FNS-263"),
+		).toBe("https://dmm.0045.kdns.fr/faleno/FNS-263?key=my-key");
+	});
+
+	it("URL-encodes the code", () => {
+		expect(buildFalenoLookupUrl("https://x.test", "k", "FNS 263")).toBe(
+			"https://x.test/faleno/FNS%20263?key=k",
+		);
+	});
+
+	it("returns empty string when base URL is empty", () => {
+		expect(buildFalenoLookupUrl("", "k", "FNS-263")).toBe("");
 	});
 });
 

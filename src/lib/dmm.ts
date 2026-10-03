@@ -24,6 +24,22 @@ export interface DmmLookupErrorData {
 }
 
 /**
+ * 反代入口 URL 通用构造:去尾斜杠 + 可选路径段 + 编码番号 + Key。
+ * base 为空（未配置）时返回空串，调用方跳过请求。
+ */
+function buildProxyUrl(
+	baseUrl: string,
+	segments: string[],
+	key: string,
+	code: string,
+): string {
+	const trimmed = (baseUrl || "").trim().replace(/\/+$/, "");
+	if (!trimmed || !code) return "";
+	const path = segments.map((segment) => `/${segment}`).join("");
+	return `${trimmed}${path}/${encodeURIComponent(code)}?key=${encodeURIComponent(key)}`;
+}
+
+/**
  * 拼接完整查询 URL：GET {base}/{code}?key={key}。
  * base 为空（未配置）时返回空串，调用方跳过请求。
  */
@@ -32,9 +48,19 @@ export function buildDmmLookupUrl(
 	key: string,
 	code: string,
 ): string {
-	const trimmed = (baseUrl || "").trim().replace(/\/+$/, "");
-	if (!trimmed || !code) return "";
-	return `${trimmed}/${encodeURIComponent(code)}?key=${encodeURIComponent(key)}`;
+	return buildProxyUrl(baseUrl, [], key, code);
+}
+
+/**
+ * 拼接 FALENO 查询 URL：GET {base}/faleno/{code}?key={key}。
+ * 与 DMM 共用同一反代入口（东京出口 + 永久缓存），响应形状一致。
+ */
+export function buildFalenoLookupUrl(
+	baseUrl: string,
+	key: string,
+	code: string,
+): string {
+	return buildProxyUrl(baseUrl, ["faleno"], key, code);
 }
 
 /**
