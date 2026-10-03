@@ -1,6 +1,9 @@
+import { MAX_CANDIDATE_LENGTH } from "./extract-codes";
+
 /**
- * Emby 媒体库「已在库」判定的纯逻辑层：
- * 地址/查询构造、响应解析、番号键生成、本地匹配、同步策略判定。
+ * Emby 媒体库「已在库」判定的纯逻辑层。
+ * 本轮：地址规范化、条目查询 URL 构造、响应解析。
+ * 后续任务在此模块补充：番号键生成、候选匹配、同步策略判定。
  * 全部为纯函数（不碰浏览器 API），网络请求在 background 执行。
  */
 
@@ -18,8 +21,8 @@ export const EMBY_SYNC_OVERLAP_MS = 60 * 60 * 1000;
 export const EMBY_SEARCH_CONCURRENCY = 4;
 /** 逐条兜底查询的返回条数 */
 export const EMBY_SEARCH_LIMIT = 5;
-/** 候选番号长度上限（与 extract-codes.ts 的 MAX_CANDIDATE_LENGTH 一致） */
-export const EMBY_MAX_CODE_LENGTH = 64;
+/** 候选番号长度上限（与抽取层保持一致，避免边界漂移） */
+export const EMBY_MAX_CODE_LENGTH = MAX_CANDIDATE_LENGTH;
 
 export interface EmbyItemLike {
 	Name?: string | null;
@@ -28,8 +31,14 @@ export interface EmbyItemLike {
 	Type?: string | null;
 }
 
-/** 主机名（含可选端口）合法性：IPv4/域名或 IPv6 字面量 */
-const HOST_PATTERN = /^(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::\d+)?$/i;
+/** 主机名合法性：IPv6 字面量，或由 . 分隔的标签（允许下划线，不允许空标签/首尾连字符） */
+const HOST_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-_]*[a-z0-9])?$/i;
+
+function isHostValid(hostname: string): boolean {
+	if (hostname.startsWith("[")) return true; // IPv6 字面量，URL 已校验
+	const labels = hostname.replace(/\.$/, "").split(".");
+	return labels.length > 0 && labels.every((label) => HOST_LABEL_PATTERN.test(label));
+}
 
 /**
  * 把用户填写的地址规范成 origin：去空白、补 http://、丢弃路径与查询串。
@@ -44,7 +53,7 @@ export function normalizeEmbyBaseUrl(raw: string): string {
 	const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
 	try {
 		const url = new URL(withScheme);
-		if (!HOST_PATTERN.test(url.host)) return "";
+		if (!isHostValid(url.hostname)) return "";
 		return `${url.protocol}//${url.host}`;
 	} catch {
 		return "";
@@ -67,6 +76,18 @@ export function buildEmbyItemsUrl(
 	const base = normalizeEmbyBaseUrl(baseUrl);
 	const key = (apiKey || "").trim();
 	if (!base || !key) return "";
+	const limit =
+		typeof query.limit === "number" &&
+		Number.isInteger(query.limit) &&
+		query.limit > 0
+			? query.limit
+			: EMBY_PAGE_SIZE;
+	const startIndex =
+		typeof query.startIndex === "number" &&
+		Number.isInteger(query.startIndex) &&
+		query.startIndex >= 0
+			? query.startIndex
+			: 0;
 	const params = new URLSearchParams({
 		api_key: key,
 		Recursive: "true",
@@ -74,8 +95,8 @@ export function buildEmbyItemsUrl(
 		Fields: "Path",
 		EnableImages: "false",
 		EnableUserData: "false",
-		Limit: String(query.limit ?? EMBY_PAGE_SIZE),
-		StartIndex: String(query.startIndex ?? 0),
+		Limit: String(limit),
+		StartIndex: String(startIndex),
 	});
 	if (query.minDateLastSaved) {
 		params.set("MinDateLastSaved", query.minDateLastSaved);
@@ -106,19 +127,25 @@ export function buildEmbySearchUrl(
 	return `${base}/emby/Items?${params.toString()}`;
 }
 
+export interface EmbyItemsPage {
+	items: EmbyItemLike[];
+	/** 服务端总数；缺失或非法时为 null（未知），调用方需继续翻页而不是当作页长 */
+	total: number | null;
+}
+
 /** 解析条目响应；结构非法返回 null（调用方据此保留旧索引） */
-export function parseEmbyItems(
-	payload: unknown,
-): { items: EmbyItemLike[]; total: number } | null {
+export function parseEmbyItems(payload: unknown): EmbyItemsPage | null {
 	if (!payload || typeof payload !== "object") return null;
 	const raw = payload as { Items?: unknown; TotalRecordCount?: unknown };
 	if (!Array.isArray(raw.Items)) return null;
 	const items = raw.Items.filter(
-		(item): item is EmbyItemLike => Boolean(item) && typeof item === "object",
+		(item): item is EmbyItemLike =>
+			typeof item === "object" && item !== null && !Array.isArray(item),
 	);
 	const total =
-		typeof raw.TotalRecordCount === "number"
+		typeof raw.TotalRecordCount === "number" &&
+		Number.isFinite(raw.TotalRecordCount)
 			? raw.TotalRecordCount
-			: items.length;
+			: null;
 	return { items, total };
 }
