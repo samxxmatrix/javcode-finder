@@ -704,6 +704,8 @@ export const App: React.FC = () => {
 							runScan();
 						}}
 						onLocaleChange={(newLocale) => setLocale(newLocale)}
+						// Emby 开关立即生效：重扫当前页，索引就绪后立刻补上在库标识
+						onEmbyChange={() => void runScan()}
 						onWebdavConnected={() => {
 							// 云端开通：本地空 → 拉取云端；本地有 → 立即推送备份
 							if (favorites.length === 0) {

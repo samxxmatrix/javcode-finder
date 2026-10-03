@@ -36,6 +36,8 @@ interface SettingsViewProps {
 	onLocaleChange?: (locale: SupportedLocale) => void;
 	// 云端验证通过（即"开通云端同步"）后回调，由 App 执行首次同步
 	onWebdavConnected?: () => void;
+	// Emby 开关立即生效后回调，由 App 重扫列表以显示在库标识
+	onEmbyChange?: () => void;
 }
 
 // 暴露给顶部图标按钮的保存/重置操作；save 返回是否保存成功（校验或云端验证失败时为 false）
@@ -45,7 +47,10 @@ export interface SettingsViewHandle {
 }
 
 export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
-	function SettingsView({ locale, t, onBack, onLocaleChange, onWebdavConnected }, ref) {
+	function SettingsView(
+		{ locale, t, onBack, onLocaleChange, onWebdavConnected, onEmbyChange },
+		ref,
+	) {
 	const [supjav, setSupjav] = useState("");
 	const [javbus, setJavbus] = useState("");
 	const [supjavName, setSupjavName] = useState(DEFAULT_SETTINGS.supjavName);
@@ -242,18 +247,27 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}
 	};
 
-	// Emby 开关：打开时先验证地址与 Key（拉 1 条确认权限），失败回弹关闭
+	// Emby 开关：打开时先验证地址与 Key（拉 1 条确认权限），失败回弹关闭。
+	// 副作用（验证 + jt:emby-sync 同步索引）在这里立即发生，所以状态也必须立即落盘：
+	// 否则面板的 getSettings() 仍读到 embyEnabled:false，会跳过整个在库匹配（看不到标识），
+	// 直到用户再点一次保存才生效。每条返回路径都保证落盘值与 embyEnabled 状态一致。
 	const handleToggleEmby = async (checked: boolean) => {
 		setEmbyVerifyError(null);
-		if (!checked) {
+		// 未通过验证的路径一律保持关闭并立即落盘（true 只出现在验证成功路径）
+		const persistOff = () => {
 			setEmbyEnabled(false);
+			saveSettings({ embyUrl, embyApiKey, embyEnabled: false });
+			onEmbyChange?.();
+		};
+		if (!checked) {
+			persistOff();
 			return;
 		}
 		const url = embyUrl.trim();
 		const key = embyApiKey.trim();
 		if (!url || !key) {
 			setEmbyVerifyError(t.embyIncomplete);
-			setEmbyEnabled(false);
+			persistOff();
 			return;
 		}
 		try {
@@ -266,14 +280,17 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				setEmbyVerifyError(
 					`${t.verifyFailed}：${health?.error || t.unknownError}`,
 				);
-				setEmbyEnabled(false);
+				persistOff();
 				return;
 			}
 			setEmbyEnabled(true);
+			// 先同步索引（await 到 background 落盘），再立即持久化开关并通知 App 重扫
 			await handleEmbySyncNow();
+			saveSettings({ embyUrl, embyApiKey, embyEnabled: true });
+			onEmbyChange?.();
 		} catch {
 			setEmbyVerifyError(`${t.verifyFailed}：${t.networkError}`);
-			setEmbyEnabled(false);
+			persistOff();
 		}
 	};
 
