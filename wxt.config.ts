@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: "JavCode Finder",
     description: "Scan video codes on the current page and preview covers and trailers from JavTrailers",
-    version: "2.0.0",
+    version: "2.0.1",
     icons: {
       16: "icons/icon-16.png",
       32: "icons/icon-32.png",
