@@ -19,6 +19,7 @@ import {
 	buildFc2EmbedUrl,
 	buildFc2SampleUrl,
 	fc2ArticleId,
+	parseFc2ArticleCover,
 	parseFc2EmbedHtml,
 	parseFc2SampleResponse,
 	type Fc2EmbedData,
@@ -110,12 +111,14 @@ const fetchProxyWithRetry = (url: string): Promise<Response> =>
 
 // FC2 预览源（adult.contents.fc2.com）超时策略：
 // `/sample` 决定成败：首次 8 s、失败重试一次 5 s（与反代查询同策略，覆盖偶发连接中断，
-// 实测该网络下撞到过"连接被意外关闭"）；`/embed` 只补标题，单次 5 s，失败即降级为 title=null。
-// 两个请求都只需要文章号 ⇒ 并行发：最坏 max(13 s, 5 s) = 13 s，而不是串行叠加的 18 s。
+// 实测该网络下撞到过"连接被意外关闭"）；`/embed`（标题）与 `/article/`（正方形封面）
+// 都只是增强项，各单次 5 s、失败即降级。三个请求都只需要文章号 ⇒ 并行发：
+// 最坏 max(13 s, 5 s, 5 s) = 13 s，而不是串行叠加的 23 s。
 const FC2_SAMPLE_FIRST_TIMEOUT_MS = 8000;
 const FC2_SAMPLE_RETRY_TIMEOUT_MS = 5000;
 const FC2_SAMPLE_ATTEMPTS = 2;
 const FC2_EMBED_TIMEOUT_MS = 5000;
+const FC2_ARTICLE_TIMEOUT_MS = 5000;
 
 /**
  * `/sample`：命中返回封面与预览地址。"无此片"有两种实测信号 —— HTTP 400 + `{code:400}`，
@@ -181,18 +184,41 @@ async function loadFc2Embed(articleId: string): Promise<Fc2EmbedData | null> {
 }
 
 /**
+ * `/article/{id}/`：只取**正方形产品封面**（`og:image` → w276）。
+ * 任何失败（超时/非 2xx/页面无 og:image/非法地址）都返回 null，由调用方退回
+ * `/sample` 的横版 poster —— 拿不到就退回旧方案，绝不让封面缺失。
+ * 该页 309 KB，但浏览器 fetch 自动协商 gzip 后线上只有 ~25 KB。
+ */
+async function loadFc2ArticleCover(articleId: string): Promise<string | null> {
+	try {
+		const res = await fetch(buildFc2DetailUrl(articleId), {
+			signal: AbortSignal.timeout(FC2_ARTICLE_TIMEOUT_MS),
+		});
+		if (!res.ok) return null;
+		return parseFc2ArticleCover(await res.text());
+	} catch {
+		return null;
+	}
+}
+
+/**
  * FC2 号独占链路：只查 FC2 公开接口，未命中即 not_found，**不回退** DMM/JavTrailers/FALENO。
  * shortTitle 留空：FC2 没有该字段，面板按来源白名单用 title 兜底显示（见 preview-source.ts）。
  * previewUrl 每次重新解析，绝不缓存 —— `mid` 令牌会失效，缓存地址必然 403。
+ * 封面优先正方形产品封面（文章页 og:image），取不到退回 /sample 的横版 poster。
  */
 async function resolveFc2Preview(articleId: string): Promise<PreviewResolution> {
 	const errors: PreviewLookupError[] = [];
-	// 先发 embed：它自身永不 reject，于是与 sample 并行，省掉一次串行等待
+	// 先发两个增强请求：它们自身永不 reject，于是与 sample 并行，省掉串行等待
 	const embedPromise = loadFc2Embed(articleId);
+	const squareCoverPromise = loadFc2ArticleCover(articleId);
 	try {
 		const sample = await loadFc2Sample(articleId);
 		if (!sample) return { status: "not_found", media: null, errors };
-		const embed = await embedPromise;
+		const [embed, squareCover] = await Promise.all([
+			embedPromise,
+			squareCoverPromise,
+		]);
 		return {
 			status: "resolved",
 			media: {
@@ -201,7 +227,7 @@ async function resolveFc2Preview(articleId: string): Promise<PreviewResolution> 
 				contentId: embed?.contentId ?? null,
 				title: embed?.title ?? null,
 				shortTitle: null,
-				coverUrl: sample.coverUrl,
+				coverUrl: squareCover ?? sample.coverUrl,
 				previewUrl: sample.previewUrl,
 				previewType: "mp4",
 			} satisfies PreviewMedia,

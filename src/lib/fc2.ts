@@ -49,6 +49,14 @@ export function buildFc2DetailUrl(articleId: string): string {
 export const FC2_COVER_THUMB_WIDTH = 480;
 
 /**
+ * 正方形产品封面（文章页 `og:image`）的宽度：**276** 是站点自己给这张图用的宽度
+ * （文章页图库里它就是 `w276`），因此与用户在页面上看到的完全一致。
+ * 面板封面区是 16:9 且 `object-fit: contain`，正方形只渲染到盒高（约 225-340 px），
+ * 用 w480 会白拉 611 KB。实测 w276 → 210 KB / 177 KB / 9.7 KB（三个样本）。
+ */
+export const FC2_SQUARE_COVER_THUMB_WIDTH = 276;
+
+/**
  * FC2 原图地址 → 缩略图代理地址（站点自己也是这么用的）：
  *   `https://storage201000.contents.fc2.com/file/...`
  *   → `https://contents-thumbnail2.fc2.com/w480/storage201000.contents.fc2.com/file/...`
@@ -125,4 +133,21 @@ export function parseFc2EmbedHtml(html: string): Fc2EmbedData | null {
 		contentId: vid || null,
 		title: title ? decodeHtmlEntities(title) : null,
 	};
+}
+
+/**
+ * 从文章页 HTML 取**正方形产品封面**：`og:image`。
+ * 它是 1000x1000 / 1280x1280 的 PNG 原图（实测 1.1-1.6 MB），一律改写为 w276 缩略图。
+ * 取不到、或不是 https 时返回 null，由调用方退回 `/sample` 的横版 poster。
+ * 属性顺序两种都吃（真实页面是 property 在前）。
+ */
+export function parseFc2ArticleCover(html: string): string | null {
+	if (!html) return null;
+	const match =
+		/property="og:image"[^>]*content="([^"]+)"/.exec(html) ??
+		/content="([^"]+)"[^>]*property="og:image"/.exec(html);
+	if (!match) return null;
+	const raw = match[1]!;
+	if (!isHttpsUrl(raw)) return null;
+	return buildFc2CoverThumbUrl(raw, FC2_SQUARE_COVER_THUMB_WIDTH);
 }

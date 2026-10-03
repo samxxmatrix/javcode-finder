@@ -5,6 +5,7 @@ import {
 	buildFc2EmbedUrl,
 	buildFc2SampleUrl,
 	fc2ArticleId,
+	parseFc2ArticleCover,
 	parseFc2EmbedHtml,
 	parseFc2SampleResponse,
 } from "../src/lib/fc2";
@@ -77,6 +78,35 @@ describe("buildFc2CoverThumbUrl", () => {
 			"https://example.com/a.png",
 		);
 		expect(buildFc2CoverThumbUrl("")).toBe("");
+	});
+});
+
+describe("parseFc2ArticleCover", () => {
+	const og =
+		'<head><meta property="og:image" content="https://storage201000.contents.fc2.com/file/381/38031442/1787814401.54.png"><meta property="og:title" content="t"></head>';
+
+	it("takes og:image and returns the w276 square product cover", () => {
+		expect(parseFc2ArticleCover(og)).toBe(
+			"https://contents-thumbnail2.fc2.com/w276/storage201000.contents.fc2.com/file/381/38031442/1787814401.54.png",
+		);
+	});
+
+	it("accepts content before property", () => {
+		expect(
+			parseFc2ArticleCover(
+				'<meta content="https://storage201000.contents.fc2.com/a/1.png" property="og:image">',
+			),
+		).toBe(
+			"https://contents-thumbnail2.fc2.com/w276/storage201000.contents.fc2.com/a/1.png",
+		);
+	});
+
+	it("returns null when og:image is missing or unusable", () => {
+		expect(parseFc2ArticleCover("<html><body>not found</body></html>")).toBeNull();
+		expect(
+			parseFc2ArticleCover('<meta property="og:image" content="http://x/y.png">'),
+		).toBeNull();
+		expect(parseFc2ArticleCover("")).toBeNull();
 	});
 });
 
