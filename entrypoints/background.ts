@@ -204,6 +204,7 @@ export default defineBackground(() => {
 		const collected: EmbyItemLike[] = [...first.items];
 		let offset = first.items.length;
 		let capReached = false;
+		let previousSignature = "";
 		// 全量与增量都要翻页：增量只取首页会把"超过一页的新增"误当作已同步
 		while (offset < EMBY_INDEX_LIMIT && first.items.length > 0) {
 			const page = parseEmbyItems(
@@ -215,14 +216,18 @@ export default defineBackground(() => {
 				),
 			);
 			if (!page || page.items.length === 0) break;
+			// 服务器忽略 StartIndex 时会一直返回同一页：签名重复即停止，避免无进展地重复请求
+			const signature = `${page.items.length}:${page.items[0]?.Path ?? page.items[0]?.Name ?? ""}`;
+			if (signature === previousSignature) break;
+			previousSignature = signature;
 			collected.push(...page.items);
 			offset += page.items.length;
-			if (offset >= EMBY_INDEX_LIMIT) {
+			if (offset > EMBY_INDEX_LIMIT) {
 				capReached = true;
 				break;
 			}
 		}
-		if (capReached || collected.length >= EMBY_INDEX_LIMIT) {
+		if (capReached || collected.length > EMBY_INDEX_LIMIT) {
 			return {
 				ok: true,
 				mode: "too-large",
@@ -274,7 +279,7 @@ export default defineBackground(() => {
 			while (cursor < codes.length) {
 				const code = codes[cursor++];
 				if (!code) continue;
-				const cacheKey = `${serverKey}|${code}`;
+				const cacheKey = `${serverKey}|${embyRegexKey(regex)}|${code}`;
 				if (embyCheckCache.has(cacheKey)) {
 					if (embyCheckCache.get(cacheKey)) matched.push(code);
 					continue;
@@ -285,6 +290,8 @@ export default defineBackground(() => {
 				// 请求失败不是「确认未命中」：不写缓存，避免把一次网络抖动固化成永久漏判
 				if (!page) continue;
 				const hit = verifyEmbySearchItems(page.items, code, regex);
+				// 粗暴上限：条目没有淘汰策略，超过后整体清空即可（内存优先）
+				if (embyCheckCache.size > 5000) embyCheckCache.clear();
 				embyCheckCache.set(cacheKey, hit);
 				if (hit) matched.push(code);
 			}

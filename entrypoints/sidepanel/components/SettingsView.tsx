@@ -975,7 +975,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								type="text"
 								className="settings-field__input settings-field__input--code"
 								value={embyUrl}
-								onChange={(e) => setEmbyUrl(e.target.value)}
+								onChange={(e) => {
+									setEmbyUrl(e.target.value);
+									// 超额提示是会话内状态，换地址/Key 后旧提示已失效
+									setEmbyTooLarge(false);
+								}}
 								placeholder="http://192.168.0.50:8096"
 								spellCheck={false}
 								autoComplete="off"
@@ -1000,7 +1004,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								type="text"
 								className="settings-field__input settings-field__input--code"
 								value={embyApiKey}
-								onChange={(e) => setEmbyApiKey(e.target.value)}
+								onChange={(e) => {
+									setEmbyApiKey(e.target.value);
+									// 同上：改 Key 等于换了服务器，超额提示一并清理
+									setEmbyTooLarge(false);
+								}}
 								placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 								spellCheck={false}
 								autoComplete="off"

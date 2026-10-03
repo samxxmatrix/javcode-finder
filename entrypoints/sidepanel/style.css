@@ -610,6 +610,13 @@ button:focus-visible {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	/* 设置页头部行：标签较长（如英文 "Last synced: …"）时换行显示，按钮不额外下移 */
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.settings-field__header-row .popup-btn {
+	margin-top: 0;
 }
 
 .settings-field__label {
