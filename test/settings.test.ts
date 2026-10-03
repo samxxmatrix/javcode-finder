@@ -221,6 +221,14 @@ describe("settings", () => {
 		expect(getSettings().embyEnabled).toBe(false);
 	});
 
+	it("ignores a non-string Emby URL instead of dropping the whole save", () => {
+		// 外部传入 null 时只有该字段回退原值，其余字段照常落盘（不能抛错吞掉整次保存）
+		saveSettings({ embyUrl: "http://keep:8096" });
+		saveSettings({ supjavName: "Y", embyUrl: null as unknown as string });
+		expect(getSettings().supjavName).toBe("Y");
+		expect(getSettings().embyUrl).toBe("http://keep:8096");
+	});
+
 	it("resets to default settings", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.org/{code}",

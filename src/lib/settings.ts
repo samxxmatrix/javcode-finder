@@ -367,12 +367,13 @@ export function saveSettings(
 				settings.dmmEnabled !== undefined
 					? settings.dmmEnabled
 					: current.dmmEnabled,
+			// 与读取端一致的宽松校验：外部传入 null/非字符串时保留原值，不让整次保存抛错被吞
 			embyUrl:
-				settings.embyUrl !== undefined
+				typeof settings.embyUrl === "string"
 					? settings.embyUrl.trim()
 					: current.embyUrl,
 			embyApiKey:
-				settings.embyApiKey !== undefined
+				typeof settings.embyApiKey === "string"
 					? settings.embyApiKey.trim()
 					: current.embyApiKey,
 			embyEnabled:

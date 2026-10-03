@@ -26,6 +26,7 @@ import type { SupportedLocale } from "../../../src/lib/types";
 import { classifyWebdavVerify, type WebdavVerifyResult } from "../../../src/lib/favorites";
 import { formatUsage, type FallbackService } from "../../../src/lib/translate";
 import { normalizePrefix } from "../../../src/lib/faleno";
+import { browserEmbyStore, loadEmbyIndex } from "../../../src/lib/emby-index";
 import { ClearButton } from "./ClearButton";
 
 interface SettingsViewProps {
@@ -83,6 +84,15 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [dmmEnabled, setDmmEnabled] = useState(false);
 	// DMM 验证错误（错误汇总区显示，可关闭）
 	const [dmmVerifyError, setDmmVerifyError] = useState<string | null>(null);
+	// Emby 媒体库配置
+	const [embyUrl, setEmbyUrl] = useState("");
+	const [embyApiKey, setEmbyApiKey] = useState("");
+	const [embyEnabled, setEmbyEnabled] = useState(false);
+	const [embyVerifyError, setEmbyVerifyError] = useState<string | null>(null);
+	const [embyIndexInfo, setEmbyIndexInfo] = useState<{
+		syncedAt: number | null;
+		total: number;
+	}>({ syncedAt: null, total: 0 });
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
@@ -190,6 +200,78 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}
 	};
 
+	// Emby 开关：打开时先验证地址与 Key（拉 1 条确认权限），失败回弹关闭
+	const handleToggleEmby = async (checked: boolean) => {
+		setEmbyVerifyError(null);
+		if (!checked) {
+			setEmbyEnabled(false);
+			return;
+		}
+		const url = embyUrl.trim();
+		const key = embyApiKey.trim();
+		if (!url || !key) {
+			setEmbyVerifyError(t.embyIncomplete);
+			setEmbyEnabled(false);
+			return;
+		}
+		try {
+			const health = (await browser.runtime.sendMessage({
+				type: "jt:emby-test",
+				embyUrl: url,
+				embyApiKey: key,
+			})) as { ok?: boolean; error?: string } | undefined;
+			if (!health?.ok) {
+				setEmbyVerifyError(
+					`${t.verifyFailed}：${health?.error || t.unknownError}`,
+				);
+				setEmbyEnabled(false);
+				return;
+			}
+			setEmbyEnabled(true);
+			await handleEmbySyncNow();
+		} catch {
+			setEmbyVerifyError(`${t.verifyFailed}：${t.networkError}`);
+			setEmbyEnabled(false);
+		}
+	};
+
+	// 立即同步：强制走一次 background 同步并刷新索引信息
+	const handleEmbySyncNow = async () => {
+		setEmbyVerifyError(null);
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:emby-sync",
+				embyUrl: embyUrl.trim(),
+				embyApiKey: embyApiKey.trim(),
+				regex: customRegex || DEFAULT_CODE_REGEX,
+			})) as
+				| {
+						ok?: boolean;
+						mode?: string;
+						syncedAt?: number;
+						total?: number;
+						error?: string;
+				  }
+				| undefined;
+			if (!res?.ok) {
+				setEmbyVerifyError(
+					`${t.verifyFailed}：${res?.error || t.unknownError}`,
+				);
+				return;
+			}
+			if (res.mode === "too-large") {
+				setEmbyIndexInfo({ syncedAt: Date.now(), total: res.total ?? 0 });
+				return;
+			}
+			setEmbyIndexInfo({
+				syncedAt: res.syncedAt ?? Date.now(),
+				total: res.total ?? 0,
+			});
+		} catch {
+			setEmbyVerifyError(`${t.verifyFailed}：${t.networkError}`);
+		}
+	};
+
 	useEffect(() => {
 		const current = getSettings();
 		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
@@ -210,6 +292,16 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setDmmApiUrl(current.dmmApiUrl);
 		setDmmApiKey(current.dmmApiKey);
 		setDmmEnabled(current.dmmEnabled);
+		setEmbyUrl(current.embyUrl);
+		setEmbyApiKey(current.embyApiKey);
+		setEmbyEnabled(current.embyEnabled);
+		void (async () => {
+			const index = await loadEmbyIndex(browserEmbyStore());
+			setEmbyIndexInfo({
+				syncedAt: index?.syncedAt ?? null,
+				total: index?.total ?? 0,
+			});
+		})();
 		// 打开设置页时展示已保存配置的用量（未配置时显示 --/--万）
 		void refreshTranslateUsage(current.translateApiUrl, current.deeplApiKey);
 		setLocaleOption(getSavedLocale());
@@ -358,6 +450,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			dmmApiKey,
 			dmmEnabled,
 			falenoPrefixes,
+			embyUrl,
+			embyApiKey,
+			embyEnabled,
 		});
 		// 保存后立即用新配置刷新用量
 		void refreshTranslateUsage(translateUrl, deeplApiKey);
@@ -404,6 +499,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setDmmApiKey("");
 		setDmmEnabled(false);
 		setDmmVerifyError(null);
+		setEmbyUrl(DEFAULT_SETTINGS.embyUrl);
+		setEmbyApiKey(DEFAULT_SETTINGS.embyApiKey);
+		setEmbyEnabled(DEFAULT_SETTINGS.embyEnabled);
+		setEmbyVerifyError(null);
+		setEmbyIndexInfo({ syncedAt: null, total: 0 });
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
 		setFalenoPrefixes([...DEFAULT_SETTINGS.falenoPrefixes]);
 		setNewPrefixInput("");
@@ -465,7 +565,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			</section>
 
 			{/* 所有错误信息统一显示在版本信息下方，均可关闭 */}
-			{(translateVerifyError || regexError || webdavError || dmmVerifyError) && (
+			{(translateVerifyError || regexError || webdavError || dmmVerifyError || embyVerifyError) && (
 				<div className="settings-errors" role="alert">
 					{translateVerifyError && (
 						<div className="settings-field__error settings-field__error--dismissible">
@@ -540,6 +640,28 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								type="button"
 								className="settings-field__error-close"
 								onClick={() => setDmmVerifyError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
+					{embyVerifyError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{embyVerifyError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setEmbyVerifyError(null)}
 								title={t.closeError}
 								aria-label={t.closeError}
 							>
@@ -817,6 +939,90 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								{t.addSite}
 							</button>
 						</div>
+					</div>
+
+					<div className="settings-field">
+						<div className="settings-field__header-row">
+							<label className="settings-field__label" htmlFor="emby-url">
+								{t.embyUrlLabel}
+							</label>
+							{/* 苹果开关：打开时验证地址与 Key；开启后在番号列表与预告片头部显示在库标识 */}
+							<label className="settings-field__switch" title={t.embyEnableLabel}>
+								<input
+									type="checkbox"
+									checked={embyEnabled}
+									onChange={(e) => void handleToggleEmby(e.target.checked)}
+									aria-label={t.embyEnableLabel}
+								/>
+								<span className="settings-field__switch-track" aria-hidden="true" />
+							</label>
+						</div>
+						<div className="settings-field__input-wrap">
+							<input
+								id="emby-url"
+								type="text"
+								className="settings-field__input settings-field__input--code"
+								value={embyUrl}
+								onChange={(e) => setEmbyUrl(e.target.value)}
+								placeholder="http://192.168.0.50:8096"
+								spellCheck={false}
+								autoComplete="off"
+							/>
+							<ClearButton
+								show={Boolean(embyUrl)}
+								onClick={() => setEmbyUrl("")}
+								title={t.clearInput}
+							/>
+						</div>
+					</div>
+
+					<div className="settings-field">
+						<div className="settings-field__header-row">
+							<label className="settings-field__label" htmlFor="emby-api-key">
+								{t.embyApiKeyLabel}
+							</label>
+						</div>
+						<div className="settings-field__input-wrap">
+							<input
+								id="emby-api-key"
+								type="text"
+								className="settings-field__input settings-field__input--code"
+								value={embyApiKey}
+								onChange={(e) => setEmbyApiKey(e.target.value)}
+								placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+								spellCheck={false}
+								autoComplete="off"
+							/>
+							<ClearButton
+								show={Boolean(embyApiKey)}
+								onClick={() => setEmbyApiKey("")}
+								title={t.clearInput}
+							/>
+						</div>
+					</div>
+
+					<div className="settings-field">
+						<div className="settings-field__header-row">
+							<span className="settings-field__label">
+								{embyIndexInfo.syncedAt
+									? t.embySyncedAtLabel(
+											new Date(embyIndexInfo.syncedAt).toLocaleString(),
+										)
+									: t.embyNotSynced}
+							</span>
+							<button
+								type="button"
+								className="popup-btn popup-btn--secondary"
+								onClick={() => void handleEmbySyncNow()}
+							>
+								{t.embySyncNow}
+							</button>
+						</div>
+						{embyIndexInfo.syncedAt !== null && (
+							<p className="settings-field__hint">
+								{t.embyItemCountLabel(embyIndexInfo.total)}
+							</p>
+						)}
 					</div>
 
 					<div className="settings-field__header-row">

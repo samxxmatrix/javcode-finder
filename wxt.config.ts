@@ -26,6 +26,7 @@ export default defineConfig({
       "scripting",
       "sidePanel",
       "tabs",
+      "storage",
       "declarativeNetRequest",
       "declarativeNetRequestWithHostAccess",
     ],
