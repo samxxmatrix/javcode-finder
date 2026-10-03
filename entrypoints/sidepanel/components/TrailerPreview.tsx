@@ -156,6 +156,20 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const coverUrl = media?.coverUrl || "";
 	const trailerUrl = media?.previewUrl || "";
 
+	// 预取元数据：实测首帧总耗时 ~7 s，其中 6.9 s 花在"连接 + moov"上
+	// （loadedmetadata 6.911 s → rvfc 7.025 s，只差 0.11 s）。
+	// 解析出地址就提前设 src + preload="metadata"，把这 6.9 s 从"点击后"挪到"看封面时"，
+	// 点击后基本只剩解码首帧。只对 mp4 直链源做（HLS 需要 hls.js attach，不适用）。
+	useEffect(() => {
+		const video = videoRef.current;
+		if (!video || !trailerUrl) return;
+		if (!isDirectMp4Source(media?.source)) return;
+		// 同一地址不重复触发，否则会把已开始的加载白重下一遍
+		if (video.getAttribute("src") === trailerUrl) return;
+		video.preload = "metadata";
+		video.src = trailerUrl;
+	}, [media?.source, trailerUrl]);
+
 	const resolveCurrentCode = useCallback(async () => {
 		const requestId = ++resolutionRequestRef.current;
 		playbackRequestRef.current++;
@@ -408,7 +422,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setStatus("loading");
 		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 均为 mp4 直链)
 		if (isDirectMp4Source(media?.source) && trailerUrl) {
-			video.src = trailerUrl;
+			// 预取已设过同一地址就不重置（重置会丢掉已缓冲的 moov，白等一遍）
+			if (video.getAttribute("src") !== trailerUrl) {
+				video.src = trailerUrl;
+			}
+			video.preload = "auto";
 			startPlayback(video, requestId);
 			void video.play().catch(() => {
 				if (requestId === playbackRequestRef.current) setStatus("failed");
