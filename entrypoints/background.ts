@@ -118,9 +118,10 @@ const FC2_SAMPLE_ATTEMPTS = 2;
 const FC2_EMBED_TIMEOUT_MS = 5000;
 
 /**
- * `/sample`：命中返回封面与预览地址；HTTP 400 = 明确"无此片"（返回 null，**不重试**——
- * 老片被删很常见，重试只会让用户白等 13 s 再多发两个请求）；超时/连接失败重试一次；
- * 其余非 2xx 抛 http 错误；响应不是 JSON 抛 api 错误。
+ * `/sample`：命中返回封面与预览地址。"无此片"有两种实测信号 —— HTTP 400 + `{code:400}`，
+ * 或 HTTP 200 + `{path:501}`（数字哨兵值，由 parseFc2SampleResponse 的 https 校验挡下）；
+ * 两者都返回 null 且**不重试**：老片被删很常见，重试只会让用户白等 13 s 再多发两个请求。
+ * 超时/连接失败重试一次；其余非 2xx 抛 http 错误；响应不是 JSON 抛 api 错误。
  */
 async function loadFc2Sample(articleId: string): Promise<Fc2Sample | null> {
 	let res: Response;

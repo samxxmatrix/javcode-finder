@@ -38,7 +38,7 @@ production ZIP 会输出到 `.output/`。构建产物不会提交到 Git。
 
 扩展只会在用户主动触发后读取当前顶层页面。它不会传送或保存页面 URL、页面文字、DOM 内容、番号候选或浏览活动。
 
-封面与预告片数据仅在用户点击番号后按需从 javtrailers.com 加载；跳转解析通过 background 请求 javtrailers 搜索页完成，不包含任何页面或用户数据。
+封面与预告片数据仅在用户点击番号后按需加载：javtrailers.com 搜索页、DMM API（自建反代，需自行配置）、FALENO 官网（可选兜底）、FC2 公开接口与内嵌页（`adult.contents.fc2.com`，仅 FC2 番号）。以上请求均由 background 在用户点击后发起，不包含页面 URL、页面文字、DOM 内容或番号候选。
 
 ## 许可证
 

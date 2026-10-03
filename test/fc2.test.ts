@@ -75,6 +75,10 @@ describe("parseFc2SampleResponse", () => {
 
 	it("fails closed when the payload is not a usable sample", () => {
 		expect(parseFc2SampleResponse({ code: 400 })).toBeNull();
+		// 实测"无此片"有两种信号：HTTP 400 + {code:400}，以及 HTTP 200 + {path:501}
+		// （后者 path 是数字哨兵值而非 URL，必须被 isHttpsUrl 挡下，不能交给 <video>）
+		expect(parseFc2SampleResponse({ path: 501, code: 200 })).toBeNull();
+		expect(parseFc2SampleResponse({ path: 0, code: 200 })).toBeNull();
 		expect(parseFc2SampleResponse({ ...ok, code: 500 })).toBeNull();
 		expect(parseFc2SampleResponse({ ...ok, path: undefined })).toBeNull();
 		expect(parseFc2SampleResponse({ ...ok, path: "" })).toBeNull();
