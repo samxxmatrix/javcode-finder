@@ -33,6 +33,15 @@ const OUTPUT_DIR = join(ROOT, ".output");
 const USAGE =
 	"用法: npm run release <patch|minor|major|x.y.z> [--push] [--dry-run] [--skip-checks]";
 
+/**
+ * 只有 Windows 上的 .cmd/.bat 必须走 shell（Node 20+ 会直接拒绝执行）。
+ * 其余命令一律不走 shell —— shell 模式下 Node 只是用空格拼命令行、**不加引号**，
+ * 带空格或中文的参数（如 `git commit -m "chore: 版本号 1 -> 2"`）会被拆成多个参数。
+ */
+function needsShell(command: string): boolean {
+	return IS_WINDOWS && /\.(cmd|bat)$/i.test(command);
+}
+
 function sh(command: string, args: string[]): string {
 	// stderr 丢弃：这里都是"探测型"调用（如 git describe 在没有 tag 时会失败），
 	// 失败由 trySh 兜住，不该把 noise 打到用户终端
@@ -40,7 +49,7 @@ function sh(command: string, args: string[]): string {
 		cwd: ROOT,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
-		shell: IS_WINDOWS,
+		shell: needsShell(command),
 	}).trim();
 }
 
@@ -56,7 +65,7 @@ function run(command: string, args: string[]): void {
 	execFileSync(command, args, {
 		cwd: ROOT,
 		stdio: "inherit",
-		shell: IS_WINDOWS,
+		shell: needsShell(command),
 	});
 }
 
