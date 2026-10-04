@@ -34,6 +34,8 @@ npm run zip
 
 production ZIP 會輸出到 `.output/`。建置產物不會提交到 Git。
 
+發版用 `npm run release <patch|minor|major|x.y.z>`：自動改版本號（唯一來源是 `package.json`）、追加 `CHANGELOG.md`、打包並校驗產物版本、打 `v<版本>` tag，並產生 Release 資產 `.output/version.json`（擴充功能的更新提示就是讀它）。加 `--dry-run` 只看計畫、`--push` 才推送。
+
 ## 隱私
 
 擴充功能只會在使用者主動觸發後讀取當前頂層頁面。它不會傳送或保存頁面 URL、頁面文字、DOM 內容、番號候選或瀏覽活動。

@@ -34,14 +34,9 @@ const USAGE =
 	"用法: npm run release <patch|minor|major|x.y.z> [--push] [--dry-run] [--skip-checks]";
 
 /**
- * 只有 Windows 上的 .cmd/.bat 必须走 shell（Node 20+ 会直接拒绝执行）。
- * 其余命令一律不走 shell —— shell 模式下 Node 只是用空格拼命令行、**不加引号**，
+ * git / gh 一律不走 shell：shell 模式下 Node 只是用空格拼命令行、**不加引号**，
  * 带空格或中文的参数（如 `git commit -m "chore: 版本号 1 -> 2"`）会被拆成多个参数。
  */
-function needsShell(command: string): boolean {
-	return IS_WINDOWS && /\.(cmd|bat)$/i.test(command);
-}
-
 function sh(command: string, args: string[]): string {
 	// stderr 丢弃：这里都是"探测型"调用（如 git describe 在没有 tag 时会失败），
 	// 失败由 trySh 兜住，不该把 noise 打到用户终端
@@ -49,7 +44,6 @@ function sh(command: string, args: string[]): string {
 		cwd: ROOT,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
-		shell: needsShell(command),
 	}).trim();
 }
 
@@ -62,11 +56,23 @@ function trySh(command: string, args: string[]): string | null {
 }
 
 function run(command: string, args: string[]): void {
-	execFileSync(command, args, {
-		cwd: ROOT,
-		stdio: "inherit",
-		shell: needsShell(command),
-	});
+	execFileSync(command, args, { cwd: ROOT, stdio: "inherit" });
+}
+
+/**
+ * npm 在 Windows 上是 npm.cmd，Node 20+ 不允许直接 execFileSync 它，
+ * 而 shell:true 又会触发 DEP0190（参数只拼接不转义）。这里显式走 cmd.exe，
+ * 参数由我们固定拼装、不含空格，既无警告也无注入面。
+ */
+function runNpm(args: string[]): void {
+	if (IS_WINDOWS) {
+		execFileSync("cmd.exe", ["/c", NPM, ...args], {
+			cwd: ROOT,
+			stdio: "inherit",
+		});
+		return;
+	}
+	execFileSync(NPM, args, { cwd: ROOT, stdio: "inherit" });
 }
 
 function fail(message: string): never {
@@ -175,8 +181,8 @@ if (dryRun) {
 // ---- 3. 检查 ----
 if (!skipChecks) {
 	try {
-		run(NPM, ["test"]);
-		run(NPM, ["run", "compile"]);
+		runNpm(["test"]);
+		runNpm(["run", "compile"]);
 	} catch {
 		fail("测试或类型检查未通过，已中止（此时未改动任何文件）");
 	}
@@ -194,7 +200,7 @@ try {
 	writeFileSync(changelogPath, prependChangelogEntry(previousChangelog, entry));
 	info("✓ CHANGELOG.md 已追加本版");
 
-	run(NPM, ["run", "zip"]);
+	runNpm(["run", "zip"]);
 
 	const manifestPath = join(OUTPUT_DIR, "chrome-mv3", "manifest.json");
 	if (!existsSync(manifestPath)) fail("找不到 .output/chrome-mv3/manifest.json");

@@ -34,6 +34,8 @@ npm run zip
 
 The production ZIP is output to `.output/`. Build artifacts are not committed to Git.
 
+Releases use `npm run release <patch|minor|major|x.y.z>`: it bumps the version (single source: `package.json`), appends `CHANGELOG.md`, builds and verifies the artifact version, tags `v<version>`, and writes the release asset `.output/version.json` (which the in-extension update notice reads). Add `--dry-run` to preview, `--push` to push.
+
 ## Privacy
 
 The extension only reads the current top-level page after explicit user action. It never transmits or stores page URLs, page text, DOM content, code candidates, or browsing activity.

@@ -34,6 +34,8 @@ npm run zip
 
 production ZIP 会输出到 `.output/`。构建产物不会提交到 Git。
 
+发版用 `npm run release <patch|minor|major|x.y.z>`：自动改版本号（唯一来源是 `package.json`）、追加 `CHANGELOG.md`、打包并校验产物版本、打 `v<版本>` tag，并生成 Release 资产 `.output/version.json`（扩展的更新提示就读它）。加 `--dry-run` 只看计划、`--push` 才推送。
+
 ## 隐私
 
 扩展只会在用户主动触发后读取当前顶层页面。它不会传送或保存页面 URL、页面文字、DOM 内容、番号候选或浏览活动。
