@@ -14,6 +14,7 @@
     "prepare": "wxt prepare",
     "compile": "tsc --noEmit",
     "test": "vitest run",
+    "release": "node scripts/release.ts",
     "e2e:proxy": "node docs/scripts/vercel-e2e.mjs"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@wxt-dev/module-react": "^1.2.2",

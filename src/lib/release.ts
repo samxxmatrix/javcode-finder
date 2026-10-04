@@ -10,10 +10,20 @@
  * 缺失或非法时静默当作"没有更新"，绝不影响扩展主流程。
  */
 
-export const LATEST_VERSION_URL =
-	"https://github.com/aizhimou/javranking-extension/releases/latest/download/version.json";
-export const RELEASES_PAGE_URL =
-	"https://github.com/aizhimou/javranking-extension/releases/latest";
+/**
+ * 发布仓库 owner/repo。构建时由 `wxt.config.ts` 从 `git remote`（或 `RELEASES_REPO` 环境变量）
+ * 注入为 `__RELEASES_REPO__` —— 不硬编码，避免出现"文档/代码写着 A、实际发到 B"导致检查永远静默失效。
+ * 未注入时（例如从 tarball 构建、跑单测）回退到下面这个值。
+ */
+declare const __RELEASES_REPO__: string;
+const FALLBACK_RELEASES_REPO = "samxxmatrix/javcode-finder";
+export const RELEASES_REPO: string =
+	typeof __RELEASES_REPO__ === "string" && __RELEASES_REPO__.length > 0
+		? __RELEASES_REPO__
+		: FALLBACK_RELEASES_REPO;
+
+export const LATEST_VERSION_URL = `https://github.com/${RELEASES_REPO}/releases/latest/download/version.json`;
+export const RELEASES_PAGE_URL = `https://github.com/${RELEASES_REPO}/releases/latest`;
 
 /** 检查节流：24 小时内不重复请求 */
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
