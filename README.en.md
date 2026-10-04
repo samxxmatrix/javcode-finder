@@ -16,7 +16,7 @@ JavCode Finder scans the current page for video codes when you click the toolbar
 3. Open `chrome://extensions` or `edge://extensions`.
 4. Enable **Developer mode**, choose **Load unpacked**, and select the folder containing `manifest.json`.
 
-Unpacked extension updates must be done manually: download and unzip the new version, then choose **Reload** on the extension card. An update notice appears at the top of the extension when a newer version is on GitHub.
+Unpacked extension updates must be done manually: download and unzip the new version, then choose **Reload** on the extension card. The extension checks GitHub for a newer version at most once every 24 hours and offers a download link at the top of the side panel (dismissing it hides that version).
 
 Firefox supports temporary development loads; a Mozilla-signed XPI for permanent install is not provided yet.
 

@@ -5,7 +5,8 @@ export default defineConfig({
   manifest: {
     name: "JavCode Finder",
     description: "Scan video codes on the current page and preview covers and trailers from JavTrailers",
-    version: "2.0.1",
+    // 版本号唯一来源是 package.json：WXT 会自动注入 manifest.version。
+    // 这里不要再写 version —— 两处各写一次必然漂移（实测删掉本行后产物仍是 package.json 的版本）。
     icons: {
       16: "icons/icon-16.png",
       32: "icons/icon-32.png",

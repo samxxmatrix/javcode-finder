@@ -16,7 +16,7 @@ JavCode Finder 會在你主動點擊瀏覽器工具列圖示後，識別當前�
 3. 開啟 `chrome://extensions` 或 `edge://extensions`。
 4. 開啟 **Developer mode**，選擇 **Load unpacked**，再選擇包含 `manifest.json` 的解壓資料夾。
 
-Unpacked extension 的更新需要手動完成：下載並解壓新版後，在擴充功能卡片選擇 **Reload**。當 GitHub 有更高版本時，擴充功能頂部會顯示更新提醒。
+Unpacked extension 的更新需要手動完成：下載並解壓新版後，在擴充功能卡片選擇 **Reload**。擴充功能最多每 24 小時檢查一次 GitHub 上的最新版本，發現更高版本時會在側邊欄頂部給出下載入口（同一版本關閉後不再提示）。
 
 Firefox 可用於 temporary development load；持久安裝仍需要 Mozilla 簽名的 XPI，目前尚未提供。
 
