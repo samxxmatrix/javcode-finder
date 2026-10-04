@@ -63,6 +63,11 @@ import {
 } from "../src/lib/translate";
 import { clearCodeMarksForTab } from "../src/lib/mark-codes";
 import { withRetry } from "../src/lib/retry";
+import {
+	LATEST_VERSION_URL,
+	isNewerVersion,
+	parseReleaseManifest,
+} from "../src/lib/release";
 import { messages } from "../src/lib/locales";
 import {
 	EMBY_INDEX_LIMIT,
@@ -1048,6 +1053,36 @@ export default defineBackground(() => {
 					)
 						.catch(() => ({ ok: false, error: "unexpected" }))
 						.then((result) => sendResponse(result));
+					return true;
+				}
+
+				// 版本更新检查：读自己 Release 上的 version.json 资产（无 GitHub API 配额）。
+				// 24h 节流由面板控制（它持久化 checkedAt/latest/dismissedVersion），
+				// 这里只负责请求 + 用真实已装版本做比较，返回可用更新或 null。
+				if (msg?.type === "jt:check-update") {
+					void (async () => {
+						try {
+							const res = await fetch(LATEST_VERSION_URL, {
+								cache: "no-store",
+								signal: AbortSignal.timeout(10000),
+							});
+							if (!res.ok) {
+								sendResponse({ update: null });
+								return;
+							}
+							const latest = parseReleaseManifest(await res.json());
+							const current = browser.runtime.getManifest().version;
+							sendResponse({
+								update:
+									latest && isNewerVersion(latest.version, current)
+										? latest
+										: null,
+							});
+						} catch {
+							// 网络失败 / 超时 / 非法 JSON：静默当作"没有更新"，不打扰用户
+							sendResponse({ update: null });
+						}
+					})();
 					return true;
 				}
 

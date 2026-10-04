@@ -46,6 +46,10 @@ export interface LocaleMessages {
 	regexSyntaxError: string;
 	resetRegex: string;
 	extensionVersionLabel: string;
+	updateAvailableTitle: (version: string) => string;
+	updateAvailableDesc: string;
+	updateNow: string;
+	updateAvailableAria: (version: string) => string;
 	previewTitle: string;
 	playTrailer: string;
 	previewVolumeLabel: string;
@@ -159,6 +163,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     regexSyntaxError: "正则表达式语法无效，请检查后重试",
     resetRegex: "恢复默认正则",
     extensionVersionLabel: "当前插件版本",
+    updateAvailableTitle: (version) => `发现新版本 v${version}`,
+    updateAvailableDesc: "扩展每 24 小时检查一次；前往 GitHub Release 下载新包并解压覆盖。",
+    updateNow: "立即更新",
+    updateAvailableAria: (version) =>
+      `发现新版本 v${version}，在新标签页打开 GitHub 最新 Release`,
     previewTitle: "预告片",
     playTrailer: "播放预告片",
     previewVolumeLabel: "预览视频音量",
@@ -273,6 +282,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     regexSyntaxError: "規則表達式語法無效，請檢查後重試",
     resetRegex: "恢復預設正則",
     extensionVersionLabel: "目前擴充功能版本",
+    updateAvailableTitle: (version) => `發現新版本 v${version}`,
+    updateAvailableDesc: "擴充功能每 24 小時檢查一次；前往 GitHub Release 下載新包並解壓覆蓋。",
+    updateNow: "立即更新",
+    updateAvailableAria: (version) =>
+      `發現新版本 v${version}，在新分頁開啟 GitHub 最新 Release`,
     previewTitle: "預告片預覽",
     playTrailer: "播放預告片",
     previewVolumeLabel: "預覽影片音量",
@@ -389,6 +403,12 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     regexSyntaxError: "Invalid regular expression syntax",
     resetRegex: "Reset to Default Regex",
     extensionVersionLabel: "Current extension version",
+    updateAvailableTitle: (version) => `Version ${version} is available`,
+    updateAvailableDesc:
+      "Checked once every 24 hours; download the new ZIP from GitHub Releases and replace the old folder.",
+    updateNow: "Update now",
+    updateAvailableAria: (version) =>
+      `Version ${version} is available. Open the latest GitHub Release in a new tab`,
     previewTitle: "Trailer Preview",
     playTrailer: "Play Trailer",
     previewVolumeLabel: "Preview volume",

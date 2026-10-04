@@ -21,6 +21,13 @@ import { messages } from "../../src/lib/locales";
 import { markCodesForTab } from "../../src/lib/mark-codes";
 import { normalizeCode } from "../../src/lib/normalize-code";
 import {
+	readUpdateState,
+	shouldCheckForUpdate,
+	shouldShowUpdate,
+	writeUpdateState,
+	type AvailableUpdate,
+} from "../../src/lib/release";
+import {
 	DEFAULT_CODE_REGEX,
 	getEffectiveLocale,
 	getSettings,
@@ -64,6 +71,9 @@ export const App: React.FC = () => {
 	const [favorites, setFavorites] = useState<string[]>([]);
 	// 已在 Emby 库中的番号（归一化形式），空集合 = 不显示任何标识
 	const [inLibrary, setInLibrary] = useState<Set<string>>(() => new Set());
+	const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(
+		null,
+	);
 	// 云端推送防抖计时器（合并连续收藏操作，降低请求频率）
 	const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// 导航完成后延迟扫描计时器（等待新文档稳定）与空结果补扫计时器
@@ -517,6 +527,40 @@ export const App: React.FC = () => {
 		};
 	}, [boundTabId]);
 
+	// 版本更新检查：24h 节流 + 关闭记忆都持久化在 localStorage（见 src/lib/release.ts）。
+	// 失败静默且**不写 checkedAt**，下次打开面板再试；节流期内复用上次查到的结果。
+	useEffect(() => {
+		const storage = getStorage();
+		const state = readUpdateState(storage);
+		if (!shouldCheckForUpdate(state, Date.now())) {
+			if (shouldShowUpdate(state)) setAvailableUpdate(state.latest);
+			return;
+		}
+		void (async () => {
+			try {
+				const res = (await browser.runtime.sendMessage({
+					type: "jt:check-update",
+				})) as { update?: AvailableUpdate | null } | undefined;
+				const latest = res?.update ?? null;
+				const next = { ...state, checkedAt: Date.now(), latest };
+				writeUpdateState(storage, next);
+				if (shouldShowUpdate(next)) setAvailableUpdate(latest);
+			} catch {
+				// 检查失败：保持原状态，不打扰用户
+			}
+		})();
+	}, []);
+
+	const dismissUpdate = () => {
+		if (!availableUpdate) return;
+		const storage = getStorage();
+		writeUpdateState(storage, {
+			...readUpdateState(storage),
+			dismissedVersion: availableUpdate.version,
+		});
+		setAvailableUpdate(null);
+	};
+
 	// 预览的番号（搜索框手输/点列表/网页圆点）不一定在「当前页候选」里，
 	// 所以这里按预览番号单独补查一次在库状态；已在集合里的会在 ensureEmbyCode 内提前返回。
 	// 依赖只有 previewCode：inLibrary 不能进依赖，否则写入后重跑形成自激循环。
@@ -753,6 +797,35 @@ export const App: React.FC = () => {
 						/>
 					</svg>
 					<span>{t.truncatedWarning}</span>
+				</div>
+			)}
+
+			{availableUpdate && (
+				<div className="popup-update-notice" role="status">
+					<a
+						className="popup-update-notice__link"
+						href={availableUpdate.url}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label={t.updateAvailableAria(availableUpdate.version)}
+					>
+						<span className="popup-update-notice__copy">
+							<strong>
+								{t.updateAvailableTitle(availableUpdate.version)}
+							</strong>
+							<span>{t.updateAvailableDesc}</span>
+						</span>
+						<span className="popup-update-notice__action">{t.updateNow}</span>
+					</a>
+					<button
+						type="button"
+						className="popup-update-notice__close"
+						onClick={dismissUpdate}
+						aria-label={t.closeError}
+						title={t.closeError}
+					>
+						×
+					</button>
 				</div>
 			)}
 
