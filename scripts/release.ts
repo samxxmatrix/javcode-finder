@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
- * 发版：npm run release <patch|minor|major|x.y.z> [--push] [--dry-run] [--skip-checks]
+ * 发版：npm run release [patch|minor|major|x.y.z] [--no-push] [--dry-run] [--skip-checks]
+ *      不带版本参数 = patch。
  *
  * 做的事（顺序即防呆）：
- *   1. 校验工作树干净、从 origin 解析 owner/repo，并断言与扩展里的检查地址一致
+ *   1. 校验工作树干净（先跑 `npm run commit`）、从 origin 解析 owner/repo，并断言与扩展里的检查地址一致
  *   2. 计算下一个版本号（只改 package.json —— 唯一版本来源）
  *   3. 跑 npm test + npm run compile
  *   4. 写 package.json、按提交前缀追加 CHANGELOG.md
  *   5. npm run zip，校验产物 manifest.version === package.json.version、zip 名字含版本
  *   6. 生成 Release 资产 .output/version.json（扩展的更新检查就读它）+ release-notes.md
  *   7. git commit + git tag v<版本>
- *   8. --push 才推送；装了 gh CLI 就顺手建 Release，否则打印手动步骤
+ *   8. 默认推送分支与 tag；--no-push 只留在本地。装了 gh CLI 就顺手建 Release，否则打印手动步骤
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -21,6 +22,7 @@ import {
 	buildChangelogEntry,
 	buildVersionAsset,
 	computeNextVersion,
+	parseReleaseArgs,
 	parseRepoSlug,
 	prependChangelogEntry,
 } from "./release-lib.ts";
@@ -31,7 +33,7 @@ const NPM = IS_WINDOWS ? "npm.cmd" : "npm";
 const OUTPUT_DIR = join(ROOT, ".output");
 
 const USAGE =
-	"用法: npm run release <patch|minor|major|x.y.z> [--push] [--dry-run] [--skip-checks]";
+	"用法: npm run release [patch|minor|major|x.y.z] [--no-push] [--dry-run] [--skip-checks]（不带版本号 = patch）";
 
 /**
  * git / gh 一律不走 shell：shell 模式下 Node 只是用空格拼命令行、**不加引号**，
@@ -112,17 +114,10 @@ function printManualReleaseSteps(
 	);
 }
 
-const args = process.argv.slice(2);
-const flags = new Set(args.filter((arg) => arg.startsWith("--")));
-const spec = args.find((arg) => !arg.startsWith("--"));
-const dryRun = flags.has("--dry-run");
-const push = flags.has("--push");
-const skipChecks = flags.has("--skip-checks");
-
-if (!spec) {
-	console.error(USAGE);
-	process.exit(1);
-}
+// 不带版本参数 = patch；推送默认开启，`--no-push` 退回纯本地
+const { spec, push, dryRun, skipChecks } = parseReleaseArgs(
+	process.argv.slice(2),
+);
 
 // ---- 1. 前置检查 ----
 const dirty = sh("git", ["status", "--porcelain"]);
@@ -142,7 +137,7 @@ const pkgRaw = readFileSync(pkgPath, "utf8");
 const current = (JSON.parse(pkgRaw) as { version?: string }).version ?? "";
 const next = computeNextVersion(current, spec);
 if (!next) {
-	fail(`版本 "${spec}" 非法，或不大于当前版本 ${current}`);
+	fail(`版本 "${spec}" 非法，或不大于当前版本 ${current}\n\n${USAGE}`);
 }
 
 // ---- 2. 收集提交、生成变更段 ----
@@ -283,7 +278,7 @@ if (push) {
 		printManualReleaseSteps(slug, next, zipPath, notesPath, false);
 	}
 } else {
-	info("未加 --push：只做了本地提交与 tag。");
+	info("已指定 --no-push：只做了本地提交与 tag。");
 	printManualReleaseSteps(slug, next, zipPath, notesPath, true);
 }
 

@@ -1,6 +1,7 @@
 // 仅供 markCodesForTab（扩展上下文）使用：注入进页面的 markCodesInTab / clearCodeMarksInTab
 // 会被序列化后执行，**不能**引用这个 import，归一化必须由调用方算好传进去。
 import { normalizeCode } from "./normalize-code";
+import { embyBadgeSvg } from "./emby-badge";
 
 /**
  * Self-contained function executed in host page top-level document via scripting.executeScript.
@@ -33,25 +34,104 @@ export function clearCodeMarksInTab(): void {
 	}
 }
 
+/** Emby 在库命中的页面标记参数（面板算好传进来，注入函数不联网） */
+export interface MarkCodesEmbyOptions {
+	/** 命中 Emby 库的番号（面板统一口径，大小写不敏感） */
+	codes: string[];
+	/**
+	 * 页面里要画的 Emby 图标字符串：由扩展上下文用 embyBadgeSvg() 生成后传入。
+	 * 注入函数不能 import，图标只能这样带进去。
+	 */
+	iconSvg: string;
+	/** true = 只按最新命中重绘已有标记（Emby 结果晚于首次标记到达），不清理、不重扫页面 */
+	recolor?: boolean;
+}
+
 /**
  * Self-contained function executed in host page top-level document via scripting.executeScript.
  * Must not reference external closure variables.
  *
  * 在每个已识别番号的页面匹配文本末尾插入金色实心小圆点；命中收藏（favoriteCodes）的
- * 番号替换为金色书签图标。点击只发消息 jt:code-clicked 给面板打开预告片预览（不做定位）。
+ * 番号替换为金色书签图标；命中 Emby 库（emby.codes）的番号优先显示 Emby 图标
+ * （优先级：Emby 在库 > 收藏 > 黄点）。点击只发消息 jt:code-clicked 给面板打开
+ * 预告片预览（不做定位），三种图标行为一致。
+ *
+ * emby.recolor = true 时不插入/清理任何节点，只把已命中的标记就地升级为 Emby 图标：
+ * Emby 索引要联网同步，结果必然晚于首次标记，重绘比整页重注入便宜得多，也不会
+ * 破坏点击产生的金底黑字高亮。
  */
 export function markCodesInTab(
 	codes: string[],
 	perCodeLimit = 30,
-	favoriteCodes?: string[],
+	favoriteCodes?: string[] | null,
 	/**
 	 * 与 codes 同序的面板统一口径（归一化）番号。页面原文可能是 `FC2-PPV-4942266`
 	 * 而面板列表/收藏用的是 `FC2-4942266`；收藏判定与点击消息都必须用后者，
 	 * 否则这类番号漏收藏图标、点击后列表也不加选中边框。缺省时退化为原文串。
 	 */
 	canonicalCodes?: string[],
+	emby?: MarkCodesEmbyOptions | null,
 ): void {
 	try {
+		// 收藏集合（大写比较，与面板收藏去重口径一致）与 Emby 在库集合
+		const favSet = new Set<string>();
+		if (favoriteCodes) {
+			for (const f of favoriteCodes) {
+				const key = String(f).trim().toUpperCase();
+				if (key) favSet.add(key);
+			}
+		}
+		const embySet = new Set<string>();
+		if (emby?.codes) {
+			for (const e of emby.codes) {
+				const key = String(e).trim().toUpperCase();
+				if (key) embySet.add(key);
+			}
+		}
+		const embyIconSvg = emby?.iconSvg || "";
+
+		// 标记统一用 SVG（黄点=金色实心圆、收藏=金色书签、在库=Emby 图标），容器样式与
+		// hover 行为完全一致：尺寸随字号（em），hover 用 drop-shadow 沿图形轮廓发光，
+		// 避免 background/box-shadow 在 SVG 图标上产生色块等异常。
+		// paintDot 同时服务首次标记与 Emby 结果晚到时的重绘，图标口径只有这一处。
+		const paintDot = (
+			dot: HTMLElement,
+			isFav: boolean,
+			isEmby: boolean,
+		): void => {
+			const useEmby = isEmby && embyIconSvg !== "";
+			dot.className = useEmby
+				? "javcode-dot javcode-dot--emby"
+				: isFav
+					? "javcode-dot javcode-dot--fav"
+					: "javcode-dot";
+			dot.innerHTML = useEmby
+				? embyIconSvg
+				: isFav
+					? // 金色书签：与面板收藏图标同款 path
+						'<svg viewBox="0 0 1024 1024" width="1em" height="1em"><path d="M832.8 63.9H191.2c-17.8 0-32.3 14.5-32.3 32.3V878c0 23.3 23.9 38.9 45.3 29.6L489.8 782l331.4 128.4c21.2 8.2 44-7.4 44-30.1V96.2c-0.1-17.9-14.5-32.3-32.4-32.3z" fill="#f59e0b"/></svg>'
+					: // 金色实心圆：尺寸与书签一致（1em）
+						'<svg viewBox="0 0 16 16" width="1em" height="1em"><circle cx="8" cy="8" r="8" fill="#f59e0b"/></svg>';
+		};
+
+		// Emby 在库结果晚于首次标记到达：只把命中的已有标记就地升级，不清理、不重走
+		// TreeWalker、不动页面文本 —— 点击产生的金底黑字高亮必须原样保留。
+		// 只升不降：未命中项保持原样（整体降级由下一次扫描的首次标记统一重建）。
+		if (emby?.recolor) {
+			if (!document.body) return;
+			// 类名硬编码：executeScript 序列化 func 时外部变量不会跟随注入
+			document.querySelectorAll(".javcode-dot").forEach((el) => {
+				const dot = el as HTMLElement;
+				// title 存的是面板统一口径番号（首次标记时写入）
+				const key = String(dot.title || "")
+					.trim()
+					.toUpperCase();
+				if (!key || !embySet.has(key)) return;
+				paintDot(dot, favSet.has(key), true);
+			});
+			return;
+		}
+
 		// 先清理旧标记（逻辑内联：注入函数不能引用模块级函数或常量）
 		// 圆点直接移除；金底黑字标记展开回普通文本后移除
 		document.querySelectorAll(".javcode-dot").forEach((el) => {
@@ -157,26 +237,14 @@ export function markCodesInTab(
 			return true;
 		};
 
-		// 收藏集合（大写比较，与面板收藏去重口径一致）
-		const favSet = new Set<string>();
-		if (favoriteCodes) {
-			for (const f of favoriteCodes) {
-				const key = String(f).trim().toUpperCase();
-				if (key) favSet.add(key);
-			}
-		}
-
-		// 标记统一用 SVG（普通番号金色实心圆、收藏番号金色书签），容器样式与
-		// hover 行为完全一致：尺寸随字号（em），hover 用 drop-shadow 沿图形轮廓发光，
-		// 避免 background/box-shadow 在 SVG 图标上产生色块等异常。
 		// matchedLen：该标记对应匹配文本的长度，点击时用于定位番号文本起点
 		const buildDot = (
 			code: string,
 			matchedLen: number,
 			isFav: boolean,
+			isEmby: boolean,
 		): HTMLElement => {
 			const dot = document.createElement("span");
-			dot.className = isFav ? "javcode-dot javcode-dot--fav" : "javcode-dot";
 			dot.title = code;
 			dot.style.cssText = [
 				"display:inline-block !important",
@@ -186,16 +254,16 @@ export function markCodesInTab(
 				"line-height:0 !important",
 				"cursor:pointer !important",
 			].join(";");
-			dot.innerHTML = isFav
-				? // 金色书签：与面板收藏图标同款 path
-					'<svg viewBox="0 0 1024 1024" width="1em" height="1em"><path d="M832.8 63.9H191.2c-17.8 0-32.3 14.5-32.3 32.3V878c0 23.3 23.9 38.9 45.3 29.6L489.8 782l331.4 128.4c21.2 8.2 44-7.4 44-30.1V96.2c-0.1-17.9-14.5-32.3-32.4-32.3z" fill="#f59e0b"/></svg>'
-				: // 金色实心圆：尺寸与书签一致（1em）
-					'<svg viewBox="0 0 16 16" width="1em" height="1em"><circle cx="8" cy="8" r="8" fill="#f59e0b"/></svg>';
-			// hover 用 JS 控制：drop-shadow 沿 SVG 轮廓发光，圆点与书签行为统一
+			paintDot(dot, isFav, isEmby);
+			// hover 用 JS 控制：drop-shadow 沿 SVG 轮廓发光，三种图标行为统一。
+			// 光晕颜色从 className 反读而不是闭包记住 —— Emby 结果晚到会就地重绘，
+			// 闭包里的旧颜色就不对了。
 			dot.addEventListener("mouseenter", () => {
 				dot.style.setProperty(
 					"filter",
-					"drop-shadow(0 0 0.15em rgba(245,158,11,0.9))",
+					dot.className.includes("javcode-dot--emby")
+						? "drop-shadow(0 0 0.15em rgba(6,184,49,0.9))"
+						: "drop-shadow(0 0 0.15em rgba(245,158,11,0.9))",
 					"important",
 				);
 			});
@@ -351,6 +419,7 @@ export function markCodesInTab(
 						f.code,
 						f.matchedLen,
 						favSet.has(f.code.toUpperCase()),
+						embySet.has(f.code.toUpperCase()),
 					);
 					// 最终结构：原节点 | dot | 番号节点 | 番号后剩余
 					currentNode.parentNode?.insertBefore(dot, codeNode);
@@ -365,20 +434,40 @@ export function markCodesInTab(
 
 /**
  * 在指定标签页执行 markCodesInTab（面板扫描成功后调用；codes 为空时仅清理旧标记）。
+ *
+ * emby.recolor：Emby 在库结果晚于首次标记到达时补一次"仅重绘"（此时 codes 传空数组即可），
+ * 只把命中的已有标记换成 Emby 图标，不动页面其余结构。
  */
 export async function markCodesForTab(
 	tabId: number,
 	codes: string[],
 	perCodeLimit = 30,
-	favoriteCodes?: string[],
+	favoriteCodes?: string[] | null,
+	emby?: { codes: string[]; recolor?: boolean },
 ): Promise<void> {
 	try {
-		// 注入函数不能引用模块函数，所以归一化在这里算好，与 codes 同序传入
+		// 注入函数不能引用模块函数，所以归一化在这里算好，与 codes 同序传入；
+		// Emby 图标同理：字符串在扩展侧生成好再传进去（页面里 import 不进来）
 		const canonicalCodes = codes.map((code) => normalizeCode(code));
 		await browser.scripting.executeScript({
 			target: { tabId },
 			func: markCodesInTab,
-			args: [codes, perCodeLimit, favoriteCodes, canonicalCodes],
+			args: [
+				codes,
+				perCodeLimit,
+				// executeScript 的参数必须可序列化：数组里混进 undefined 会被 Chrome
+				// 以 "Error at property 'args': Value is unserializable" 拒掉整个注入
+				// （"仅重绘"那条调用就踩过），缺省一律落成 null
+				favoriteCodes ?? null,
+				canonicalCodes,
+				emby
+					? {
+							codes: emby.codes,
+							iconSvg: embyBadgeSvg("1em"),
+							recolor: emby.recolor === true,
+						}
+					: null,
+			],
 		});
 	} catch (err) {
 		console.warn("Failed to mark codes in tab:", tabId, err);

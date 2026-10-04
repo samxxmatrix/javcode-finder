@@ -6,24 +6,19 @@ import type { SupportedLocale } from "./types";
 // String.raw 保持反斜杠字面：正则所见即所得（普通字符串中 \b 是退格符、\d 会丢反斜杠）
 export const DEFAULT_CODE_REGEX = String.raw`\b(?!(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?:[A-Z]+)?[- —–－\u00A0]+\d{4}\b)(?!\d{4}[- —–－\u00A0]\d{2}[- —–－\u00A0]\d{2}\b)(?<!\d)(?:FC2[- —–－\u00A0]+\d{3,8}|FC2[- —–－\u00A0]+PPV[- —–－\u00A0]+\d{3,8}|FC2PPV[- —–－\u00A0]?\d{3,8}|[A-Z][A-Z0-9]{1,5}[- —–－\u00A0]+\d{3,6})(?![A-Z0-9])`;
 
-// supjav 官方搜索模板按语言区分：中文/繁中走 /zh/ 前缀，英文无前缀
-export const SUPJAV_ZH_TEMPLATE = "https://supjav.com/zh/?s={code}";
-export const SUPJAV_EN_TEMPLATE = "https://supjav.com/?s={code}";
-
 export interface ExtensionSettings {
-	// 空字符串 = 未自定义，跳转时按界面语言选择 supjav 官方模板
+	// 三个外部平台完全同构：无内置品牌/地址，名称与链接规则都由用户配置；
+	// 任一为空 = 该平台未配置 → 面板不显示对应按钮
 	supjavTemplate: string;
 	javbusTemplate: string;
+	customTemplate: string;
+	supjavName: string;
+	javdbName: string;
+	customName: string;
 	excludedHosts: string[];
 	customRegex: string;
 	// 预览视频音量（0-100），所有预览播放统一使用
 	previewVolume: number;
-	// 跳转按钮显示名称（空 = 使用默认名称）
-	supjavName: string;
-	javdbName: string;
-	// 第三个自定义平台：无默认配置，名称与模板均空 = 面板不显示该按钮
-	customName: string;
-	customTemplate: string;
 	// DeepL 自建 Worker 翻译（Bearer key 即为 CLIENT_API_KEY）
 	deeplApiKey: string;
 	// Worker 地址（空 = 未配置，直接用谷歌翻译）
@@ -56,21 +51,22 @@ export type LocaleOption = "auto" | SupportedLocale;
 export const SETTINGS_STORAGE_KEY = "javranking_search_settings";
 export const LOCALE_STORAGE_KEY = "javranking_user_locale";
 
-// 旧版本默认跳转 MissAV；若用户从未自定义过该模板，升级后应改用新默认
+// 旧版本默认跳转 MissAV；若用户从未自定义过该模板，升级后应改用新默认（空 = 未配置）
 export const LEGACY_MISSAV_TEMPLATE = "https://missav.ws/cn/{code}";
 // 旧版本默认跳转 JavTrailers 搜索页
 export const LEGACY_JAVTRAILERS_TEMPLATE = "https://javtrailers.com/search/{code}";
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
+	// 三个平台默认都未配置：名称与链接规则均为空，面板不显示按钮
+	supjavName: "",
+	javdbName: "",
+	customName: "",
 	supjavTemplate: "",
-	javbusTemplate: "https://javdb.com/search?q={code}",
+	javbusTemplate: "",
+	customTemplate: "",
 	excludedHosts: [],
 	customRegex: DEFAULT_CODE_REGEX,
 	previewVolume: 100,
-	supjavName: "Supjav",
-	javdbName: "JavDB",
-	customName: "",
-	customTemplate: "",
 	deeplApiKey: "",
 	translateApiUrl: "",
 	translateEnabled: false,
@@ -284,8 +280,7 @@ export function saveSettings(
 					? settings.supjavTemplate.trim()
 					: current.supjavTemplate,
 			javbusTemplate:
-				settings.javbusTemplate !== undefined &&
-				settings.javbusTemplate.trim()
+				settings.javbusTemplate !== undefined
 					? settings.javbusTemplate.trim()
 					: current.javbusTemplate,
 			excludedHosts:
@@ -453,10 +448,116 @@ export function getEffectiveLocale(savedOption?: LocaleOption): SupportedLocale 
 	return detectLocale();
 }
 
+/**
+ * 平台是否已配置：名称与链接规则都非空才成立。
+ * 三个平台同构，未配置的平台在面板上不显示跳转按钮。
+ */
+export function isPlatformConfigured(name: string, template: string): boolean {
+	return Boolean((name || "").trim() && (template || "").trim());
+}
+
+export type PlatformKey = "supjav" | "javdb" | "custom";
+
+export interface PlatformLink {
+	key: PlatformKey;
+	/** trim 后的平台名称（按钮正文取首字符，title 用全名） */
+	name: string;
+	/** trim 后的链接规则模板（交给 resolveSearchUrl 生成跳转地址） */
+	template: string;
+}
+
+/**
+ * 面板上要显示的外部平台跳转按钮（最多三个）：名称与链接规则都非空的平台，
+ * 顺序固定 supjav → javdb → custom。
+ *
+ * 番号列表区与预告片头部共用这一份显示规则 —— 两处各写一遍判断迟早会漂移
+ * （历史上来源判定就漏登记过一次）。
+ */
+export function configuredPlatforms(
+	settings: ExtensionSettings,
+): PlatformLink[] {
+	const candidates: PlatformLink[] = [
+		{
+			key: "supjav",
+			name: settings.supjavName,
+			template: settings.supjavTemplate,
+		},
+		{
+			key: "javdb",
+			name: settings.javdbName,
+			template: settings.javbusTemplate,
+		},
+		{
+			key: "custom",
+			name: settings.customName,
+			template: settings.customTemplate,
+		},
+	];
+	const platforms: PlatformLink[] = [];
+	for (const candidate of candidates) {
+		const name = (candidate.name || "").trim();
+		const template = (candidate.template || "").trim();
+		if (isPlatformConfigured(name, template)) {
+			platforms.push({ key: candidate.key, name, template });
+		}
+	}
+	return platforms;
+}
+
+/**
+ * 方形平台按钮的正文：平台名首字符（中文取第一个字符），拉丁字母转大写。
+ * 用 Array.from 取字符而不是 charAt：代理对（emoji / 生僻字）不会被截成半个。
+ */
+export function platformInitial(name: string): string {
+	const first = Array.from((name || "").trim())[0];
+	return first ? first.toUpperCase() : "";
+}
+
+/**
+ * 配置签名：把全部可保存配置序列化成一个字符串。
+ * 表单当前值的签名 ≠ 已落盘配置的签名 = 有未保存改动（用于“请保存”提醒）。
+ * 字符串统一 trim（与 saveSettings 落盘口径一致）、正则按保存时的空值回退口径归一，
+ * 避免保存后因首尾空白等差异残留提醒。
+ */
+export function configSignature(settings: ExtensionSettings): string {
+	const trim = (value: string) => (value || "").trim();
+	return JSON.stringify([
+		trim(settings.supjavName),
+		trim(settings.supjavTemplate),
+		trim(settings.javdbName),
+		trim(settings.javbusTemplate),
+		trim(settings.customName),
+		trim(settings.customTemplate),
+		settings.previewVolume,
+		trim(settings.deeplApiKey),
+		trim(settings.translateApiUrl),
+		settings.translateEnabled,
+		settings.fallbackService,
+		trim(settings.dmmApiUrl),
+		trim(settings.dmmApiKey),
+		settings.dmmEnabled,
+		trim(settings.embyUrl),
+		trim(settings.embyApiKey),
+		settings.embyEnabled,
+		trim(settings.webdavUrl),
+		trim(settings.webdavUser),
+		// 密码按原样比较：保存时不做 trim
+		settings.webdavPass,
+		settings.webdavEnabled,
+		settings.excludedHosts,
+		settings.falenoPrefixes,
+		trim(settings.customRegex) || DEFAULT_CODE_REGEX,
+	]);
+}
+
+/**
+ * 用链接规则模板生成跳转 URL。
+ * 模板为空 = 该平台未配置：不生成链接（返回空串），面板也不会显示对应按钮。
+ */
 export function resolveSearchUrl(template: string, code: string): string {
 	const trimmedTemplate = (template || "").trim();
 	if (!trimmedTemplate) {
-		return `https://javdb.com/search?q=${encodeURIComponent(code)}`;
+		return "";
 	}
 
 	const encoded = encodeURIComponent(code);
@@ -476,20 +577,4 @@ export function resolveSearchUrl(template: string, code: string): string {
 	}
 
 	return `${trimmedTemplate}/${encoded}`;
-}
-
-/**
- * 构造 supJAV 跳转 URL：用户自定义模板优先；
- * 模板为空时按界面语言使用官方默认（中文/繁中走 /zh/ 前缀，英文无前缀）。
- */
-export function resolveSupjavUrl(
-	template: string,
-	code: string,
-	locale: SupportedLocale,
-): string {
-	if (template && template.trim()) {
-		return resolveSearchUrl(template, code);
-	}
-	const base = locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
-	return resolveSearchUrl(base, code);
 }

@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	configSignature,
+	DEFAULT_CODE_REGEX,
 	DEFAULT_SETTINGS,
+	type ExtensionSettings,
 	getEffectiveLocale,
 	getSavedLocale,
 	getSettings,
 	isHostExcluded,
+	isPlatformConfigured,
 	isValidRegex,
 	normalizeDomain,
 	resetSettings,
 	resolveSearchUrl,
-	resolveSupjavUrl,
 	saveLocale,
 	saveSettings,
 	SETTINGS_STORAGE_KEY,
@@ -52,7 +55,7 @@ describe("settings", () => {
 		expect(saved.javbusTemplate).toBe("https://www.javbus.com/{code}");
 	});
 
-	it("saves an empty supjav template (means follow locale)", () => {
+	it("saves an empty supjav template (means unconfigured)", () => {
 		saveSettings({ supjavTemplate: "https://custom.example.org/{code}" });
 		saveSettings({ supjavTemplate: "" });
 		expect(getSettings().supjavTemplate).toBe("");
@@ -66,10 +69,42 @@ describe("settings", () => {
 		expect(getSettings().supjavName).toBe("Supjav2");
 		expect(getSettings().javdbName).toBe("DB");
 
-		// 清空名称 → 回退默认名称
+		// 清空名称 → 保存为空（该平台视为未配置，面板不显示按钮）
 		saveSettings({ supjavName: "", javdbName: "" });
 		expect(getSettings().supjavName).toBe(DEFAULT_SETTINGS.supjavName);
 		expect(getSettings().javdbName).toBe(DEFAULT_SETTINGS.javdbName);
+	});
+
+	it("defaults all three platforms to unconfigured (empty name + template)", () => {
+		// 三个平台完全同构：无内置品牌名与内置地址，名称与链接规则默认都为空
+		expect(DEFAULT_SETTINGS.supjavName).toBe("");
+		expect(DEFAULT_SETTINGS.javdbName).toBe("");
+		expect(DEFAULT_SETTINGS.customName).toBe("");
+		expect(DEFAULT_SETTINGS.supjavTemplate).toBe("");
+		expect(DEFAULT_SETTINGS.javbusTemplate).toBe("");
+		expect(DEFAULT_SETTINGS.customTemplate).toBe("");
+
+		const settings = getSettings();
+		expect(settings.supjavName).toBe("");
+		expect(settings.javdbName).toBe("");
+		expect(settings.customName).toBe("");
+		expect(settings.supjavTemplate).toBe("");
+		expect(settings.javbusTemplate).toBe("");
+		expect(settings.customTemplate).toBe("");
+
+		// 未配置 = 不生成跳转链接（面板也不显示按钮）
+		expect(resolveSearchUrl("", "ABP-123")).toBe("");
+		expect(resolveSearchUrl("   ", "ABP-123")).toBe("");
+	});
+
+	it("allows clearing the JavDB link template back to empty", () => {
+		saveSettings({ javbusTemplate: "https://mysite.example.com/search/{code}" });
+		expect(getSettings().javbusTemplate).toBe(
+			"https://mysite.example.com/search/{code}",
+		);
+
+		saveSettings({ javbusTemplate: "" });
+		expect(getSettings().javbusTemplate).toBe("");
 	});
 
 	it("saves and restores WebDAV cloud settings", () => {
@@ -322,30 +357,84 @@ describe("settings", () => {
 		});
 	});
 
-	describe("resolveSupjavUrl", () => {
-		it("uses the zh template for zh-hans and zh-hant locales", () => {
-			expect(resolveSupjavUrl("", "DLDSS-547", "zh-hans")).toBe(
-				"https://supjav.com/zh/?s=DLDSS-547",
-			);
-			expect(resolveSupjavUrl("", "DLDSS-547", "zh-hant")).toBe(
-				"https://supjav.com/zh/?s=DLDSS-547",
-			);
-		});
-
-		it("uses the plain template for the en locale", () => {
-			expect(resolveSupjavUrl("", "DLDSS-547", "en")).toBe(
-				"https://supjav.com/?s=DLDSS-547",
-			);
-		});
-
-		it("prefers a user-customized template over locale defaults", () => {
+	describe("isPlatformConfigured", () => {
+		it("requires both the platform name and the link rule", () => {
 			expect(
-				resolveSupjavUrl("https://custom.example/{code}", "DLDSS-547", "zh-hans"),
-			).toBe("https://custom.example/DLDSS-547");
+				isPlatformConfigured("Supjav", "https://example.com/search?q={code}"),
+			).toBe(true);
+			// 缺任一项 = 未配置 → 面板不显示该平台按钮
+			expect(isPlatformConfigured("", "https://example.com/search?q={code}")).toBe(false);
+			expect(isPlatformConfigured("Supjav", "")).toBe(false);
+			expect(isPlatformConfigured("", "")).toBe(false);
+			// 纯空白同样视为未配置
+			expect(isPlatformConfigured("  ", "  ")).toBe(false);
+		});
+	});
+
+	describe("configSignature", () => {
+		it("covers every configurable field", () => {
+			const base = { ...DEFAULT_SETTINGS };
+			const baseSignature = configSignature(base);
+			const patches: Partial<ExtensionSettings>[] = [
+				{ supjavName: "S" },
+				{ supjavTemplate: "https://example.com/search?q={code}" },
+				{ javdbName: "J" },
+				{ javbusTemplate: "https://example.com/{code}" },
+				{ customName: "C" },
+				{ customTemplate: "https://example.com/{code}" },
+				{ previewVolume: 50 },
+				{ deeplApiKey: "key" },
+				{ translateApiUrl: "https://translate.example/" },
+				{ translateEnabled: true },
+				{ fallbackService: "bing" },
+				{ dmmApiUrl: "https://dmm.example/" },
+				{ dmmApiKey: "key" },
+				{ dmmEnabled: true },
+				{ embyUrl: "http://127.0.0.1:8096" },
+				{ embyApiKey: "key" },
+				{ embyEnabled: true },
+				{ webdavUrl: "https://dav.example/" },
+				{ webdavUser: "user" },
+				{ webdavPass: "pass" },
+				{ webdavEnabled: true },
+				{ excludedHosts: ["example.com"] },
+				{ falenoPrefixes: [] },
+				{ customRegex: "\\bFC2-\\d+\\b" },
+			];
+			for (const patch of patches) {
+				expect(configSignature({ ...base, ...patch })).not.toBe(
+					baseSignature,
+				);
+			}
+		});
+
+		it("matches how settings are persisted (trim + regex fallback)", () => {
+			const base: ExtensionSettings = {
+				...DEFAULT_SETTINGS,
+				supjavName: "Supjav",
+				supjavTemplate: "https://example.com/search?q={code}",
+			};
+			// 首尾空白落盘时被 trim：签名必须一致，否则保存后提醒不会消失
+			expect(configSignature({ ...base, supjavName: "  Supjav  " })).toBe(
+				configSignature(base),
+			);
+			// 正则留空 = 保存时回退默认正则
+			expect(configSignature({ ...base, customRegex: "" })).toBe(
+				configSignature({ ...base, customRegex: DEFAULT_CODE_REGEX }),
+			);
+			// 密码保存时不做 trim：空格属于有效差异
+			expect(configSignature({ ...base, webdavPass: " pass " })).not.toBe(
+				configSignature({ ...base, webdavPass: "pass" }),
+			);
 		});
 	});
 
 	describe("resolveSearchUrl", () => {
+		it("returns an empty string for an unconfigured platform", () => {
+			expect(resolveSearchUrl("", "DLDSS-547")).toBe("");
+			expect(resolveSearchUrl("  ", "DLDSS-547")).toBe("");
+		});
+
 		it("replaces {code} placeholder", () => {
 			const url = resolveSearchUrl(
 				"https://javtrailers.com/search/{code}",
@@ -386,7 +475,10 @@ describe("settings", () => {
 
 		it("Supjav jump uses the FC2-PPV form for FC2 codes", () => {
 			expect(
-				resolveSupjavUrl("", toExternalSearchCode("FC2-123456"), "zh-hans"),
+				resolveSearchUrl(
+					"https://supjav.com/zh/?s={code}",
+					toExternalSearchCode("FC2-123456"),
+				),
 			).toBe("https://supjav.com/zh/?s=FC2-PPV-123456");
 		});
 

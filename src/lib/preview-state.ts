@@ -19,6 +19,49 @@ export type PreviewRetryAction =
 	| { type: "playback" }
 	| { type: "multiple"; actions: ["playback", "lookup"] };
 
+export interface DirectMp4StartPlan {
+	/** 需要写 src：地址变了（重新解析到新地址 / 兜底地址）或还没设过 */
+	assignSrc: boolean;
+	/** 地址没变但元素不可复用，必须先 load() 复位再重新拉流 */
+	reload: boolean;
+}
+
+export interface DirectMp4StartInput {
+	/** `<video>` 当前 src 属性值（从未设过为 null） */
+	currentSrc: string | null;
+	targetUrl: string;
+	/** 元素已进入错误态（`video.error` 非空），不复位就再也拉不回流 */
+	elementHasError: boolean;
+	/** 上一次播放尝试已判失败（`playbackStatus === "failed"`） */
+	previousAttemptFailed: boolean;
+}
+
+/**
+ * mp4 直链播放前如何准备 `<video>`。
+ *
+ * 起因（用户症状）："重新播放"从未成功过，只有"重新加载预览"才放得出来。
+ * 根因：预取优化（5a4ccac）看到 src 已是同一地址就跳过赋值，而失败后的 `<video>`
+ * 停在错误态（`networkState = NETWORK_NO_SOURCE`）：`play()` 只在 networkState 为
+ * NETWORK_EMPTY 时才重新走资源选择算法，所以同一个坏元素永远拉不回流——每次要么
+ * 立刻 NotSupportedError，要么 20s 超时再次判失败。"重新加载预览"之所以有效，
+ * 正是因为 resolveCurrentCode 用 `removeAttribute("src") + load()` 复位了元素。
+ *
+ * 因此：地址不同 → 赋值（赋值本身触发加载算法并清掉 error）；地址相同且元素不可用
+ * → 显式 `load()` 复位；只有"预取完好且从未失败"这条热路径才保留已缓冲的 moov。
+ */
+export function planDirectMp4Start({
+	currentSrc,
+	targetUrl,
+	elementHasError,
+	previousAttemptFailed,
+}: DirectMp4StartInput): DirectMp4StartPlan {
+	if (currentSrc !== targetUrl) return { assignSrc: true, reload: false };
+	if (elementHasError || previousAttemptFailed) {
+		return { assignSrc: false, reload: true };
+	}
+	return { assignSrc: false, reload: false };
+}
+
 export interface PreviewPresentationInput {
 	resolution: PreviewResolution | { status: "loading" };
 	playbackStatus: PreviewPlaybackStatus;

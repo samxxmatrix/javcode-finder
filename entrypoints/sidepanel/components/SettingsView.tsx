@@ -6,6 +6,7 @@ import React, {
 } from "react";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import {
+	configSignature,
 	DEFAULT_CODE_REGEX,
 	DEFAULT_SETTINGS,
 	getEffectiveLocale,
@@ -14,12 +15,9 @@ import {
 	isValidRegex,
 	normalizeDomain,
 	resetSettings,
-	resolveSearchUrl,
-	resolveSupjavUrl,
 	saveLocale,
 	saveSettings,
-	SUPJAV_EN_TEMPLATE,
-	SUPJAV_ZH_TEMPLATE,
+	type ExtensionSettings,
 	type LocaleOption,
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
@@ -36,8 +34,8 @@ interface SettingsViewProps {
 	onLocaleChange?: (locale: SupportedLocale) => void;
 	// 云端验证通过（即"开通云端同步"）后回调，由 App 执行首次同步
 	onWebdavConnected?: () => void;
-	// Emby 开关立即生效后回调，由 App 重扫列表以显示在库标识
-	onEmbyChange?: () => void;
+	// 未保存改动状态变化时回调，由 App 在保存按钮左侧显示“请保存”提醒
+	onDirtyChange?: (dirty: boolean) => void;
 }
 
 // 暴露给顶部图标按钮的保存/重置操作；save 返回是否保存成功（校验或云端验证失败时为 false）
@@ -48,7 +46,7 @@ export interface SettingsViewHandle {
 
 export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	function SettingsView(
-		{ locale, t, onBack, onLocaleChange, onWebdavConnected, onEmbyChange },
+		{ locale, t, onBack, onLocaleChange, onWebdavConnected, onDirtyChange },
 		ref,
 	) {
 	const [supjav, setSupjav] = useState("");
@@ -109,10 +107,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [regexError, setRegexError] = useState<string | null>(null);
 	const [previewVolume, setPreviewVolume] = useState(DEFAULT_SETTINGS.previewVolume);
 	const [savedMessage, setSavedMessage] = useState(false);
-
-	// 当前语言的官方默认模板（输入框为空时显示它，用户视角里输入框始终有具体值）
-	const defaultSupjavTemplate =
-		locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE;
+	// 表单是否已灌入已保存配置：灌入前不做“未保存改动”判断
+	const [initialized, setInitialized] = useState(false);
 
 	// 查询 Worker 用量并刷新显示；地址或 key 缺失/请求失败显示 --/--万
 	const refreshTranslateUsage = async (url: string, key: string) => {
@@ -248,26 +244,19 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	};
 
 	// Emby 开关：打开时先验证地址与 Key（拉 1 条确认权限），失败回弹关闭。
-	// 副作用（验证 + jt:emby-sync 同步索引）在这里立即发生，所以状态也必须立即落盘：
-	// 否则面板的 getSettings() 仍读到 embyEnabled:false，会跳过整个在库匹配（看不到标识），
-	// 直到用户再点一次保存才生效。每条返回路径都保证落盘值与 embyEnabled 状态一致。
+	// 与翻译 / DMM / 云端开关一致：开关只改本地状态，点“保存”才落盘；
+	// 验证成功后顺手预取媒体库索引（background 落盘），保存返回识别页即可显示在库标识。
 	const handleToggleEmby = async (checked: boolean) => {
 		setEmbyVerifyError(null);
-		// 未通过验证的路径一律保持关闭并立即落盘（true 只出现在验证成功路径）
-		const persistOff = () => {
-			setEmbyEnabled(false);
-			saveSettings({ embyUrl, embyApiKey, embyEnabled: false });
-			onEmbyChange?.();
-		};
 		if (!checked) {
-			persistOff();
+			setEmbyEnabled(false);
 			return;
 		}
 		const url = embyUrl.trim();
 		const key = embyApiKey.trim();
 		if (!url || !key) {
 			setEmbyVerifyError(t.embyIncomplete);
-			persistOff();
+			setEmbyEnabled(false);
 			return;
 		}
 		try {
@@ -280,27 +269,24 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				setEmbyVerifyError(
 					`${t.verifyFailed}：${health?.error || t.unknownError}`,
 				);
-				persistOff();
+				setEmbyEnabled(false);
 				return;
 			}
 			setEmbyEnabled(true);
-			// 先同步索引（await 到 background 落盘），再立即持久化开关并通知 App 重扫
 			await handleEmbySyncNow();
-			saveSettings({ embyUrl, embyApiKey, embyEnabled: true });
-			onEmbyChange?.();
 		} catch {
 			setEmbyVerifyError(`${t.verifyFailed}：${t.networkError}`);
-			persistOff();
+			setEmbyEnabled(false);
 		}
 	};
 
 	useEffect(() => {
 		const current = getSettings();
-		// 存储为空（跟随语言）时，把当前语言的官方模板填入输入框
-		setSupjav(current.supjavTemplate || defaultSupjavTemplate);
+		// 平台名称与链接规则默认为空：输入框留空，仅显示占位提示
+		setSupjav(current.supjavTemplate);
 		setJavbus(current.javbusTemplate);
-		setSupjavName(current.supjavName || DEFAULT_SETTINGS.supjavName);
-		setJavdbName(current.javdbName || DEFAULT_SETTINGS.javdbName);
+		setSupjavName(current.supjavName);
+		setJavdbName(current.javdbName);
 		setCustomName(current.customName);
 		setCustomTemplate(current.customTemplate);
 		setDeeplApiKey(current.deeplApiKey);
@@ -334,6 +320,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setFalenoPrefixes(current.falenoPrefixes);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
 		setPreviewVolume(current.previewVolume);
+		// 表单已与已保存配置对齐，从这里开始才比较“未保存改动”
+		setInitialized(true);
 		return () => {
 			cancelled = true;
 		};
@@ -505,8 +493,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 
 	const handleReset = () => {
 		resetSettings();
-		// 恢复默认：把当前语言的官方模板填入输入框（而非留空）
-		setSupjav(defaultSupjavTemplate);
+		// 恢复默认：平台名称与链接规则均留空（跳转时用内置官方地址）
+		setSupjav("");
 		setJavbus(DEFAULT_SETTINGS.javbusTemplate);
 		setSupjavName(DEFAULT_SETTINGS.supjavName);
 		setJavdbName(DEFAULT_SETTINGS.javdbName);
@@ -549,13 +537,41 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		}, 2000);
 	};
 
-	const sampleCode = "ABP-123";
-	const supjavPreview = resolveSupjavUrl(supjav, sampleCode, locale);
-	const javbusPreview = resolveSearchUrl(javbus, sampleCode);
-	// 自定义平台模板为空时预览显示空（未配置）
-	const customPreview = customTemplate.trim()
-		? resolveSearchUrl(customTemplate, sampleCode)
-		: "";
+	// 表单当前值 vs 已落盘配置：签名不同 = 有未保存改动，通知外层显示“请保存”提醒
+	const formConfig: ExtensionSettings = {
+		supjavName,
+		supjavTemplate: supjav,
+		javdbName,
+		javbusTemplate: javbus,
+		customName,
+		customTemplate,
+		previewVolume,
+		deeplApiKey,
+		translateApiUrl: translateUrl,
+		translateEnabled,
+		fallbackService,
+		dmmApiUrl,
+		dmmApiKey,
+		dmmEnabled,
+		embyUrl,
+		embyApiKey,
+		embyEnabled,
+		webdavUrl,
+		webdavUser,
+		webdavPass,
+		webdavEnabled,
+		excludedHosts,
+		falenoPrefixes,
+		customRegex,
+	};
+	const hasUnsavedChanges =
+		configSignature(formConfig) !== configSignature(getSettings());
+
+	// 挂载后先由上面的 effect 把已保存配置灌进表单，避免首帧用空表单误报“有改动”
+	useEffect(() => {
+		if (!initialized) return;
+		onDirtyChange?.(hasUnsavedChanges);
+	}, [initialized, hasUnsavedChanges, onDirtyChange]);
 
 	return (
 		<div className="settings-view">
@@ -583,7 +599,6 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 				<h2 className="settings-view__title">{t.settingsTitle}</h2>
 			</div>
 
-			<p className="settings-view__desc">{t.settingsDesc}</p>
 			<section className="settings-version" aria-labelledby="extension-version-label">
 				<span id="extension-version-label" className="settings-version__label">
 					{t.extensionVersionLabel}
@@ -877,7 +892,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						className="settings-field__input settings-field__input--code"
 						value={dmmApiUrl}
 						onChange={(e) => setDmmApiUrl(e.target.value)}
-						placeholder="https://dmm.0045.kdns.fr"
+						placeholder="https://example.com/"
 						spellCheck={false}
 						autoComplete="off"
 					/>
@@ -997,7 +1012,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 									// 超额提示是会话内状态，换地址/Key 后旧提示已失效
 									setEmbyTooLarge(false);
 								}}
-								placeholder="http://192.168.0.50:8096"
+								placeholder="http://127.0.0.1:8096"
 								spellCheck={false}
 								autoComplete="off"
 							/>
@@ -1086,6 +1101,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							/>
 						</label>
 					</div>
+					<p className="settings-field__hint">{t.cloudSyncDesc}</p>
 					<div className="settings-field__input-wrap">
 						<input
 							id="webdav-url"
@@ -1253,6 +1269,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 					</div>
 				</div>
 
+				{/* 说明文案：紧邻平台设置区，位于第一个“平台名称”之上 */}
+				<p className="settings-view__desc">{t.settingsDesc}</p>
+
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="supjav-name">
 						{t.platformNameLabel}
@@ -1264,7 +1283,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							className="settings-field__input"
 							value={supjavName}
 							onChange={(e) => setSupjavName(e.target.value)}
-							placeholder={DEFAULT_SETTINGS.supjavName}
+							placeholder={t.platformNameLabel}
 							spellCheck={false}
 							autoComplete="off"
 						/>
@@ -1278,7 +1297,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="supjav-template">
-						{t.platformUrlLabel(supjavName || DEFAULT_SETTINGS.supjavName)}
+						{t.platformUrlLabel(supjavName || t.customPlatformName)}
 					</label>
 					<div className="settings-field__input-wrap">
 						<input
@@ -1287,9 +1306,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							className="settings-field__input"
 							value={supjav}
 							onChange={(e) => setSupjav(e.target.value)}
-							placeholder={
-								locale === "en" ? SUPJAV_EN_TEMPLATE : SUPJAV_ZH_TEMPLATE
-							}
+							placeholder="https://example.com/search?q={code}"
 							spellCheck={false}
 							autoComplete="off"
 						/>
@@ -1298,14 +1315,6 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							onClick={() => setSupjav("")}
 							title={t.clearInput}
 						/>
-					</div>
-					<div className="settings-field__preview">
-						<span className="settings-field__preview-label">
-							{t.previewUrlLabel}
-						</span>
-						<span className="settings-field__preview-url" title={supjavPreview}>
-							{supjavPreview}
-						</span>
 					</div>
 				</div>
 
@@ -1320,7 +1329,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							className="settings-field__input"
 							value={javdbName}
 							onChange={(e) => setJavdbName(e.target.value)}
-							placeholder={DEFAULT_SETTINGS.javdbName}
+							placeholder={t.platformNameLabel}
 							spellCheck={false}
 							autoComplete="off"
 						/>
@@ -1334,7 +1343,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="javbus-template">
-						{t.platformUrlLabel(javdbName || DEFAULT_SETTINGS.javdbName)}
+						{t.platformUrlLabel(javdbName || t.customPlatformName)}
 					</label>
 					<div className="settings-field__input-wrap">
 						<input
@@ -1343,7 +1352,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							className="settings-field__input"
 							value={javbus}
 							onChange={(e) => setJavbus(e.target.value)}
-							placeholder={DEFAULT_SETTINGS.javbusTemplate}
+							placeholder="https://example.com/search?q={code}"
 							spellCheck={false}
 							autoComplete="off"
 						/>
@@ -1352,14 +1361,6 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							onClick={() => setJavbus("")}
 							title={t.clearInput}
 						/>
-					</div>
-					<div className="settings-field__preview">
-						<span className="settings-field__preview-label">
-							{t.previewUrlLabel}
-						</span>
-						<span className="settings-field__preview-url" title={javbusPreview}>
-							{javbusPreview}
-						</span>
 					</div>
 				</div>
 
@@ -1374,6 +1375,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							className="settings-field__input"
 							value={customName}
 							onChange={(e) => setCustomName(e.target.value)}
+							placeholder={t.platformNameLabel}
 							spellCheck={false}
 							autoComplete="off"
 						/>
@@ -1405,14 +1407,6 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							onClick={() => setCustomTemplate("")}
 							title={t.clearInput}
 						/>
-					</div>
-					<div className="settings-field__preview">
-						<span className="settings-field__preview-label">
-							{t.previewUrlLabel}
-						</span>
-						<span className="settings-field__preview-url" title={customPreview}>
-							{customPreview}
-						</span>
 					</div>
 				</div>
 

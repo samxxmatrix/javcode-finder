@@ -58,6 +58,8 @@ export const App: React.FC = () => {
 
 	const [status, setStatus] = useState<PopupStatus>("loading");
 	const [showSettings, setShowSettings] = useState(false);
+	// 设置页有未保存改动：顶部保存按钮左侧显示“请保存”提醒
+	const [settingsDirty, setSettingsDirty] = useState(false);
 	const [candidates, setCandidates] = useState<string[]>([]);
 	const [truncated, setTruncated] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -81,6 +83,9 @@ export const App: React.FC = () => {
 	const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// Emby 刷新请求序号：新一轮扫描递增，迟到的旧刷新据此放弃写入（防止覆盖新图标）
 	const embyRefreshIdRef = useRef(0);
+	// 本轮扫描页面标记的 promise 与目标 tab：Emby 在库结果晚到，重绘必须等首次标记先落地
+	const markDoneRef = useRef<Promise<void> | null>(null);
+	const markTabIdRef = useRef<number | undefined>(undefined);
 
 	// 获取面板目标的标签页：优先绑定 tab，否则当前窗口活动 tab
 	const getTargetTab = async (): Promise<
@@ -276,6 +281,28 @@ export const App: React.FC = () => {
 		return { index, tooLarge: false, stillCurrent };
 	};
 
+	// Emby 在库结果晚于页面标记到达：把命中的番号就地换成 Emby 图标（黄点/书签让位）。
+	// 先等首次标记注入完成再重绘 —— 冷启动时 Emby 结果可能先到，顺序反了就永远没有图标。
+	const recolorEmbyMarks = async (codes: Set<string>): Promise<void> => {
+		const tabId = markTabIdRef.current;
+		if (tabId === undefined) return;
+		const markDone = markDoneRef.current;
+		if (markDone) {
+			try {
+				await markDone;
+			} catch {
+				// 首次注入失败（受限页面等）：无标记可改，静默放弃
+				return;
+			}
+		}
+		// codes 传空：recolor 模式不插入/不清理，只按命中的已有标记重绘。
+		// 收藏集传空数组而不是 undefined —— executeScript 的 args 不允许 undefined
+		await markCodesForTab(tabId, [], 30, [], {
+			codes: [...codes],
+			recolor: true,
+		});
+	};
+
 	// 整页候选的在库判定：拿索引后整体替换标识集（未启用 Emby 或没有候选时清空）
 	const refreshEmbyIndex = async (codes: string[]): Promise<void> => {
 		const settings = getSettings();
@@ -298,15 +325,23 @@ export const App: React.FC = () => {
 			if (!res.stillCurrent()) return;
 			if (checked?.ok === true && Array.isArray(checked.matched)) {
 				// background 回传的是面板发出的原始候选写法，这里统一归一化后再入库
-				setInLibrary(
-					new Set(checked.matched.map((code) => normalizeCode(code))),
+				const next = new Set(
+					checked.matched.map((code) => normalizeCode(code)),
 				);
+				setInLibrary(next);
+				// 页面标记同步升级：命中库的番号显示 Emby 图标
+				if (next.size > 0) void recolorEmbyMarks(next);
 			}
 			// 逐条查询失败：保留现有标识，不因为一次抖动清空
 			return;
 		}
 		// index 为 null = fail closed（无可用索引）：清空标识，不保留上一轮的
-		setInLibrary(res.index ? matchEmbyCodes(res.index.keys, codes) : new Set());
+		const next = res.index
+			? matchEmbyCodes(res.index.keys, codes)
+			: new Set<string>();
+		setInLibrary(next);
+		// 只升不降：集合为空时页面标记保持首次注入的黄点/书签
+		if (next.size > 0) void recolorEmbyMarks(next);
 	};
 
 	// 顶部搜索框/手动查询的番号不在当前页候选里，单独按索引查一次（本地匹配，不额外联网）
@@ -334,12 +369,15 @@ export const App: React.FC = () => {
 				(checked.matched ?? []).some((m) => normalizeCode(m) === code)
 			) {
 				setInLibrary((prev) => new Set(prev).add(code));
+				// 该番号在页面上有标记就跟着升级为 Emby 图标（recolor 只升不降）
+				void recolorEmbyMarks(new Set([code]));
 			}
 			return;
 		}
 		if (res.index && matchEmbyCodes(res.index.keys, [code]).has(code)) {
 			// 只增不减：不要因为一次手动查询把列表已有的标识覆盖掉
 			setInLibrary((prev) => new Set(prev).add(code));
+			void recolorEmbyMarks(new Set([code]));
 		}
 	};
 
@@ -376,7 +414,9 @@ export const App: React.FC = () => {
 			// 无候选/排除/不支持时仅清理旧标记；收藏读 storage 最新值，不依赖 state
 			if (extraction.tabId !== undefined) {
 				const codes = extraction.candidates;
-				void markCodesForTab(
+				// 记下首次注入的 promise 与目标 tab：Emby 在库结果晚到时要等它之后补一次重绘
+				markTabIdRef.current = extraction.tabId;
+				markDoneRef.current = markCodesForTab(
 					extraction.tabId,
 					codes.length > 0 ? codes : [],
 					30,
@@ -681,6 +721,12 @@ export const App: React.FC = () => {
 					{showSettings ? (
 						<>
 							{/* 设置页：保存与恢复默认以图标方式置于顶部，替代原底部按钮 */}
+							{settingsDirty && (
+								// 有未保存改动：金色跳动文案指向右侧保存按钮
+								<span className="save-hint" role="status" aria-live="polite">
+									{t.saveHint}
+								</span>
+							)}
 							<button
 								type="button"
 								className="popup-header__icon-btn"
@@ -760,7 +806,12 @@ export const App: React.FC = () => {
 					<button
 						type="button"
 						className={`popup-header__icon-btn ${showSettings ? "popup-header__icon-btn--active" : ""}`}
-						onClick={() => setShowSettings(!showSettings)}
+						onClick={() => {
+							const next = !showSettings;
+							setShowSettings(next);
+							// 进入设置页时先清掉上次遗留的提醒，避免重挂载瞬间闪一下
+							if (next) setSettingsDirty(false);
+						}}
 						title={t.settingsTitle}
 						aria-label={t.settingsTitle}
 					>
@@ -853,8 +904,9 @@ export const App: React.FC = () => {
 							runScan();
 						}}
 						onLocaleChange={(newLocale) => setLocale(newLocale)}
-						// Emby 开关立即生效：重扫当前页，索引就绪后立刻补上在库标识
-						onEmbyChange={() => void runScan()}
+						// 有未保存改动时在顶部保存按钮左侧显示“请保存”提醒
+						onDirtyChange={setSettingsDirty}
+						// Emby 开关与其他开关一致：点保存才落盘，保存成功后统一重扫
 						onWebdavConnected={() => {
 							// 云端开通：本地空 → 拉取云端；本地有 → 立即推送备份
 							if (favorites.length === 0) {
@@ -883,7 +935,10 @@ export const App: React.FC = () => {
 									type="button"
 									className="popup-btn popup-btn--secondary"
 									style={{ marginTop: 16 }}
-									onClick={() => setShowSettings(true)}
+									onClick={() => {
+										setShowSettings(true);
+										setSettingsDirty(false);
+									}}
 								>
 									{t.manageExcludedSites}
 								</button>

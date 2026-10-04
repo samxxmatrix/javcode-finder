@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearCodeMarksInTab, markCodesInTab } from "../src/lib/mark-codes";
+import {
+	clearCodeMarksInTab,
+	markCodesForTab,
+	markCodesInTab,
+} from "../src/lib/mark-codes";
+import { embyBadgeSvg } from "../src/lib/emby-badge";
 
 interface MockTextNode {
 	nodeValue: string;
@@ -413,5 +418,143 @@ describe("markCodesInTab", () => {
 
 		// 第二次调用前清理了旧 dot，每次各插 1 个，总数 2
 		expect(insertedDots.length).toBe(2);
+	});
+
+	it("命中 Emby 库的番号优先显示 Emby 图标，压过收藏书签与黄点", () => {
+		const embyIcon = '<svg data-emby-icon="1"><path /></svg>';
+		const { createdSpans } = createMockDom([
+			{ text: "ABP-123 in library and favorite" },
+			{ text: "IPX-456 favorite only" },
+			{ text: "SSIS-789 plain" },
+		]);
+
+		markCodesInTab(
+			["ABP-123", "IPX-456", "SSIS-789"],
+			30,
+			["ABP-123", "IPX-456"],
+			undefined,
+			{ codes: ["ABP-123"], iconSvg: embyIcon },
+		);
+
+		// 命中库 + 已收藏：Emby 优先，书签让位
+		expect(createdSpans[0]!.className).toContain("javcode-dot--emby");
+		expect(createdSpans[0]!.className).not.toContain("--fav");
+		expect(createdSpans[0]!.innerHTML).toBe(embyIcon);
+		// 未命中库的收藏：仍是书签
+		expect(createdSpans[1]!.className).toContain("javcode-dot--fav");
+		expect(createdSpans[1]!.innerHTML).toContain("path");
+		// 未命中库也未收藏：仍是黄点
+		expect(createdSpans[2]!.className).toBe("javcode-dot");
+		expect(createdSpans[2]!.innerHTML).toContain("circle");
+	});
+
+	it("recolor 模式就地升级命中库的已有标记，不新增/不清理/不碰点击高亮", () => {
+		const embyIcon = '<svg data-emby-icon="1"><path /></svg>';
+		const {
+			createdSpans,
+			insertedDots,
+			removedDots,
+			removedMarks,
+			handlers,
+			surroundCalls,
+		} = createMockDom([
+			{ text: "ABP-123 in library" },
+			{ text: "IPX-456 favorite" },
+		]);
+
+		// 首次标记：Emby 结果还没到，只有收藏口径可用
+		markCodesInTab(["ABP-123", "IPX-456"], 30, ["IPX-456"]);
+		// 点击第一个圆点 → 金底黑字高亮已存在
+		handlers.find((h) => h.type === "click")!.fn({
+			preventDefault: vi.fn(),
+			stopPropagation: vi.fn(),
+		});
+		expect(surroundCalls.length).toBe(1);
+
+		// Emby 在库结果到达后：只重绘命中项
+		markCodesInTab([], 30, undefined, undefined, {
+			codes: ["ABP-123"],
+			iconSvg: embyIcon,
+			recolor: true,
+		});
+
+		expect(createdSpans[0]!.className).toContain("javcode-dot--emby");
+		expect(createdSpans[0]!.innerHTML).toBe(embyIcon);
+		// 未命中库的收藏标记原样保留（只升不降）
+		expect(createdSpans[1]!.className).toContain("javcode-dot--fav");
+		expect(createdSpans[1]!.innerHTML).toContain("path");
+		// 不新增 dot、不清理旧标记、金底黑字高亮保留
+		expect(insertedDots.length).toBe(2);
+		expect(removedDots.length).toBe(0);
+		expect(removedMarks.length).toBe(0);
+		expect(surroundCalls.length).toBe(1);
+	});
+
+	it("recolor 模式在 Emby 未命中时不改任何标记", () => {
+		const { createdSpans } = createMockDom([{ text: "ABP-123 plain" }]);
+
+		markCodesInTab(["ABP-123"], 30);
+		markCodesInTab([], 30, undefined, undefined, {
+			codes: [],
+			iconSvg: '<svg data-emby-icon="1"><path /></svg>',
+			recolor: true,
+		});
+
+		expect(createdSpans[0]!.className).toBe("javcode-dot");
+		expect(createdSpans[0]!.innerHTML).toContain("circle");
+	});
+	it("注入函数自包含：脱离模块作用域仍可执行（序列化后不能丢外部引用）", () => {
+		const { insertedDots, createdSpans } = createMockDom([
+			{ text: "ABP-123 here" },
+		]);
+
+		// 模拟 executeScript：只把函数源码序列化后执行，模块级变量/import 一律不可见
+		const standalone = new Function(
+			`return (${markCodesInTab.toString()})`,
+		)() as typeof markCodesInTab;
+		standalone(["ABP-123"], 30, ["ABP-123"], undefined, {
+			codes: ["ABP-123"],
+			iconSvg: "<svg />",
+		});
+
+		expect(insertedDots.length).toBe(1);
+		expect(createdSpans[0]!.className).toContain("javcode-dot--emby");
+	});
+});
+
+describe("markCodesForTab", () => {
+	it("把共享的 Emby 图标字符串与 recolor 模式透传给页面注入", async () => {
+		const executeScript = vi.fn().mockResolvedValue([]);
+		(globalThis as any).browser = { scripting: { executeScript } };
+
+		await markCodesForTab(7, ["ABP-123"], 30, ["ABP-123"], {
+			codes: ["ABP-123"],
+			recolor: true,
+		});
+
+		const injected = executeScript.mock.calls[0]![0];
+		expect(injected.target).toEqual({ tabId: 7 });
+		expect(injected.args[0]).toEqual(["ABP-123"]);
+		expect(injected.args[4]).toEqual({
+			codes: ["ABP-123"],
+			iconSvg: embyBadgeSvg("1em"),
+			recolor: true,
+		});
+	});
+
+	it("可选参数缺省时不留 undefined：Chrome 会以 unserializable 拒绝整个注入", async () => {
+		const executeScript = vi.fn().mockResolvedValue([]);
+		(globalThis as any).browser = { scripting: { executeScript } };
+
+		// 面板的重绘调用正是不带收藏集的形式：undefined 混进 args，
+		// executeScript 会直接抛 "Error at property 'args': Value is unserializable"
+		await markCodesForTab(7, [], 30, undefined, {
+			codes: ["ABP-123"],
+			recolor: true,
+		});
+
+		const injected = executeScript.mock.calls[0]![0];
+		expect(injected.args).toHaveLength(5);
+		expect(injected.args).not.toContain(undefined);
 	});
 });

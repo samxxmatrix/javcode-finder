@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	armPlayingOnFirstFrame,
 	getPreviewPresentation,
+	planDirectMp4Start,
 	transitionPreviewNotice,
 	type FirstFrameTarget,
 } from "../src/lib/preview-state";
@@ -122,6 +123,59 @@ describe("armPlayingOnFirstFrame", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+describe("planDirectMp4Start", () => {
+	const url = "https://cdn.example/trailer.mp4";
+	const input = (
+		overrides: Partial<Parameters<typeof planDirectMp4Start>[0]> = {},
+	) => ({
+		currentSrc: url,
+		targetUrl: url,
+		elementHasError: false,
+		previousAttemptFailed: false,
+		...overrides,
+	});
+
+	it("keeps the prefetched source on a first click so the warm buffer survives", () => {
+		expect(planDirectMp4Start(input())).toEqual({
+			assignSrc: false,
+			reload: false,
+		});
+	});
+
+	it("forces a reload when retrying the same address after a failed attempt", () => {
+		// 症状：失败后沿用同一个 src，play() 不会重新走资源选择 → "重新播放"永远失败
+		expect(planDirectMp4Start(input({ previousAttemptFailed: true }))).toEqual({
+			assignSrc: false,
+			reload: true,
+		});
+	});
+
+	it("forces a reload when the prefetch errored before the first click", () => {
+		expect(planDirectMp4Start(input({ elementHasError: true }))).toEqual({
+			assignSrc: false,
+			reload: true,
+		});
+	});
+
+	it("assigns the source when nothing has been set yet", () => {
+		expect(planDirectMp4Start(input({ currentSrc: null }))).toEqual({
+			assignSrc: true,
+			reload: false,
+		});
+	});
+
+	it("assigns a changed address, which clears an element error by itself", () => {
+		expect(
+			planDirectMp4Start(
+				input({
+					currentSrc: "https://cdn.example/old.mp4",
+					elementHasError: true,
+				}),
+			),
+		).toEqual({ assignSrc: true, reload: false });
 	});
 });
 

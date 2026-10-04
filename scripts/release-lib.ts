@@ -59,6 +59,83 @@ export function computeNextVersion(
 	return isNewerVersion(normalized, current) ? normalized : null;
 }
 
+export interface ReleaseArgs {
+	spec: string;
+	push: boolean;
+	dryRun: boolean;
+	skipChecks: boolean;
+}
+
+/**
+ * 解析 `npm run release` 的参数：位置参数（可省略）是版本号，缺省 = patch，
+ * 所以"不带参数就能发一个小版本"。推送默认开启（发版即发布），`--no-push` 退回纯本地；
+ * `--push` 保留兼容（默认已是推送）。
+ */
+export function parseReleaseArgs(argv: string[]): ReleaseArgs {
+	const args = argv ?? [];
+	const flags = new Set(args.filter((arg) => arg.startsWith("--")));
+	return {
+		spec: args.find((arg) => !arg.startsWith("--")) ?? "patch",
+		push: !flags.has("--no-push"),
+		dryRun: flags.has("--dry-run"),
+		skipChecks: flags.has("--skip-checks"),
+	};
+}
+
+export interface CommitArgs {
+	/** 自定义提交标题；缺省时由 buildCommitMessage 按文件数生成 */
+	message?: string;
+	dryRun: boolean;
+}
+
+/** 解析 `npm run commit` 的参数：位置参数（可省略）是提交标题，`--dry-run` 只打印不提交 */
+export function parseCommitArgs(argv: string[]): CommitArgs {
+	const args = argv ?? [];
+	return {
+		message: args.find((arg) => !arg.startsWith("--")),
+		dryRun: args.includes("--dry-run"),
+	};
+}
+
+const DEFAULT_MAX_COMMIT_FILES = 20;
+
+/** git status --porcelain 的一行 → "M path"（状态码与路径都去掉多余空白） */
+function formatStatusLine(line: string): string {
+	const status = line.slice(0, 2).trim() || "M";
+	const path = line.slice(2).trim();
+	return path ? `${status} ${path}` : status;
+}
+
+/**
+ * 自动提交信息：首行标题（调用方给了就用它，否则按文件数生成），正文列出改动文件。
+ * files 为空返回空串 —— 调用方据此判定"没有需要提交的改动"。
+ * 注：默认标题用 chore 前缀，CHANGELOG 会归入"其他"；想要正确归类就传 `feat: ...` 这种标题。
+ */
+export function buildCommitMessage(input: {
+	files: string[];
+	subject?: string;
+	maxFiles?: number;
+}): string {
+	const files = (input.files ?? [])
+		.map((line) => String(line ?? "").trim())
+		.filter(Boolean);
+	if (files.length === 0) return "";
+
+	const max = input.maxFiles ?? DEFAULT_MAX_COMMIT_FILES;
+	const kept = files.slice(0, Math.max(0, max));
+	const dropped = files.length - kept.length;
+	const subject =
+		(input.subject ?? "").trim() || `chore: 同步改动（${files.length} 个文件）`;
+
+	const lines = [
+		subject,
+		"",
+		...kept.map((line) => `- ${formatStatusLine(line)}`),
+	];
+	if (dropped > 0) lines.push(`- 另有 ${dropped} 个文件未列出`);
+	return lines.join("\n");
+}
+
 /** 从 git remote 解析 owner/repo，支持 https 与 ssh、带或不带 .git 与尾斜杠 */
 export function parseRepoSlug(remoteUrl: string): string | null {
 	const url = (remoteUrl ?? "").trim();

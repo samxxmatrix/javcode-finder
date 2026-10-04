@@ -8,6 +8,7 @@ import {
 	PLAYBACK_LOAD_TIMEOUT_MS,
 	armPlayingOnFirstFrame,
 	getPreviewPresentation,
+	planDirectMp4Start,
 	transitionPreviewNotice,
 } from "../../../src/lib/preview-state";
 import {
@@ -21,7 +22,13 @@ import {
 	splitMergedTranslation,
 } from "../../../src/lib/translate";
 import type { LocaleMessages } from "../../../src/lib/locales";
-import { getSettings } from "../../../src/lib/settings";
+import { toExternalSearchCode } from "../../../src/lib/normalize-code";
+import {
+	configuredPlatforms,
+	getSettings,
+	platformInitial,
+	resolveSearchUrl,
+} from "../../../src/lib/settings";
 import type {
 	PreviewLookupError,
 	PreviewMedia,
@@ -384,6 +391,25 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		);
 	};
 
+	// 准备 `<video>` 播放 mp4 直链：预取完好就沿用（保住已缓冲的 moov），
+	// 失败/错误态则 load() 复位重拉。直链与 HLS 404 兜底直链共用，
+	// 避免两处各自漏掉复位 —— 那正是"重新播放"永远失败的根因（见 planDirectMp4Start）。
+	const prepareDirectMp4 = (
+		video: HTMLVideoElement,
+		url: string,
+		previousFailed: boolean,
+	) => {
+		const plan = planDirectMp4Start({
+			currentSrc: video.getAttribute("src"),
+			targetUrl: url,
+			elementHasError: video.error !== null,
+			previousAttemptFailed: previousFailed,
+		});
+		video.preload = "auto";
+		if (plan.assignSrc) video.src = url;
+		if (plan.reload) video.load();
+	};
+
 	// HLS 404 后的兜底（仅 javtrailers 源）：用详情页的 sample MP4 直连播放
 	const playFallbackTrailer = async (requestId: number) => {
 		const fb = await destroyHlsBefore(hlsRef, () =>
@@ -398,7 +424,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			setStatus("failed");
 			return;
 		}
-		video.src = fb.trailerUrl;
+		prepareDirectMp4(video, fb.trailerUrl, status === "failed");
 		setStatus("loading");
 		startPlayback(video, requestId);
 		void video.play().catch(() => {
@@ -422,11 +448,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setStatus("loading");
 		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 均为 mp4 直链)
 		if (isDirectMp4Source(media?.source) && trailerUrl) {
-			// 预取已设过同一地址就不重置（重置会丢掉已缓冲的 moov，白等一遍）
-			if (video.getAttribute("src") !== trailerUrl) {
-				video.src = trailerUrl;
-			}
-			video.preload = "auto";
+			// 预取地址可用就沿用不重置（重置会丢掉已缓冲的 moov，白等一遍）；
+			// 但同一地址 + 已失败/错误态必须 load() 复位，否则 play() 不会重新走资源选择，
+			// <video> 卡在错误态里，"重新播放"就永远失败（只有"重新加载预览"能救）。
+			prepareDirectMp4(video, trailerUrl, status === "failed");
 			startPlayback(video, requestId);
 			void video.play().catch(() => {
 				if (requestId === playbackRequestRef.current) setStatus("failed");
@@ -485,6 +510,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		destroyHlsInstance(hlsRef);
 		onClose();
 	};
+
+	// 头部的外部平台跳转按钮：显示规则与番号列表区共用 configuredPlatforms
+	// （名称 + 链接规则都配置才出现），正文取平台名首字符做成方形按钮。
+	// 跳转码用 toExternalSearchCode：FC2 番号外部平台只认 FC2-PPV-<数字> 写法。
+	const platforms = configuredPlatforms(getSettings());
+	const externalSearchCode = toExternalSearchCode(code);
 
 	// 短标题行：dmm 商品名，或 javtrailers/faleno/fc2 的标题（这三个源没有独立短标题字段）；
 	// 长标题行：仅 dmm 长文。来源判定统一走 preview-source.ts，避免新增源漏登记。
@@ -601,9 +632,33 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						</span>
 					)}
 				</h3>
+				{platforms.length > 0 && (
+					<div className="trailer-preview__actions">
+						{/* 外部平台跳转：方形按钮只放平台名首字符，全名与番号走 title/aria-label */}
+						{platforms.map((platform) => {
+							const label = `Search ${code} on ${platform.name}`;
+							return (
+								<a
+									key={platform.key}
+									className="trailer-preview__icon-btn"
+									href={resolveSearchUrl(
+										platform.template,
+										externalSearchCode,
+									)}
+									target="_blank"
+									rel="noopener noreferrer"
+									title={label}
+									aria-label={label}
+								>
+									{platformInitial(platform.name)}
+								</a>
+							);
+						})}
+					</div>
+				)}
 				<button
 					type="button"
-					className="trailer-preview__close"
+					className="trailer-preview__icon-btn trailer-preview__close"
 					onClick={handleClose}
 					title={t.closePreview}
 					aria-label={t.closePreview}

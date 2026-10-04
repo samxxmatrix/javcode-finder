@@ -7,10 +7,9 @@ import {
 	toExternalSearchCode,
 } from "../../../src/lib/normalize-code";
 import {
-	DEFAULT_SETTINGS,
+	configuredPlatforms,
 	getSettings,
 	resolveSearchUrl,
-	resolveSupjavUrl,
 } from "../../../src/lib/settings";
 import type { SupportedLocale } from "../../../src/lib/types";
 import { EmbyBadge } from "./EmbyBadge";
@@ -40,13 +39,12 @@ export const CodeList: React.FC<CodeListProps> = ({
 	if (candidates.length === 0) return null;
 
 	const settings = getSettings();
-	// 按钮显示名称来自配置，空值时回退默认名称
-	const supjavName = settings.supjavName || DEFAULT_SETTINGS.supjavName;
-	const javdbName = settings.javdbName || DEFAULT_SETTINGS.javdbName;
-	// 自定义平台无默认配置：名称与模板均非空才显示按钮
-	const customName = settings.customName.trim();
-	const customTemplate = settings.customTemplate.trim();
-	const showCustom = Boolean(customName && customTemplate);
+	// 平台清单走共享 helper（与预告片头部同一份显示规则）：名称与链接规则都配置了才出现
+	const platforms = configuredPlatforms(settings);
+	const supjav = platforms.find((platform) => platform.key === "supjav");
+	const javdb = platforms.find((platform) => platform.key === "javdb");
+	const custom = platforms.find((platform) => platform.key === "custom");
+	const showPlatformLinks = platforms.length > 0;
 	const [locateStates, setLocateStates] = useState<
 		Record<string, { status: "idle" | "success" | "not_found" }>
 	>({});
@@ -62,13 +60,10 @@ export const CodeList: React.FC<CodeListProps> = ({
 		}
 	}
 
-	// 直接按模板打开 supJAV 搜索页（无需解析）
+	// 直接按模板打开第一平台搜索页（无需解析）
 	const handleSupjavClick = async (code: string) => {
-		const url = resolveSupjavUrl(
-			settings.supjavTemplate,
-			toExternalSearchCode(code),
-			locale,
-		);
+		if (!supjav) return;
+		const url = resolveSearchUrl(supjav.template, toExternalSearchCode(code));
 		try {
 			await browser.tabs.create({ url });
 		} catch {
@@ -104,10 +99,9 @@ export const CodeList: React.FC<CodeListProps> = ({
 			<ul className="unmatched-section__list">
 				{uniqueCodes.map((code) => {
 					// 跳转码与显示码分离：FC2 番号外部平台只认 FC2-PPV-<数字> 写法
-					const javdbUrl = resolveSearchUrl(
-						settings.javbusTemplate,
-						toExternalSearchCode(code),
-					);
+					const javdbUrl = javdb
+						? resolveSearchUrl(javdb.template, toExternalSearchCode(code))
+						: "";
 					const locateState = locateStates[code] || { status: "idle" };
 
 					const isSelected = code === selectedCode;
@@ -164,39 +158,45 @@ export const CodeList: React.FC<CodeListProps> = ({
 									<EmbyBadge />
 								</span>
 							)}
-							<div className="unmatched-item__links">
-								<button
-									type="button"
-									className="unmatched-item__link unmatched-item__link--supjav"
-									title={`Search ${code} on ${supjavName}`}
-									onClick={() => handleSupjavClick(code)}
-								>
-									{supjavName}
-								</button>
-								<a
-									href={javdbUrl}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="unmatched-item__link unmatched-item__link--javdb"
-									title={`Search ${code} on ${javdbName}`}
-								>
-									{javdbName}
-								</a>
-								{showCustom && (
-									<a
-										href={resolveSearchUrl(
-											customTemplate,
-											toExternalSearchCode(code),
-										)}
-										target="_blank"
-										rel="noopener noreferrer"
-										className="unmatched-item__link unmatched-item__link--custom"
-										title={`Search ${code} on ${customName}`}
-									>
-										{customName}
-									</a>
-								)}
-							</div>
+							{showPlatformLinks && (
+								<div className="unmatched-item__links">
+									{supjav && (
+										<button
+											type="button"
+											className="unmatched-item__link unmatched-item__link--supjav"
+											title={`Search ${code} on ${supjav.name}`}
+											onClick={() => handleSupjavClick(code)}
+										>
+											{supjav.name}
+										</button>
+									)}
+									{javdb && (
+										<a
+											href={javdbUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											className="unmatched-item__link unmatched-item__link--javdb"
+											title={`Search ${code} on ${javdb.name}`}
+										>
+											{javdb.name}
+										</a>
+									)}
+									{custom && (
+										<a
+											href={resolveSearchUrl(
+												custom.template,
+												toExternalSearchCode(code),
+											)}
+											target="_blank"
+											rel="noopener noreferrer"
+											className="unmatched-item__link unmatched-item__link--custom"
+											title={`Search ${code} on ${custom.name}`}
+										>
+											{custom.name}
+										</a>
+									)}
+								</div>
+							)}
 						</li>
 					);
 				})}

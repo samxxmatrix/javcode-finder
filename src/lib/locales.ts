@@ -25,11 +25,11 @@ export interface LocaleMessages {
 	translateEnableLabel: string;
 	saveSettings: string;
 	resetDefaults: string;
+	saveHint: string;
 	searchCodePlaceholder: string;
 	searchCodeLabel: string;
 	settingsSaved: string;
 	backToScanner: string;
-	previewUrlLabel: string;
 	reloadPreview: string;
 	languageLabel: string;
 	languageAuto: string;
@@ -81,6 +81,7 @@ export interface LocaleMessages {
 	addFavorite: string;
 	removeFavorite: string;
 	cloudSyncLabel: string;
+	cloudSyncDesc: string;
 	webdavUrlPlaceholder: string;
 	webdavUserPlaceholder: string;
 	webdavPassPlaceholder: string;
@@ -131,7 +132,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     codesListTitle: "识别到的番号",
     settingsTitle: "搜索与跳转设置",
     settingsDesc:
-      "自定义外部平台跳转规则，支持 {code} 或 {番号} 占位符。设置永久保存在本地。",
+      "自定义外部平台跳转规则，支持 {code} 或 {番号} 占位符。设置永久保存在本地。示例效果预览 (以 ABP-123 为例)：https://example.com/search?q=ABP-123",
     platformNameLabel: "平台名称",
     platformUrlLabel: (name) => `${name} 链接规则`,
     customPlatformName: "自定义平台",
@@ -141,11 +142,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateEnableLabel: "启用翻译",
     saveSettings: "保存设置",
     resetDefaults: "恢复默认",
+    saveHint: "请保存 -->",
     searchCodePlaceholder: "输入番号",
     searchCodeLabel: "查询番号",
     settingsSaved: "设置已保存！",
     backToScanner: "返回扫描",
-    previewUrlLabel: "示例效果预览 (以 ABP-123 为例)：",
     reloadPreview: "重新加载预览",
     languageLabel: "界面语言",
     languageAuto: "跟随系统",
@@ -199,6 +200,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "云盘同步（WebDAV）",
+    cloudSyncDesc: "收藏的番号默认保存本地，也可同步到云盘",
     webdavUrlPlaceholder: "云盘地址，如 https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "用户名（邮箱）",
     webdavPassPlaceholder: "密码",
@@ -249,7 +251,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     codesListTitle: "識別到的番號",
     settingsTitle: "搜尋與跳轉設定",
     settingsDesc:
-      "自訂外部平台跳轉規則，支援 {code} 或 {番号} 佔位符。設定永久保存在本地。",
+      "自訂外部平台跳轉規則，支援 {code} 或 {番号} 佔位符。設定永久保存在本地。範例效果預覽 (以 ABP-123 為例)：https://example.com/search?q=ABP-123",
     platformNameLabel: "平台名稱",
     platformUrlLabel: (name) => `${name} 連結規則`,
     customPlatformName: "自訂平台",
@@ -259,11 +261,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateEnableLabel: "啟用翻譯",
     saveSettings: "儲存設定",
     resetDefaults: "恢復預設",
+    saveHint: "請儲存 -->",
     searchCodePlaceholder: "輸入番號",
     searchCodeLabel: "查詢番號",
     settingsSaved: "設定已儲存！",
     backToScanner: "返回掃描",
-    previewUrlLabel: "範例效果預覽 (以 ABP-123 為例)：",
     reloadPreview: "重新載入預覽",
     languageLabel: "介面語言",
     languageAuto: "跟隨系統",
@@ -318,6 +320,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "加入收藏",
     removeFavorite: "取消收藏",
     cloudSyncLabel: "雲端同步（WebDAV）",
+    cloudSyncDesc: "收藏的番號預設儲存本地，也可同步到雲端",
     webdavUrlPlaceholder: "雲端地址，如 https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "使用者名稱（信箱）",
     webdavPassPlaceholder: "密碼",
@@ -369,7 +372,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     codesListTitle: "Detected Codes",
     settingsTitle: "Search & Navigation Settings",
     settingsDesc:
-      "Customize external navigation rules. Supports {code} placeholder. Saved permanently in local storage.",
+      "Customize external navigation rules. Supports {code} placeholder. Saved permanently in local storage. Preview example (ABP-123): https://example.com/search?q=ABP-123",
     platformNameLabel: "Platform name",
     platformUrlLabel: (name) => `${name} URL Template`,
     customPlatformName: "Custom Platform",
@@ -379,11 +382,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateEnableLabel: "Enable Translation",
     saveSettings: "Save Settings",
     resetDefaults: "Reset Defaults",
+    saveHint: "Please save -->",
     searchCodePlaceholder: "Enter code",
     searchCodeLabel: "Search Code",
     settingsSaved: "Settings saved!",
     backToScanner: "Back to Scanner",
-    previewUrlLabel: "Preview URL (e.g. ABP-123):",
     reloadPreview: "Reload preview",
     languageLabel: "Language",
     languageAuto: "Follow Browser",
@@ -440,6 +443,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     addFavorite: "Add to favorites",
     removeFavorite: "Remove from favorites",
     cloudSyncLabel: "Cloud Sync (WebDAV)",
+    cloudSyncDesc:
+      "Favorites are saved locally by default; you can also sync them to your cloud drive",
     webdavUrlPlaceholder: "WebDAV URL, e.g. https://dav.jianguoyun.com/dav/",
     webdavUserPlaceholder: "Username (email)",
     webdavPassPlaceholder: "Password",

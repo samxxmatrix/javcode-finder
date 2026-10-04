@@ -1,27 +1,28 @@
 import React from "react";
+import {
+	EMBY_BADGE_GREEN_PATH,
+	EMBY_BADGE_VIEW_BOX,
+	EMBY_BADGE_WHITE_PATH,
+} from "../../../src/lib/emby-badge";
 
 /**
  * 「已在 Emby 库中」标识：绿色星形 + 白色播放三角，纯标识、不可点击。
  * 第二条 path 含两个子路径（星形外框 + 播放三角），三角子路径绕向与星形相反；
  * 因此 nonzero 与 evenodd 都会把三角挖空，显式写 evenodd 只是自证意图、对未来改动更稳。
  * viewBox 裁到图形实际外接框（155→869），16px 下才与收藏书签视觉等大。
+ *
+ * path 与 viewBox 来自 src/lib/emby-badge.ts —— 目标页黄点的 Emby 图标用同一份常量
+ * （那边是字符串注入），改图标只改一处，不会出现面板与页面两个形状。
  */
 export const EmbyBadge: React.FC = () => (
 	<svg
 		className="emby-badge"
-		viewBox="155 155 714 714"
+		viewBox={EMBY_BADGE_VIEW_BOX}
 		width="16"
 		height="16"
 		aria-hidden="true"
 	>
-		<path
-			d="M385.60768 361.14432h292.64896v296.27392H385.60768z"
-			fill="#FFFFFF"
-		/>
-		<path
-			fillRule="evenodd"
-			fill="#06B831"
-			d="M476.30336 155.01312L297.80992 333.50656l35.69664 35.69664-178.49344 178.49344 178.49344 178.49344 35.69664-35.69664 178.49344 178.49344 178.49344-178.49344-35.69664-35.69664 178.49344-178.49344-178.49344-178.49344-35.69664 35.69664-178.49344-178.49344m-35.69664 232.0384L654.7968 512 440.60672 636.94848V387.06176z"
-		/>
+		<path d={EMBY_BADGE_WHITE_PATH} fill="#FFFFFF" />
+		<path fillRule="evenodd" fill="#06B831" d={EMBY_BADGE_GREEN_PATH} />
 	</svg>
 );

@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
 	applyVersion,
 	buildChangelogEntry,
+	buildCommitMessage,
 	buildVersionAsset,
 	computeNextVersion,
 	groupCommits,
+	parseCommitArgs,
+	parseReleaseArgs,
 	parseRepoSlug,
 	prependChangelogEntry,
 } from "../scripts/release-lib.ts";
@@ -164,5 +167,96 @@ describe("prependChangelogEntry", () => {
 		expect(second.match(/# Changelog/g)).toHaveLength(1);
 		expect(second).toContain("- a");
 		expect(second).toContain("- b");
+	});
+});
+
+describe("parseReleaseArgs", () => {
+	it("defaults to a patch bump with push enabled", () => {
+		expect(parseReleaseArgs([])).toEqual({
+			spec: "patch",
+			push: true,
+			dryRun: false,
+			skipChecks: false,
+		});
+	});
+
+	it("takes one positional argument as the version spec", () => {
+		expect(parseReleaseArgs(["minor"]).spec).toBe("minor");
+		expect(parseReleaseArgs(["2.1.0"]).spec).toBe("2.1.0");
+		// 多余的位置参数忽略（只有第一个生效）
+		expect(parseReleaseArgs(["major", "minor"]).spec).toBe("major");
+	});
+
+	it("understands the flags in any position", () => {
+		expect(parseReleaseArgs(["--dry-run"])).toEqual({
+			spec: "patch",
+			push: true,
+			dryRun: true,
+			skipChecks: false,
+		});
+		expect(parseReleaseArgs(["2.1.0", "--no-push"]).push).toBe(false);
+		expect(parseReleaseArgs(["--skip-checks", "--dry-run"]).skipChecks).toBe(
+			true,
+		);
+		// --push 保留兼容：默认已是推送，显式给出不改变结果
+		expect(parseReleaseArgs(["--push"]).push).toBe(true);
+		// 同时给出时以 --no-push 为准
+		expect(parseReleaseArgs(["--push", "--no-push"]).push).toBe(false);
+	});
+});
+
+describe("parseCommitArgs", () => {
+	it("returns no message and no dry-run by default", () => {
+		expect(parseCommitArgs([])).toEqual({ message: undefined, dryRun: false });
+	});
+
+	it("takes one positional argument as the commit subject", () => {
+		expect(parseCommitArgs(["fix: 修正重播失败"])).toEqual({
+			message: "fix: 修正重播失败",
+			dryRun: false,
+		});
+		expect(parseCommitArgs(["fix: x", "--dry-run"])).toEqual({
+			message: "fix: x",
+			dryRun: true,
+		});
+		expect(parseCommitArgs(["--dry-run", "fix: x"]).dryRun).toBe(true);
+	});
+});
+
+describe("buildCommitMessage", () => {
+	it("returns an empty string when there is nothing to commit", () => {
+		expect(buildCommitMessage({ files: [] })).toBe("");
+		expect(buildCommitMessage({ files: ["", "  "] })).toBe("");
+	});
+
+	it("auto-summarizes the file count and lists files with their status", () => {
+		const message = buildCommitMessage({
+			files: [" M src/lib/a.ts", "?? test/b.test.ts", "A  entrypoints/c.tsx"],
+		});
+		const [subject, , ...lines] = message.split("\n");
+		expect(subject).toBe("chore: 同步改动（3 个文件）");
+		expect(lines).toEqual([
+			"- M src/lib/a.ts",
+			"- ?? test/b.test.ts",
+			"- A entrypoints/c.tsx",
+		]);
+	});
+
+	it("uses a caller-supplied subject verbatim", () => {
+		const message = buildCommitMessage({
+			files: [" M src/lib/a.ts"],
+			subject: "fix: 修正重播失败",
+		});
+		expect(message.split("\n")[0]).toBe("fix: 修正重播失败");
+		expect(message).toContain("- M src/lib/a.ts");
+	});
+
+	it("caps the listed files and reports how many were left out", () => {
+		const files = Array.from({ length: 25 }, (_, i) => ` M file-${i}.ts`);
+		const message = buildCommitMessage({ files, maxFiles: 20 });
+		expect(message).toContain("- M file-19.ts");
+		expect(message).not.toContain("file-20.ts");
+		expect(message).toContain("另有 5 个文件未列出");
+		expect(message.split("\n")[0]).toBe("chore: 同步改动（25 个文件）");
 	});
 });
