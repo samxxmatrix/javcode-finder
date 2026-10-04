@@ -34,9 +34,12 @@ const USAGE =
 	"用法: npm run release <patch|minor|major|x.y.z> [--push] [--dry-run] [--skip-checks]";
 
 function sh(command: string, args: string[]): string {
+	// stderr 丢弃：这里都是"探测型"调用（如 git describe 在没有 tag 时会失败），
+	// 失败由 trySh 兜住，不该把 noise 打到用户终端
 	return execFileSync(command, args, {
 		cwd: ROOT,
 		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
 		shell: IS_WINDOWS,
 	}).trim();
 }
