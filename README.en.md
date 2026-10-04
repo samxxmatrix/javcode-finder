@@ -11,7 +11,7 @@ JavCode Finder scans the current page for video codes when you click the toolbar
 
 ## Install on Chrome or Edge
 
-1. Download the Chromium ZIP from [GitHub Releases](https://github.com/aizhimou/javranking-extension/releases).
+1. Download the Chromium ZIP from [GitHub Releases](https://github.com/samxxmatrix/javcode-finder/releases).
 2. Unzip it into a folder you will keep.
 3. Open `chrome://extensions` or `edge://extensions`.
 4. Enable **Developer mode**, choose **Load unpacked**, and select the folder containing `manifest.json`.

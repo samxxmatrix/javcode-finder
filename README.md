@@ -11,7 +11,7 @@ JavCode Finder 会在你主动点击浏览器工具栏图标后，识别当前�
 
 ## 安装 Chrome 或 Edge 版本
 
-1. 从 [GitHub Releases](https://github.com/aizhimou/javranking-extension/releases) 下载 Chromium ZIP。
+1. 从 [GitHub Releases](https://github.com/samxxmatrix/javcode-finder/releases) 下载 Chromium ZIP。
 2. 将 ZIP 解压到会保留的本地文件夹。
 3. 打开 `chrome://extensions` 或 `edge://extensions`。
 4. 开启 **Developer mode**，选择 **Load unpacked**，再选择包含 `manifest.json` 的解压文件夹。
