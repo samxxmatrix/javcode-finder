@@ -165,8 +165,12 @@ if (dryRun) {
 
 // ---- 3. 检查 ----
 if (!skipChecks) {
-	run(NPM, ["test"]);
-	run(NPM, ["run", "compile"]);
+	try {
+		run(NPM, ["test"]);
+		run(NPM, ["run", "compile"]);
+	} catch {
+		fail("测试或类型检查未通过，已中止（此时未改动任何文件）");
+	}
 }
 
 // ---- 4~6. 改版本、写 CHANGELOG、打包、校验、生成资产 ----
@@ -221,9 +225,20 @@ try {
 }
 
 // ---- 7. 提交 + 打 tag ----
-run("git", ["add", "package.json", "CHANGELOG.md"]);
-run("git", ["commit", "-m", `chore: 版本号 ${current} -> ${next}`]);
-run("git", ["tag", `v${next}`]);
+try {
+	run("git", ["add", "package.json", "CHANGELOG.md"]);
+	run("git", ["commit", "-m", `chore: 版本号 ${current} -> ${next}`]);
+	run("git", ["tag", `v${next}`]);
+} catch {
+	fail(
+		[
+			"git 提交或打 tag 失败（见上方 git 输出）。",
+			`若 tag v${next} 已存在，删掉后重试：git tag -d v${next}`,
+			"package.json 与 CHANGELOG.md 已改好，也可以自行提交：",
+			`  git add package.json CHANGELOG.md && git commit -m "chore: 版本号 ${current} -> ${next}" && git tag v${next}`,
+		].join("\n"),
+	);
+}
 info(`✓ 已提交并打 tag v${next}`);
 
 // ---- 8. 推送 / 建 Release ----
