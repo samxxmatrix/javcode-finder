@@ -317,18 +317,20 @@ describe("extractCandidatesInTab", () => {
 	});
 
 	// 排除模式的口径（Task 15 复核发现两路口径不一致后对齐，此前只靠 buildUncensoredRules 的
-	// trim "兜住"）：模块端是 `(excludeRegex || "").trim()`，纯空白 = 不排除；注入副本原来是
-	// 直接 `new RegExp(uncensored.exclude)`，纯空白模式会把含连续空格的候选误排除。
-	// 这里**绕开 buildUncensoredRules**（它会把纯空白 trim 成 ""）手工造快照，才观测得到该分支。
-	it("排除正则吃的是 trim 后的模式：纯空白 = 不排除（与模块端逐字同口径）", () => {
-		stubPage("無修正 HEYZO-3953 ABC   123");
+	// trim "兜住"）：模块端是 `(excludeRegex || "").trim()`，注入副本原来是直接
+	// `new RegExp(uncensored.exclude)`。差别只在"模式自带首尾空白"时可见（生产路径上
+	// buildUncensoredRules 已 trim，所以这是**防御性**对齐）——这里手工造快照绕开它才观测得到。
+	// ⚠️ 靶子必须放在**无码侧**：排除正则只对判定为无码的候选执行，有修正侧的候选不会经过 isExcluded。
+	it("排除模式口径与模块端一致：模式自身先 trim（前导空白不应让排除失效）", () => {
+		stubPage("無修正 HEYZO-3953 ABC-456");
 		const rules: UncensoredRules = {
 			...buildUncensoredRules(""),
-			exclude: "   ",
+			exclude: "  ^HEYZO-",
 		};
+		// 模块端口径 ⇒ trim 成 `^HEYZO-` ⇒ HEYZO-3953 被排除，只剩有修正侧的 ABC-456；
+		// 副本若不 trim ⇒ `new RegExp("  ^HEYZO-")` 永不命中 ⇒ HEYZO-3953 留在列表里（假绿）。
 		expect(injectedExtract(DEFAULT_CODE_REGEX, rules).candidates).toEqual([
-			"HEYZO-3953",
-			"ABC   123",
+			"ABC-456",
 		]);
 	});
 });

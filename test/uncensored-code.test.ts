@@ -466,15 +466,18 @@ describe("mergeCandidateLists", () => {
 	});
 
 	// trim 语义的网（Task 15 复核实测：`keyOf` 去掉 `.trim()` 时既有用例 **0 条变红**）。
-	// 两路的键必须"trim 后同口径"：否则同一个号只因为一边带首尾空白就会被当成两个号留下来。
-	it("去重键 trim 后同口径：带首尾空白的同一个号只留一条（取无码那一次）", () => {
+	// 它守的是"被排除的无码候选也进 key 集合，且**与入选判定同用 trim 口径**"：
+	// 否则同一个号只因无码侧多带首尾空白就会从有修正那一路复活。
+	// ⚠️ 靶子必须是**被排除**的无码候选：没被排除时它就在 `winners` 里，挡住有修正侧的是
+	// `winners.has(key)`，与 `keyOf` 内部 trim 无关（第一版用例正是这样漏掉的，M-β 实测 0 红）。
+	it("被排除的双命中号不因首尾空白而复活：key 集合与入选判定同用 trim 口径", () => {
 		expect(
 			mergeCandidateLists(
-				[{ text: "abp-123", index: 30 }],
-				[{ text: "  ABP-123  ", index: 10 }],
-				"",
+				[{ text: "heyzo-3953", index: 30 }],
+				[{ text: "  HEYZO-3953  ", index: 10 }],
+				"^HEYZO-",
 			),
-		).toEqual(["ABP-123"]);
+		).toEqual([]);
 	});
 });
 
