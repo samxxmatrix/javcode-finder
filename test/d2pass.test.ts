@@ -54,17 +54,15 @@ describe("parseD2passLookupResponse", () => {
 	});
 
 	it("不映射 actress 与 class（面板不展示这两项）", () => {
+		// 判据：意图断言「不产出 actress/class」，而不是逐字段比对键集合。
+		// 逐字段比对（Object.keys 精确 7 项）的独有价值只有"抓值被显式赋成 undefined
+		// 的多余字段"，代价却是给 D2passLookupData 加任何合法字段都会误报红；
+		// not.toHaveProperty 对 { actress: undefined } 这种显式赋 undefined 仍会失败，
+		// 独有价值不丢，对不存在的键正常通过。
 		const parsed = parseD2passLookupResponse(full);
 		expect(parsed).not.toBeNull();
-		expect(Object.keys(parsed as object).sort()).toEqual([
-			"code",
-			"coverUrl",
-			"detailUrl",
-			"previewType",
-			"previewUrl",
-			"shortTitle",
-			"title",
-		]);
+		expect(parsed).not.toHaveProperty("actress");
+		expect(parsed).not.toHaveProperty("class");
 	});
 
 	it("cover_url_alt 是协议相对地址时补 https:", () => {
@@ -147,6 +145,61 @@ describe("parseD2passLookupError", () => {
 			status: 502,
 		});
 	});
+
+	it("矛盾组合（404 + 50301 SOURCE_UNAVAILABLE）取 fail-safe 方向：api 而非 not_found", () => {
+		// 守 d2pass.ts:82-84 的不变量：api（故障）优先于 not_found（查无）。
+		// 判成 not_found 会让上游不写 errors、不置 failed，落进"此号无预告片"终态并负缓存，
+		// 源站恢复也不重查；还会诱导路由退到分隔符兄弟番号。
+		const result = parseD2passLookupError(404, {
+			code: 50301,
+			error: "SOURCE_UNAVAILABLE",
+			message: "Upstream unavailable.",
+		});
+		expect(result.kind).toBe("api");
+		expect(result.kind).not.toBe("not_found");
+	});
+
+	it("矛盾组合（503 + 40401 ITEM_NOT_FOUND）取 fail-safe 方向：api 而非 not_found", () => {
+		// 反方向同样必须钉住：变异实验显示"只留 code === 40401"这类改法在单向下仍全绿，
+		// 只测一个方向不足以守住判定顺序。
+		const result = parseD2passLookupError(503, {
+			code: 40401,
+			error: "ITEM_NOT_FOUND",
+			message: "Item not found.",
+		});
+		expect(result.kind).toBe("api");
+		expect(result.kind).not.toBe("not_found");
+	});
+
+	it("响应体不是 JSON（body = null）时只能靠状态码分类", () => {
+		// 生产承重：Task 12 的 lookupD2pass 在 body 解析失败时传 data = null，
+		// 此时分类只能靠状态码，这三条是唯一防线。
+		expect(parseD2passLookupError(404, null).kind).toBe("not_found");
+		expect(parseD2passLookupError(403, null).kind).toBe("api");
+		expect(parseD2passLookupError(503, null).kind).toBe("api");
+	});
+
+	it("状态码不在表里但 error 字符串命中接口错误表时仍是 api", () => {
+		// 零覆盖补网：例如代理把 503 的响应体配成 502 时，error 字符串是唯一防线。
+		const result = parseD2passLookupError(502, {
+			error: "SOURCE_UNAVAILABLE",
+		});
+		expect(result.kind).toBe("api");
+	});
+
+	it("code 的 number 与 string 两种写法都识别为接口错误", () => {
+		// 接口契约里 code 恒为 number，但实现同时收字符串形式；
+		// 既然收两种写法就把它钉住（50001 的字符串形式原先无覆盖）。
+		for (const code of [40101, 40301, 42901, 50301, 50001]) {
+			expect(parseD2passLookupError(500, { code }).kind).toBe("api");
+			expect(parseD2passLookupError(500, { code: `${code}` }).kind).toBe("api");
+		}
+	});
+
+	it("status 0 最优先：网络错误不能被响应体里的 code 伪装成查无", () => {
+		// 判定顺序里 status === 0 排在 apiLike / notFound 之前，这条钉住该优先级。
+		expect(parseD2passLookupError(0, { code: 40401 }).kind).toBe("network");
+	});
 });
 
 describe("readD2passLookupResponse", () => {
@@ -203,5 +256,21 @@ describe("readD2passLookupResponse", () => {
 			error: "SOURCE_UNAVAILABLE",
 			message: "Upstream unavailable.",
 		});
+	});
+
+	it("200 + 40401 ITEM_NOT_FOUND 的早退响应体按查无返回 null（不抛错）", async () => {
+		// 守读取层的 not_found 守卫（`if (apiError.kind !== "not_found")`）：
+		// 把它改成 `if (true)` 时只有这条会变红。同时是分类顺序改动的安全网 ——
+		// 40401 命中 notFound 但不命中 apiLike，改成 api 优先后仍应返回 null。
+		await expect(
+			readD2passLookupResponse({
+				status: 200,
+				json: async () => ({
+					code: 40401,
+					error: "ITEM_NOT_FOUND",
+					message: "Item not found.",
+				}),
+			}),
+		).resolves.toBeNull();
 	});
 });

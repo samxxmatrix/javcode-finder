@@ -36,9 +36,19 @@ export interface D2passLookupErrorData {
 }
 
 /**
- * 取封面并在需要时补全协议：`cover_url_alt` 是源站 og:image，
- * 可能是协议相对地址（`//www.heyzo.com/...`）；不补 `https:` 的话
+ * 补全协议相对封面地址：`//www.heyzo.com/...`；不补 `https:` 的话
  * 面板会把它解析成 `chrome-extension://...` 而加载失败。
+ *
+ * 归因：会漏出未归一值的是 **bifrost JSON 路径**
+ * （`docs/d2pass-api/api/lib/sites.js:396` 的 `coverAlt: j.ThumbHigh || j.MovieThumb || null`
+ * 完全不做协议处理）；`:427` 的 `coverAlt: coverFromHtml(page.text)` 上游已经归一过了。
+ *
+ * 适用边界：本函数只处理位置 0 的 `//`，**不**把 `http://` 升级成 `https://`
+ * —— 上游 `coverFromHtml`（`:282-283`）会升级，此处是有意为之的真子集，
+ * 只兜住会导致面板加载失败的那一种形态。
+ *
+ * 作用范围：`cover_url` 与 `cover_url_alt` 都走这里；
+ * `preview_url` / `d2pass_url` **不**做此处理（由服务端模板保证绝对 https）。
  */
 function normalizeCoverUrl(value: unknown): string | null {
 	if (typeof value !== "string" || !value) return null;
@@ -79,11 +89,15 @@ export function parseD2passLookupResponse(
 
 /**
  * 归一化 D2PASS 的失败响应：
+ * - `status` 为 0 → `network`：网络层错误最先判，不能被响应体里的 code 伪装成查无
+ * - `status` 在 401/403/429/503 之一、或 `code`/`error` 命中接口错误表 ⇒ `api`
+ *   （`503 SOURCE_UNAVAILABLE`：源站**无法定性**，必须保留在 errors、绝不降级成查无，
+ *   否则会落进"此号无预告片"的终态，源站恢复后也不会重查）
  * - `404 ITEM_NOT_FOUND`（含带 class 的早退响应）→ `not_found`：确认查无，不进 errors
- * - `503 SOURCE_UNAVAILABLE` → `api`：源站**无法定性**，必须保留在 errors、绝不降级成查无
- *   （否则会落进"此号无预告片"的终态，源站恢复后也不会重查）
- * - `401` / `403` / `429` → `api`：带 code/message，界面直接展示（提示检查 Key）
- * - 其余非 2xx → `http`（沿用 DMM 源口径）；status 0 → `network`
+ * - 其余非 2xx（含裸 500）→ `http`，沿用 DMM 源口径
+ *
+ * `api`（故障）排在 `not_found`（查无）之前是本模块的不变量：矛盾组合
+ * （如 503 + `code 40401`、404 + `code 50301`）一律取故障方向。
  */
 export function parseD2passLookupError(
 	status: number,
@@ -127,10 +141,10 @@ export function parseD2passLookupError(
 		kind:
 			status === 0
 				? "network"
-				: notFound
-					? "not_found"
-					: apiLike
-						? "api"
+				: apiLike
+					? "api"
+					: notFound
+						? "not_found"
 						: status >= 200 && status < 300
 							? "api"
 							: "http",
