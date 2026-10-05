@@ -5,6 +5,7 @@ import {
 	parseSearchPageHtml,
 } from "../src/lib/javtrailers";
 import {
+	buildD2passLookupUrl,
 	buildDmmHealthUrl,
 	buildDmmLookupUrl,
 	buildFalenoLookupUrl,
@@ -14,6 +15,12 @@ import {
 	type DmmLookupData,
 } from "../src/lib/dmm";
 import { normalizeLookupError, resolvePreview } from "../src/lib/resolve-preview";
+import {
+	parseD2passLookupError,
+	readD2passLookupResponse,
+	type D2passLookupData,
+} from "../src/lib/d2pass";
+import { isUncensoredCode } from "../src/lib/uncensored-code";
 import {
 	buildFc2DetailUrl,
 	buildFc2EmbedUrl,
@@ -100,15 +107,21 @@ const PROXY_LOOKUP_FIRST_TIMEOUT_MS = 8000;
 const PROXY_LOOKUP_RETRY_TIMEOUT_MS = 5000;
 const PROXY_LOOKUP_ATTEMPTS = 2;
 
-/** 反代查询统一入口：首次 8 s，失败后重试一次（5 s） */
-const fetchProxyWithRetry = (url: string): Promise<Response> =>
+// D2PASS 单独放宽首次超时：接口整链预算 12 s（冷查询实测 1.4-2.6 s、最坏 12 s），
+// 而无码号在 JavTrailers / FALENO 上必然查不到、后面没有可用兜底 ——
+// 8 s 截断等于直接拿不到结果。代价是慢查询时面板最多多等 4 s。
+const D2PASS_FIRST_TIMEOUT_MS = 12000;
+
+/** 反代查询统一入口：首次 8 s（D2PASS 传 12 s），失败后重试一次（5 s） */
+const fetchProxyWithRetry = (
+	url: string,
+	firstTimeoutMs: number = PROXY_LOOKUP_FIRST_TIMEOUT_MS,
+): Promise<Response> =>
 	withRetry(
 		(attempt) =>
 			fetch(url, {
 				signal: AbortSignal.timeout(
-					attempt === 1
-						? PROXY_LOOKUP_FIRST_TIMEOUT_MS
-						: PROXY_LOOKUP_RETRY_TIMEOUT_MS,
+					attempt === 1 ? firstTimeoutMs : PROXY_LOOKUP_RETRY_TIMEOUT_MS,
 				),
 			}),
 		{ attempts: PROXY_LOOKUP_ATTEMPTS },
@@ -568,6 +581,9 @@ export default defineBackground(() => {
 					dmmApiUrl?: string;
 					dmmApiKey?: string;
 					dmmEnabled?: boolean;
+					d2passApiUrl?: string;
+					d2passApiKey?: string;
+					d2passEnabled?: boolean;
 					falenoPrefixes?: string[];
 				};
 
@@ -967,6 +983,48 @@ export default defineBackground(() => {
 					}
 				};
 
+				// D2PASS 反代查询：GET {base}/{code}?key={key}，与 DMM 同一入口（东京出口 + 永久缓存）。
+				// 唯一区别是首次超时放宽到 12 s（见 D2PASS_FIRST_TIMEOUT_MS）。
+				const lookupD2pass = async (
+					baseUrl: string,
+					key: string,
+					code: string,
+				): Promise<D2passLookupData | null> => {
+					let res: Response;
+					try {
+						res = await fetchProxyWithRetry(
+							buildD2passLookupUrl(baseUrl, key, code),
+							D2PASS_FIRST_TIMEOUT_MS,
+						);
+					} catch (error) {
+						throw {
+							source: "d2pass",
+							kind:
+								error instanceof Error && error.name === "TimeoutError"
+									? "timeout"
+									: "network",
+							status: 0,
+						} satisfies PreviewLookupError;
+					}
+
+					// 404 = 确认查无（接口侧连缓存都不写），按查无返回、链继续
+					if (!res.ok) {
+						let data: unknown = null;
+						try {
+							data = await res.json();
+						} catch {
+							// 响应体不是 JSON 时仅用状态码
+						}
+						const parsed = parseD2passLookupError(res.status, data);
+						if (parsed.kind === "not_found") return null;
+						throw {
+							source: "d2pass",
+							...parsed,
+						} satisfies PreviewLookupError;
+					}
+					return readD2passLookupResponse(res);
+				};
+
 				// 详情页兜底：主媒体服务 404 时，从详情页提取 mgstage 封面与 sample MP4
 				if (msg?.type === "jt:resolve-fallback") {
 					const contentId = (msg.contentId || "").trim();
@@ -1117,7 +1175,30 @@ export default defineBackground(() => {
 
 					const dmmBase = (msg.dmmApiUrl || "").trim();
 					const dmmKey = (msg.dmmApiKey || "").trim();
+					const d2passBase = (msg.d2passApiUrl || "").trim();
+					const d2passKey = (msg.d2passApiKey || "").trim();
+					// 无码链首只在开关打开、地址与 Key 齐备、且番号是无码形态时启用；
+					// 有码号（IPX-118 等）照旧直接走 DMM → JavTrailers → FALENO
+					const d2passOn =
+						msg.d2passEnabled === true &&
+						Boolean(d2passBase && d2passKey) &&
+						isUncensoredCode(code);
 					const resolution = await resolvePreview({
+						d2passEnabled: d2passOn,
+						d2passLookup: async () => {
+							const hit = await lookupD2pass(d2passBase, d2passKey, code);
+							if (!hit) return null;
+							return {
+								source: "d2pass",
+								detailUrl: hit.detailUrl,
+								contentId: hit.code,
+								title: hit.title,
+								shortTitle: hit.shortTitle,
+								coverUrl: hit.coverUrl,
+								previewUrl: hit.previewUrl,
+								previewType: hit.previewType ?? "mp4",
+							} satisfies PreviewMedia;
+						},
 						dmmEnabled:
 							msg.dmmEnabled === true && Boolean(dmmBase && dmmKey),
 						dmmLookup: async () => {
