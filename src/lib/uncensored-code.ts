@@ -2,18 +2,22 @@
  * 无码番号识别（两层匹配器）。纯函数、不碰 DOM：页面文本由调用方传入。
  *
  * 规则来源：docs/browser-extension.md:74-99
- *   T1 强特征（任何页面启用）：日期型 / HEYZO / 3dw / hitozuma / 零填充 5 位
- *   T2 弱特征（全页命中锚点表才启用）：ori|gol / les / n / 两段数字型
+ *   T1 强特征（任何页面启用，5 条）：日期型 / HEYZO / 3dw / hitozuma / 零填充 5 位
+ *   T2 弱特征（全页命中锚点表才启用，5 条）：ori|gol / les / n / 两段数字型（`-` 或 `/` / `-` 或 `_`）
+ *   共 **10 条**正则：源文档表格是 8 行，其中一行含 3 个备选
  *   锚点表：18 家站名与域名 + 無修正 / 無碼 / 无码 / uncensored
- *   去重①：长匹配优先（被更长匹配完整包含的短匹配丢弃）
+ *   去重①：长匹配优先（被更长匹配完整包含的短匹配丢弃；唯一可达形态是 `04684` ⊂ `04684-4229`
+ *          ——没有任何规则匹配裸 4 位数字，`4229-2960` 丢掉 `4229`/`2960` 那种写法不可达）
  *   去重②：锚点自带数字排除（エッチな0930 的 0930、h4610 的 4610、av9898 的 9898）
  * 实测口径（同文档 :101-108）：裸番号 10/11 命中；带锚点弱形态 4/4；噪音 28 条 + URL 路径片段 3 条
  * 0 误报（另有 2 条 URL 形态接受为残留：`img/04684/01` 的 `04684`、`ID:12345/678`——
  * 它们与真实番号/写法在文本上不可区分，收紧断言会变成漏报，见 test 里的专门用例）。
  *
- * ⚠️ 注入端（src/lib/extract-codes.ts 的 extractCandidatesInTab）由 executeScript 序列化后在
- * 页面里执行，import 不跟随注入，所以那边按 UNCENSORED_RULES 这份数据自包含实现了同一套引擎。
- * 两条路径的一致性由 test/extract-codes.test.ts 的交叉验证用例守住。
+ * ⚠️ 注入端：src/lib/extract-codes.ts 的 extractCandidatesInTab 由 executeScript 序列化后在页面里
+ * 执行，import 不跟随注入，所以那边**计划**（计划 Task 9，**HEAD 上尚未落地**）按 UNCENSORED_RULES
+ * 这份数据自包含实现同一套引擎，一致性由 test/extract-codes.test.ts 的交叉验证用例守住。
+ * 这两处落地之前，本注释不得写成"已实现"：HEAD 上的 extract-codes.ts 仍是旧实现、
+ * extract-codes.test.ts 里也没有交叉验证用例。
  */
 
 import { isValidRegex } from "./settings";
@@ -32,66 +36,121 @@ export interface UncensoredRules {
 	exclude: string;
 }
 
-export const UNCENSORED_RULES: UncensoredRules = {
+/** 锚点分组：一家加盟站 = 站名 + 域名 */
+export interface AnchorGroup {
+	/** 站名（中日文写法；判定时大小写不敏感地做子串包含） */
+	name: string;
+	/** 源站域名（判定是大小写不敏感的子串包含，多数按原锚点写裸域名；与站名大小写重复的写全域名，见下面注释） */
+	domains: string[];
+}
+
+/**
+ * 18 家加盟站（docs/d2pass-api接口文档.md §5 的 18 行，一家一条）。
+ * **按家分组**而不是拉平成一串：新增一家站只动这一处，下面三条防漂移断言
+ * （家数 = 18、锚点表无大小写重复、域名里的 4 位数字必须已列进 anchorNumbers）才有结构可挂。
+ * 对外/注入载荷形状不变：`UncensoredRules.anchors` 仍是拉平后的 `string[]`。
+ */
+export const ANCHOR_GROUPS: readonly AnchorGroup[] = [
+	{ name: "Hey動画", domains: ["heydouga"] },
+	{ name: "女体のしんぴ", domains: ["nyoshin"] },
+	{ name: "カリビアンコム", domains: ["caribbeancom"] },
+	{ name: "カリビアンコムプレミアム", domains: ["caribbeancompr"] },
+	{ name: "一本道", domains: ["1pondo"] },
+	{ name: "天然むすめ", domains: ["10musume"] },
+	// 域名写全 `heyzo.com`：判定大小写不敏感，`heyzo` 恒等于站名 `HEYZO`，写裸域名就是死数据
+	{ name: "HEYZO", domains: ["heyzo.com"] },
+	{ name: "ピッカー", domains: ["pikkur"] },
+	{ name: "パコパコママ", domains: ["pacopacomama"] },
+	// 同上：站名恒等于裸域名，域名按源文档 §5 写全（也是 anchorNumbers 里 `9898` 的来处）
+	{ name: "av9898", domains: ["av9898.heydouga.com"] },
+	{ name: "金髪天國", domains: ["kin8tengoku"] },
+	{ name: "エロックスジャパン", domains: ["eroxjapanz"] },
+	{ name: "ムラムラ", domains: ["muramura"] },
+	{ name: "エッチな4610", domains: ["h4610"] },
+	{ name: "エッチな0930", domains: ["h0930"] },
+	{ name: "人妻斬り", domains: ["c0930"] },
+	{ name: "うんこたれ", domains: ["unkotare"] },
+	{ name: "3d-eros", domains: ["3d-eros.net", "3dw"] },
+];
+
+/** 无码语境词：不属任何加盟站，单独一组 */
+const CONTEXT_ANCHORS: string[] = ["無修正", "無碼", "无码", "uncensored"];
+
+/**
+ * 冻结一组字符串：`Object.freeze` 的类型是 `readonly string[]`，而对外/注入载荷形状要保住
+ * `string[]`（消费者与注入端都按可变数组用），所以这里用一处显式断言换回可变类型。
+ * 运行时确实已冻结：ESM 恒为严格模式，写入会抛 TypeError（测试里钉住了这一点）。
+ */
+function freezeItems(items: string[]): string[] {
+	return Object.freeze(items) as string[];
+}
+
+/** 冻结整份规则表（对象 + 四个数组）：它是唯一数据源，不能被消费者 push 一下改掉。 */
+function freezeRules(rules: UncensoredRules): UncensoredRules {
+	return Object.freeze({
+		t1: freezeItems(rules.t1),
+		t2: freezeItems(rules.t2),
+		anchors: freezeItems(rules.anchors),
+		anchorNumbers: freezeItems(rules.anchorNumbers),
+		exclude: rules.exclude,
+	});
+}
+
+export const UNCENSORED_RULES: UncensoredRules = freezeRules({
+	// 每条规则上方一行注释 = 它挡什么（边界断言 + 具体形态），下面的噪音语料表按这些名字点名。
 	t1: [
+		// 日期型：月日校验（01–12 / 01–31）是主要防线；尾断言挡 `100426-00123`（超 4 位的尾巴不截断），
+		// 前边界挡"嵌在更长数字串里"的日期型（`1100426-001`、`v1.100426-001`）
 		String.raw`(?<![\d._])(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{2}[-_]\d{2,4}(?![\d])`,
+		// HEYZO：前边界挡字母/数字粘连（`SHEYZO-3953`），尾断言挡 `HEYZO-395312` 这类截断
 		String.raw`(?<![A-Z0-9])HEYZO[-_ ]?\d{3,5}(?![\d])`,
+		// 3dw：前边界挡字母/数字粘连（`x3dw-315`），尾断言挡 `3dw-31555`
 		String.raw`(?<![A-Z0-9])3dw[-_]\d{3,4}(?![\d])`,
+		// hitozuma：前边界挡字母/数字粘连（`xhitozuma1579`），尾断言挡 `hitozuma157912`
 		String.raw`(?<![A-Z0-9])hitozuma\d{3,5}(?![\d])`,
+		// 零填充 5 位：前边界额外排除字母与 `.`/`_`（`DSC04684`、`IMG_04684.jpg`、`No.00001`），
+		// 尾断言挡 `046845`；位数下限 `0\d{4}` 顺带放过裸 4 位数字（`No.0001`、`3953`）
 		String.raw`(?<![A-Za-z0-9._])0\d{4}(?![\d])`,
 	],
 	t2: [
+		// ori|gol：前边界挡字母粘连（`sori1812`），尾断言挡 `ori181234`（不截断成 `ori18123`）
 		String.raw`(?<![A-Z0-9])(?:ori|gol)\d{4,5}(?![\d])`,
+		// les：前边界挡字母粘连（`bles3351`），尾断言挡 `les33511`
 		String.raw`(?<![A-Z0-9])les\d{3,4}(?![\d])`,
+		// n：前边界挡"前面还有字母"的形态（噪音 `on3351`），尾断言挡 `n335123` 这类截断形态
 		String.raw`(?<![A-Z0-9])n\d{4,5}(?![\d])`,
+		// 数字型（`-` 或 `/`）：前断言里的 `/`/`.`/`_`/数字挡掉 URL 路径片段与长数字串中段
+		// （`/video/12345/678.html` 的 `12345/678`、`09-1234-5678` 的 `1234-5678`）；
+		// 尾断言挡 `2024-01`（后面还跟着 `-`+数字：噪音 `2024-01-15` / `2024/01/15`）
 		String.raw`(?<![\d._/-])\d{3,5}[-/]\d{2,4}(?![\d])(?![-/]\d)`,
+		// 数字型（`-` 或 `_`）：与上一条共用同一套边界，不给未来留两套口径；
+		// 前断言挡 `Tel: +81-90-1234-5678` 里的 `90-1234`，尾断言挡 `09-1234-5678` 里的 `09-1234`
 		String.raw`(?<![\d._/-])\d{2,4}[-_]\d{3,4}(?![\d])(?![-/]\d)`,
 	],
+	// 18 家加盟站（站名 + 域名）+ 无码语境词，由分组派生 ⇒ 新增一家站只动 ANCHOR_GROUPS 一处
 	anchors: [
-		// 18 家加盟站（站名 + 域名，docs/d2pass-api接口文档.md §5 的那 18 家）
-		"Hey動画",
-		"heydouga",
-		"女体のしんぴ",
-		"nyoshin",
-		"カリビアンコム",
-		"caribbeancompr",
-		"caribbeancom",
-		"一本道",
-		"1pondo",
-		"天然むすめ",
-		"10musume",
-		"HEYZO",
-		"heyzo",
-		"ピッカー",
-		"pikkur",
-		"パコパコママ",
-		"pacopacomama",
-		"av9898",
-		"金髪天國",
-		"kin8tengoku",
-		"エロックスジャパン",
-		"eroxjapanz",
-		"ムラムラ",
-		"muramura",
-		"エッチな4610",
-		"h4610",
-		"エッチな0930",
-		"h0930",
-		"人妻斬り",
-		"c0930",
-		"うんこたれ",
-		"unkotare",
-		"3d-eros",
-		"3dw",
-		// 无码语境词
-		"無修正",
-		"無碼",
-		"无码",
-		"uncensored",
+		...ANCHOR_GROUPS.flatMap((group) => [group.name, ...group.domains]),
+		...CONTEXT_ANCHORS,
 	],
 	anchorNumbers: ["0930", "4610", "9898"],
 	exclude: "",
-};
+});
+
+/**
+ * 规则表加载期自检：把 T1/T2 全部编译一次，**编译失败直接抛**。
+ * 手写常量表的笔误（括号不配对、转义写坏）必须在模块加载期炸出来，不能退化成
+ * `collectMatches` 里的 `catch { continue }` —— 那样只有"笔误规则的新形态恰好也进了语料"时才会红。
+ * 导出只为让 test 反证"坏源码真的抛"。
+ * ⚠️ 注入副本（计划 Task 9）**不能**这么干：那边抛错会毁掉整页，必须保留 try/catch。
+ */
+export function assertRulesCompile(rules: UncensoredRules): void {
+	for (const source of [...rules.t1, ...rules.t2]) {
+		new RegExp(source, "gi");
+	}
+}
+
+// 模块加载期就跑一遍：笔误 ⇒ import 即抛 ⇒ `npm test` / 任何 import 它的编译产物立刻红
+assertRulesCompile(UNCENSORED_RULES);
 
 /** 锚点判定本体：抽成内部函数，好让调用方能按传入的规则快照判定 */
 function hasAnyAnchor(text: string, anchors: string[]): boolean {
@@ -100,9 +159,16 @@ function hasAnyAnchor(text: string, anchors: string[]): boolean {
 	return anchors.some((anchor) => lower.includes(anchor.toLowerCase()));
 }
 
-/** 页面文本是否命中锚点表：判定"这是无码语境" */
-export function hasUncensoredAnchor(text: string): boolean {
-	return hasAnyAnchor(text, UNCENSORED_RULES.anchors);
+/**
+ * 页面文本是否命中锚点表：判定"这是无码语境"。
+ * 第二参数可选（`hasUncensoredAnchor(text)` 照旧可用）：不传就用内置规则表，
+ * 传了就以传入的规则快照为准 —— 规则集在这条链路上可注入，不再直接捕获全局常量。
+ */
+export function hasUncensoredAnchor(
+	text: string,
+	rules: UncensoredRules = UNCENSORED_RULES,
+): boolean {
+	return hasAnyAnchor(text, rules.anchors);
 }
 
 interface RawMatch {
@@ -212,14 +278,15 @@ function dropContained(buckets: MatchBucket[]): RawMatch[] {
 	return flat.filter((match) => !dropped.has(match));
 }
 
-/** 去重规则②：锚点自带数字排除（数字表由调用方按当前规则快照传入） */
+/**
+ * 去重规则②：锚点自带数字排除（エッチな0930 的 0930、h4610 的 4610、av9898 的 9898）。
+ * 数字表来自传入的规则快照（不传 = 内置表）：规则集在这条链路上可注入。
+ */
 function dropAnchorNumbers(
 	matches: RawMatch[],
-	anchorNumbers: string[],
+	rules: UncensoredRules = UNCENSORED_RULES,
 ): RawMatch[] {
-	return matches.filter(
-		(match) => !anchorNumbers.includes(match.text),
-	);
+	return matches.filter((match) => !rules.anchorNumbers.includes(match.text));
 }
 
 /** 按页面出现顺序去重（大小写不敏感，保留首次出现的原文写法） */
@@ -249,10 +316,7 @@ export function findUncensoredCandidates(
 		? [...rules.t1, ...rules.t2]
 		: [...rules.t1];
 	return sortAndDedupe(
-		dropAnchorNumbers(
-			dropContained(collectMatches(scanText, sources)),
-			rules.anchorNumbers,
-		),
+		dropAnchorNumbers(dropContained(collectMatches(scanText, sources)), rules),
 	);
 }
 

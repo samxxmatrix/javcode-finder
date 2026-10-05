@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+	ANCHOR_GROUPS,
 	UNCENSORED_RULES,
+	assertRulesCompile,
 	buildUncensoredRules,
 	findUncensoredCandidates,
+	hasUncensoredAnchor,
 	isUncensoredCode,
 	mergeCandidateLists,
 } from "../src/lib/uncensored-code";
@@ -28,42 +31,61 @@ const BARE_CORPUS = [
 /** 带锚点的弱形态：4/4 命中 */
 const WEAK_CORPUS = ["ori1812", "4229-2960", "103_933", "n3351"];
 
-/** 噪音语料：ISO 日期 / 电话 / 版本号 / 文件名 / 订单号 / 价格 / 时间 / 序号 */
-const NOISE_CORPUS = [
-	"2024-01-15",
-	"2024/01/15",
-	"2024.01.15",
-	"09-1234-5678",
-	"090-1234-5678",
-	"03-1234-5678",
-	"v1.2.3",
-	"10.3.5",
-	"Version 2.14.03",
-	"IMG_3953.jpg",
-	"IMG_04684.jpg",
-	"DSC04684.JPG",
-	"20240115-001",
-	"user_id=395312",
-	"ORDER-20240115-0001",
-	"¥1,980",
-	"3980円",
-	"1,980円",
-	"12:30:45",
-	"10:30",
-	"2024年01月15日",
-	"第1234回",
-	"No.0001",
-	"No.00001",
-	"v2.0.1-beta",
-	"movie_1080p.mp4",
-	"1920x1080",
-	"Tel: +81-90-1234-5678",
+/**
+ * 噪音语料表：`[输入, 期望, 守住的断言]`（期望恒为 `[]` = 0 误报）。
+ * 第三列指名"这个写法撞在哪条断言上被挡住"，名字与模块里 10 条规则上方的注释一一对应：
+ *   · 日期型前边界     = T1 日期型的 `(?<![\d._])`
+ *   · 零填充前边界     = T1 零填充型的 `(?<![A-Za-z0-9._])`
+ *   · 字母数字前边界   = T1 HEYZO / 3dw / hitozuma 与 T2 ori|gol / les / n 的 `(?<![A-Z0-9])`
+ *   · 数字型前断言     = T2 两条数字型共用的 `(?<![\d._/-])`
+ *   · 数字型尾断言     = T2 两条数字型共用的 `(?![\d])(?![-/]\d)`
+ *   · 无规则覆盖       = 规则集里没有任何一条能碰到这个写法（位数下限 / 分隔符集合 / 月日校验）
+ * 映射不是猜的：把每条断言剥掉（`new RegExp(源码去掉所有 (?<!…) 与 (?!…))`）再跑一遍整份语料实测出来的，
+ * 所以谁改坏某一列点名的断言，红的就是那一条用例，而不是笼统的"噪音 0 误报"。
+ */
+const NOISE_CORPUS: [input: string, expected: string[], guard: string][] = [
+	["2024-01-15", [], "数字型尾断言（`2024-01` 后面还跟着 `-` + 数字）"],
+	["2024/01/15", [], "数字型尾断言（`2024/01` 后面还跟着 `/` + 数字）"],
+	["2024.01.15", [], "无规则覆盖（`.` 分隔符不在任何规则里）"],
+	["09-1234-5678", [], "数字型前断言（`1234-5678` 前是 `-`）+ 数字型尾断言（`09-1234` 后是 `-`）"],
+	["090-1234-5678", [], "数字型尾断言（`090-1234` 后面还跟着 `-`）"],
+	["03-1234-5678", [], "数字型前断言 + 数字型尾断言（同 `09-1234-5678`）"],
+	["v1.2.3", [], "无规则覆盖（位数下限：最短命中 5 位）"],
+	["10.3.5", [], "无规则覆盖（`.` 分隔符不在任何规则里）"],
+	["Version 2.14.03", [], "无规则覆盖（位数下限 + `.` 分隔符）"],
+	["IMG_3953.jpg", [], "无规则覆盖（裸 4 位数字没有任何规则）"],
+	["IMG_04684.jpg", [], "零填充前边界（`_` 在排除集里）"],
+	["DSC04684.JPG", [], "零填充前边界（前一个字符是字母）"],
+	["20240115-001", [], "零填充前边界 + 数字型前断言（前面都是数字）"],
+	["user_id=395312", [], "无规则覆盖（6 位裸数字、没有规则里的分隔符）"],
+	["ORDER-20240115-0001", [], "零填充前边界 + 数字型前断言（同 `20240115-001`）"],
+	["¥1,980", [], "无规则覆盖（`,` 分隔符不在任何规则里）"],
+	["3980円", [], "无规则覆盖（位数下限 + 无分隔符）"],
+	["1,980円", [], "无规则覆盖（`,` 分隔符不在任何规则里）"],
+	["12:30:45", [], "无规则覆盖（`:` 分隔符不在任何规则里）"],
+	["10:30", [], "无规则覆盖（`:` 分隔符不在任何规则里）"],
+	["2024年01月15日", [], "无规则覆盖（非数字分隔符）"],
+	["第1234回", [], "无规则覆盖（裸 4 位数字没有任何规则）"],
+	["No.0001", [], "无规则覆盖（零填充型要 5 位：`0` + 4 位数字）"],
+	["No.00001", [], "零填充前边界（`.` 在排除集里）"],
+	["v2.0.1-beta", [], "无规则覆盖（位数下限 + `.`/`-` 组合不成规则里的两段型）"],
+	["movie_1080p.mp4", [], "无规则覆盖（位数下限 + 字母后缀）"],
+	["1920x1080", [], "无规则覆盖（`x` 不是规则里的分隔符）"],
+	["Tel: +81-90-1234-5678", [], "数字型前断言（`90-1234` 前是 `-`）"],
 	// URL 路径片段：T2 的两条数字型规则曾把路径当番号（`12345/678` 这类候选会绕开
 	// isValidCodeCandidate 直接进候选列表）。前向断言加 `/` 之后这 3 条必须 0 命中；
 	// 另有 2 条文本上无法与真实番号区分的形态，故意保留为残留（见下方专门用例）。
-	"https://site.com/video/12345/678.html",
-	"watch/movie/4422/032/index.html",
-	"/gallery/1234/567",
+	[
+		"https://site.com/video/12345/678.html",
+		[],
+		"数字型前断言里的 `/`（`12345/678` 前是路径分隔符）",
+	],
+	[
+		"watch/movie/4422/032/index.html",
+		[],
+		"数字型前断言里的 `/` + 数字型尾断言（`/032/` 后面还有 `/` + 数字）",
+	],
+	["/gallery/1234/567", [], "数字型前断言里的 `/`（`1234/567` 前是路径分隔符）"],
 ];
 
 const ANCHOR_TEXT = "無修正";
@@ -107,11 +129,18 @@ describe("findUncensoredCandidates", () => {
 		}
 	});
 
-	it("噪音 28 条 + URL 路径片段 3 条 0 误报（带锚点变体 = T2 全开）", () => {
-		for (const noise of NOISE_CORPUS) {
-			expect(findUncensoredCandidates(`${ANCHOR_TEXT} ${noise}`)).toEqual([]);
-		}
+	it("噪音表完整性：28 条噪音 + URL 路径片段 3 条", () => {
+		expect(NOISE_CORPUS).toHaveLength(31);
 	});
+
+	// 一条噪音一个用例：失败信息里带着"守它的那条断言"，不必再从 31 条里二分定位
+	for (const [noise, expected, guard] of NOISE_CORPUS) {
+		it(`噪音 0 误报：${noise}（守：${guard}）`, () => {
+			expect(findUncensoredCandidates(`${ANCHOR_TEXT} ${noise}`)).toEqual(
+				expected,
+			);
+		});
+	}
 
 	it("URL 路径残留 2 条：显式钉住当前行为（接受，代价是一次查无）", () => {
 		// 这两条**故意不修**（已裁决，见 docs/d2pass-api执行进度.md §4.0）：
@@ -192,7 +221,7 @@ describe("isUncensoredCode", () => {
 	});
 
 	it("噪音语料（含 URL 路径片段）全不是无码形态", () => {
-		for (const noise of NOISE_CORPUS) {
+		for (const [noise] of NOISE_CORPUS) {
 			expect(isUncensoredCode(noise)).toBe(false);
 		}
 	});
@@ -204,12 +233,14 @@ describe("buildUncensoredRules", () => {
 		expect(buildUncensoredRules("  HEYZO-  ").exclude).toBe("HEYZO-");
 	});
 
-	it("快照带全 8 条内置正则与锚点表", () => {
+	it("快照带全 10 条内置正则（T1 5 条 + T2 5 条）与锚点表", () => {
 		const rules = buildUncensoredRules("");
 		expect(rules.t1).toEqual(UNCENSORED_RULES.t1);
 		expect(rules.t2).toEqual(UNCENSORED_RULES.t2);
 		expect(rules.anchors).toEqual(UNCENSORED_RULES.anchors);
 		expect(rules.anchorNumbers).toEqual(UNCENSORED_RULES.anchorNumbers);
+		// 源文档表格 8 行、其中一行含 3 个备选 ⇒ 规则源码共 10 条
+		expect(rules.t1.length + rules.t2.length).toBe(10);
 	});
 
 	it("返回的是副本：改快照不会污染 UNCENSORED_RULES", () => {
@@ -224,6 +255,122 @@ describe("buildUncensoredRules", () => {
 		expect(UNCENSORED_RULES.t2).not.toContain("X");
 		expect(UNCENSORED_RULES.anchors).not.toContain("X");
 		expect(UNCENSORED_RULES.anchorNumbers).not.toContain("X");
+	});
+});
+
+describe("规则表不可变（A1）", () => {
+	it("UNCENSORED_RULES 与四个数组都已冻结", () => {
+		expect(Object.isFrozen(UNCENSORED_RULES)).toBe(true);
+		expect(Object.isFrozen(UNCENSORED_RULES.t1)).toBe(true);
+		expect(Object.isFrozen(UNCENSORED_RULES.t2)).toBe(true);
+		expect(Object.isFrozen(UNCENSORED_RULES.anchors)).toBe(true);
+		expect(Object.isFrozen(UNCENSORED_RULES.anchorNumbers)).toBe(true);
+	});
+
+	it("冻结是硬的：消费者写不进去（严格模式下抛 TypeError）", () => {
+		// 守的是"唯一数据源"：以前任何一个消费者/测试 push 一下就能改掉它，
+		// 并静默污染同进程后续用例。ESM 恒为严格模式，所以写入必抛而不是静默失败。
+		expect(() => {
+			UNCENSORED_RULES.t1.push("X");
+		}).toThrow(TypeError);
+		expect(() => {
+			(UNCENSORED_RULES as { anchors: string[] }).anchors = [];
+		}).toThrow(TypeError);
+		expect(UNCENSORED_RULES.t1).toHaveLength(5);
+		expect(UNCENSORED_RULES.t2).toHaveLength(5);
+	});
+});
+
+describe("规则集可注入（A1）", () => {
+	it("hasUncensoredAnchor：不传规则仍按内置锚点表（对外签名向后兼容）", () => {
+		expect(hasUncensoredAnchor("無修正 100426-001")).toBe(true);
+		expect(hasUncensoredAnchor("普通页面 ABC")).toBe(false);
+		expect(hasUncensoredAnchor("")).toBe(false);
+	});
+
+	it("hasUncensoredAnchor：传入规则快照后以快照为准，不再捕获全局常量", () => {
+		const onlyContext: UncensoredRules = {
+			...UNCENSORED_RULES,
+			anchors: ["無修正"],
+		};
+		expect(hasUncensoredAnchor("無修正", onlyContext)).toBe(true);
+		expect(hasUncensoredAnchor("HEYZO-3953", onlyContext)).toBe(false);
+	});
+
+	it("锚点门控整条链路都吃注入的规则：快照里没有的锚点就不开 T2", () => {
+		const onlyContext: UncensoredRules = {
+			...UNCENSORED_RULES,
+			anchors: ["無修正"],
+		};
+		// `uncensored` 是内置锚点表里的语境词；换掉锚点表之后它不该再开 T2
+		expect(findUncensoredCandidates("uncensored ori1812", onlyContext)).toEqual(
+			[],
+		);
+		expect(findUncensoredCandidates("無修正 ori1812", onlyContext)).toEqual([
+			"ori1812",
+		]);
+	});
+
+	it("dropAnchorNumbers 吃注入的 anchorNumbers：丢掉的是快照里那一份", () => {
+		// 合成规则多一条能产出 4 位裸数字的 T2，让规则②真的有两个靶子可比
+		expect(
+			findUncensoredCandidates("無修正 0930 4610", SYNTHETIC_RULES),
+		).toEqual(["4610"]);
+		expect(
+			findUncensoredCandidates("無修正 0930 4610", {
+				...SYNTHETIC_RULES,
+				anchorNumbers: ["4610"],
+			}),
+		).toEqual(["0930"]);
+	});
+});
+
+describe("规则表加载期校验（A2）", () => {
+	it("内置 T1/T2 共 10 条，模块加载期跑的就是这个函数", () => {
+		expect(UNCENSORED_RULES.t1.length + UNCENSORED_RULES.t2.length).toBe(10);
+		expect(() => assertRulesCompile(UNCENSORED_RULES)).not.toThrow();
+	});
+
+	it("笔误不再静默失效：坏源码必须从这里抛出去", () => {
+		// 以前 collectMatches 里的 catch-continue 会把笔误吃掉，只在"新形态恰好也进了语料"时才红
+		expect(() =>
+			assertRulesCompile({
+				...UNCENSORED_RULES,
+				t2: [...UNCENSORED_RULES.t2, "(["],
+			}),
+		).toThrow();
+	});
+
+	it("逐个规则源码可编译（等价写法，逐个走一遍）", () => {
+		for (const source of [...UNCENSORED_RULES.t1, ...UNCENSORED_RULES.t2]) {
+			expect(() => new RegExp(source, "gi")).not.toThrow();
+		}
+	});
+});
+
+describe("锚点表分组（A6）", () => {
+	it("分组数 = 18 家加盟站", () => {
+		expect(ANCHOR_GROUPS).toHaveLength(18);
+	});
+
+	it("锚点表内无大小写重复（本可拦住 `HEYZO`/`heyzo` 这类死数据）", () => {
+		const lowered = UNCENSORED_RULES.anchors.map((anchor) =>
+			anchor.toLowerCase(),
+		);
+		expect(new Set(lowered).size).toBe(lowered.length);
+	});
+
+	it("域名里带数字时，4 位数字段必须在 anchorNumbers", () => {
+		// 拦住 `h0930` / `h4610` / `av9898` 这类"新加一家站却忘了把它的自带数字列进 anchorNumbers"。
+		// 只认 4 位数字段：`1pondo` 的 `1`、`10musume` 的 `10`、`kin8tengoku` 的 `8`、`3dw` 的 `3`
+		// 都不是裸番号形态（最短命中 5 位），列进 anchorNumbers 反而是噪音。
+		const digitRuns = ANCHOR_GROUPS.flatMap((group) =>
+			group.domains.flatMap((domain) => domain.match(/\d{4}/g) ?? []),
+		);
+		expect(digitRuns.length).toBeGreaterThan(0);
+		for (const run of digitRuns) {
+			expect(UNCENSORED_RULES.anchorNumbers).toContain(run);
+		}
 	});
 });
 
