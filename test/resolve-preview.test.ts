@@ -406,4 +406,28 @@ describe("resolvePreview", () => {
 		expect(result).toEqual({ status: "resolved", media, errors: [] });
 		expect(javtrailersLookup).toHaveBeenCalledOnce();
 	});
+
+	it("D2PASS 抛出 not_found（而非返回 null）时同样当查无：不进 errors，链继续到底", async () => {
+		// 上一条"D2PASS 查无（404）"是用 `async () => null` 模拟的，它根本不进 catch，
+		// 所以 `resolve-preview.ts` 里 `if (lookupError.kind !== "not_found")` 这个唯一分流点
+		// 从未被执行过。这里让 d2passLookup 真的抛 not_found，把该分支钉住：
+		// 一旦降级判定写反（把 not_found 也当成故障），整轮会被拖成 error 而不是 not_found。
+		const d2passLookup = vi.fn(async () => {
+			throw {
+				source: "d2pass",
+				kind: "not_found",
+				status: 404,
+			} satisfies PreviewLookupError;
+		});
+		const result = await resolvePreview({
+			d2passEnabled: true,
+			d2passLookup,
+			dmmEnabled: true,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => null,
+		});
+
+		expect(d2passLookup).toHaveBeenCalledOnce();
+		expect(result).toEqual({ status: "not_found", media: null, errors: [] });
+	});
 });

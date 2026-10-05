@@ -91,7 +91,8 @@ export async function resolvePreview({
 			const lookupError = normalizeLookupError("d2pass", error);
 			// 404 ITEM_NOT_FOUND(含带 class 的早退响应)= 确认查无,链继续走下一源;
 			// 503 SOURCE_UNAVAILABLE / 401 / 403 / 429 绝不能降级成 not_found ——
-			// 那会落进"此号无预告片"的终态,源站恢复后也不会重查
+			// 降级会让面板抛出「暂无番号信息」(locales.ts:183)这种断言式结论,把源站故障
+			// 说成"此号没有资料";若失败同时被丢弃(errors 为空),连错误行与"重新查询"入口都没了
 			if (lookupError.kind !== "not_found") {
 				failed = true;
 				errors.push(lookupError);

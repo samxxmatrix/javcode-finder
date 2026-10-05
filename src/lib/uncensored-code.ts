@@ -142,7 +142,7 @@ export const UNCENSORED_RULES: UncensoredRules = freezeRules({
  * 手写常量表的笔误（括号不配对、转义写坏）必须在模块加载期炸出来，不能退化成
  * `collectMatches` 里的 `catch { continue }` —— 那样只有"笔误规则的新形态恰好也进了语料"时才会红。
  * 导出只为让 test 反证"坏源码真的抛"。
- * ⚠️ 注入副本（计划 Task 9）**不能**这么干：那边抛错会毁掉整页，必须保留 try/catch。
+ * ⚠️ 注入副本（注入端规则快照）**不能**这么干：那边抛错会毁掉整页，必须保留 try/catch。
  */
 export function assertRulesCompile(rules: UncensoredRules): void {
 	for (const source of [...rules.t1, ...rules.t2]) {
