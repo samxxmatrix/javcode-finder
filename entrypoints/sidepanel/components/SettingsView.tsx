@@ -112,7 +112,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [newPrefixInput, setNewPrefixInput] = useState("");
 	const [customRegex, setCustomRegex] = useState("");
 	const [regexError, setRegexError] = useState<string | null>(null);
-	// 无修正番号排除正则（命中则不视为无码番号，不交给 D2PASS）
+	// 无修正番号排除正则（命中则从扫描候选列表里剔除；只降噪，不改变番号的形态判定，
+	// 手动输入的查询也不受影响 —— 排除只发生在 mergeCandidateLists 里，见 uncensored-code.ts）
 	const [uncensoredExcludeRegex, setUncensoredExcludeRegex] = useState("");
 	const [uncensoredRegexError, setUncensoredRegexError] = useState<
 		string | null
@@ -1454,6 +1455,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							{t.uncensoredExcludeRegexLabel}
 						</label>
 					</div>
+					<p className="settings-field__hint">{t.uncensoredExcludeRegexDesc}</p>
 					<div className="settings-field__input-wrap">
 						<input
 							id="uncensored-exclude-regex"

@@ -100,6 +100,7 @@ export interface LocaleMessages {
 	d2passApiKeyLabel: string;
 	d2passEnableLabel: string;
 	uncensoredExcludeRegexLabel: string;
+	uncensoredExcludeRegexDesc: string;
 	embyUrlLabel: string;
 	embyApiKeyLabel: string;
 	embyEnableLabel: string;
@@ -225,6 +226,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     d2passApiKeyLabel: "D2PASS API Key",
     d2passEnableLabel: "启用 D2PASS 查询（无码番号优先自建无码源）",
     uncensoredExcludeRegexLabel: "无修正番号排除正则",
+    uncensoredExcludeRegexDesc:
+      "命中该正则的番号会从扫描列表中剔除，仅用于降噪；不改变番号的形态判定，手动输入的查询也不受影响。",
     embyUrlLabel: "Emby 地址",
     embyApiKeyLabel: "Emby API Key",
     embyEnableLabel: "启用 Emby 媒体库查询",
@@ -351,6 +354,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     d2passApiKeyLabel: "D2PASS API Key",
     d2passEnableLabel: "啟用 D2PASS 查詢（無碼番號優先自建無碼源）",
     uncensoredExcludeRegexLabel: "無修正番號排除正則",
+    uncensoredExcludeRegexDesc:
+      "命中該正則的番號會從掃描列表中剔除，僅用於降噪；不改變番號的形態判定，手動輸入的查詢也不受影響。",
     embyUrlLabel: "Emby 位址",
     embyApiKeyLabel: "Emby API Key",
     embyEnableLabel: "啟用 Emby 媒體庫查詢",
@@ -481,6 +486,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     d2passApiKeyLabel: "D2PASS API Key",
     d2passEnableLabel: "Enable D2PASS lookup (uncensored codes first)",
     uncensoredExcludeRegexLabel: "Uncensored code exclusion regex",
+    uncensoredExcludeRegexDesc:
+      "Codes matching this regex are dropped from the scanned list (noise reduction only). It does not change uncensored detection, and manual lookups are unaffected.",
     embyUrlLabel: "Emby URL",
     embyApiKeyLabel: "Emby API Key",
     embyEnableLabel: "Enable Emby library lookup",
