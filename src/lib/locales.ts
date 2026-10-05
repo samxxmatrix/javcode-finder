@@ -96,6 +96,10 @@ export interface LocaleMessages {
 	dmmApiUrlLabel: string;
 	dmmApiKeyLabel: string;
 	dmmEnableLabel: string;
+	d2passApiUrlLabel: string;
+	d2passApiKeyLabel: string;
+	d2passEnableLabel: string;
+	uncensoredExcludeRegexLabel: string;
 	embyUrlLabel: string;
 	embyApiKeyLabel: string;
 	embyEnableLabel: string;
@@ -108,11 +112,13 @@ export interface LocaleMessages {
 	embySyncFailed: string;
 	embyTooLarge: string;
 	dmmIncomplete: string;
+	d2passIncomplete: string;
 	falenoPrefixesLabel: string;
 	falenoPrefixesDesc: string;
 	falenoPrefixPlaceholder: string;
 	falenoSourceLabel: string;
 	fc2SourceLabel: string;
+	d2passSourceLabel: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -215,6 +221,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiUrlLabel: "DMM API 地址",
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "启用 DMM 查询（预览/详情优先官方数据）",
+    d2passApiUrlLabel: "D2PASS API 地址",
+    d2passApiKeyLabel: "D2PASS API Key",
+    d2passEnableLabel: "启用 D2PASS 查询（无码番号优先自建无码源）",
+    uncensoredExcludeRegexLabel: "无修正番号排除正则",
     embyUrlLabel: "Emby 地址",
     embyApiKeyLabel: "Emby API Key",
     embyEnableLabel: "启用 Emby 媒体库查询",
@@ -227,12 +237,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncFailed: "同步失败（索引未更新）",
     embyTooLarge: "库条目超过 3 万，已改为逐个番号查询（不缓存索引）",
     dmmIncomplete: "请补全 DMM API 地址和 Key",
+    d2passIncomplete: "请补全 D2PASS API 地址和 Key",
     falenoPrefixesLabel: "FALENO 番号前缀复查",
     falenoPrefixesDesc:
       "番号前缀以设置开头的，若普通查询无结果将至 FALENO 官网查询。清空即不启用。",
     falenoPrefixPlaceholder: "输入前缀，如 FNS",
     falenoSourceLabel: "FALENO",
     fc2SourceLabel: "FC2",
+    d2passSourceLabel: "D2PASS",
   },
 
   "zh-hant": {
@@ -335,6 +347,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiUrlLabel: "DMM API 位址",
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "啟用 DMM 查詢（預覽/詳情優先官方資料）",
+    d2passApiUrlLabel: "D2PASS API 位址",
+    d2passApiKeyLabel: "D2PASS API Key",
+    d2passEnableLabel: "啟用 D2PASS 查詢（無碼番號優先自建無碼源）",
+    uncensoredExcludeRegexLabel: "無修正番號排除正則",
     embyUrlLabel: "Emby 位址",
     embyApiKeyLabel: "Emby API Key",
     embyEnableLabel: "啟用 Emby 媒體庫查詢",
@@ -347,12 +363,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncFailed: "同步失敗（索引未更新）",
     embyTooLarge: "庫條目超過 3 萬，已改為逐個番號查詢（不建立索引）",
     dmmIncomplete: "請補全 DMM API 位址與 Key",
+    d2passIncomplete: "請補全 D2PASS API 位址與 Key",
     falenoPrefixesLabel: "FALENO 番號前綴複查",
     falenoPrefixesDesc:
       "番號前綴以設定開頭的，若普通查詢無結果將至 FALENO 官網查詢。清空即不啟用。",
     falenoPrefixPlaceholder: "輸入前綴，如 FNS",
     falenoSourceLabel: "FALENO",
     fc2SourceLabel: "FC2",
+    d2passSourceLabel: "D2PASS",
   },
 
   en: {
@@ -459,6 +477,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     dmmApiUrlLabel: "DMM API URL",
     dmmApiKeyLabel: "DMM API Key",
     dmmEnableLabel: "Enable DMM lookup (official data first)",
+    d2passApiUrlLabel: "D2PASS API URL",
+    d2passApiKeyLabel: "D2PASS API Key",
+    d2passEnableLabel: "Enable D2PASS lookup (uncensored codes first)",
+    uncensoredExcludeRegexLabel: "Uncensored code exclusion regex",
     embyUrlLabel: "Emby URL",
     embyApiKeyLabel: "Emby API Key",
     embyEnableLabel: "Enable Emby library lookup",
@@ -472,12 +494,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embyTooLarge:
       "Library has over 30,000 items; using per-code lookup instead of a cached index",
     dmmIncomplete: "Fill in the DMM API URL and Key",
+    d2passIncomplete: "Fill in the D2PASS API URL and Key",
     falenoPrefixesLabel: "FALENO code prefix check",
     falenoPrefixesDesc:
       "Codes whose prefixes match the settings fall back to the FALENO official site when the normal lookup finds nothing. Clearing the list disables it.",
     falenoPrefixPlaceholder: "Prefix, e.g. FNS",
     falenoSourceLabel: "FALENO",
     fc2SourceLabel: "FC2",
+    d2passSourceLabel: "D2PASS",
   },
 };
 
