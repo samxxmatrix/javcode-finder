@@ -13,11 +13,12 @@
  * 0 误报（另有 2 条 URL 形态接受为残留：`img/04684/01` 的 `04684`、`ID:12345/678`——
  * 它们与真实番号/写法在文本上不可区分，收紧断言会变成漏报，见 test 里的专门用例）。
  *
- * ⚠️ 注入端：src/lib/extract-codes.ts 的 extractCandidatesInTab 由 executeScript 序列化后在页面里
- * 执行，import 不跟随注入，所以那边**计划**（计划 Task 9，**HEAD 上尚未落地**）按 UNCENSORED_RULES
- * 这份数据自包含实现同一套引擎，一致性由 test/extract-codes.test.ts 的交叉验证用例守住。
- * 这两处落地之前，本注释不得写成"已实现"：HEAD 上的 extract-codes.ts 仍是旧实现、
- * extract-codes.test.ts 里也没有交叉验证用例。
+ * ⚠️ 注入端**已落地**（Task 9，提交 95411ab）：src/lib/extract-codes.ts 的 extractCandidatesInTab 由
+ * executeScript 序列化后在页面里执行，import 不跟随注入，所以那边按同一份规则数据自包含地复写了
+ * 这套匹配引擎；规则快照（本模块 UNCENSORED_RULES 的可注入副本）由 buildUncensoredRules() 算好后
+ * 随 executeScript 的 args 一起进页面。
+ * 两条路径的一致性由 test/extract-codes.test.ts 的「交叉验证」用例守住（16 组语料逐字比对）；
+ * 该副本已实测自包含：with + Proxy 的自由标识符探针显示它只依赖 RegExp / Set / document。
  */
 
 import { isValidRegex } from "./settings";
