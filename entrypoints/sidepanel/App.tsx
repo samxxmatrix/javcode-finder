@@ -8,6 +8,7 @@ import {
 } from "../../src/lib/emby";
 import { browserEmbyStore, loadEmbyIndex } from "../../src/lib/emby-index";
 import { extractCandidatesInTab } from "../../src/lib/extract-codes";
+import { buildUncensoredRules } from "../../src/lib/uncensored-code";
 import {
 	FAVORITES_STORAGE_KEY,
 	loadFavorites,
@@ -158,8 +159,14 @@ export const App: React.FC = () => {
 			const results = await browser.scripting.executeScript({
 				target: { tabId: activeTab.id },
 				func: extractCandidatesInTab,
-				// 占位：Task 10 会把第二个参数换成 buildUncensoredRules(...) 算好的规则快照
-				args: [settings.customRegex || DEFAULT_CODE_REGEX, null],
+				// 无码规则快照只在开关打开时注入：关闭时传 null，页面里一行无码逻辑都不走
+				// （注入函数不能 import，规则只能这样当参数带过去）
+				args: [
+					settings.customRegex || DEFAULT_CODE_REGEX,
+					settings.d2passEnabled
+						? buildUncensoredRules(settings.uncensoredExcludeRegex)
+						: null,
+				],
 			});
 
 			const firstResult =
