@@ -17,6 +17,8 @@ export interface ExtensionSettings {
 	customName: string;
 	excludedHosts: string[];
 	customRegex: string;
+	// 无码番号排除正则：匹配候选番号字符串本身（不是页面文本）；留空 = 不排除
+	uncensoredExcludeRegex: string;
 	// 预览视频音量（0-100），所有预览播放统一使用
 	previewVolume: number;
 	// DeepL 自建 Worker 翻译（Bearer key 即为 CLIENT_API_KEY）
@@ -38,6 +40,10 @@ export interface ExtensionSettings {
 	dmmApiKey: string;
 	// DMM 开关：打开时预览/详情优先走 DMM API，javtrailers 兜底
 	dmmEnabled: boolean;
+	// D2PASS 无码源配置（地址与 Key 均空 = 未配置）；开关关闭 = 回到接入前的行为
+	d2passApiUrl: string;
+	d2passApiKey: string;
+	d2passEnabled: boolean;
 	// FALENO 官方兜底番号头:番号以任一前缀开头时,DMM 与 JavTrailers 均查不到则回退 faleno.jp;空数组 = 不启用
 	falenoPrefixes: string[];
 	// Emby 媒体库（URL 与 API Key 均空 = 未配置，面板不显示在库标识）
@@ -66,6 +72,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	customTemplate: "",
 	excludedHosts: [],
 	customRegex: DEFAULT_CODE_REGEX,
+	uncensoredExcludeRegex: "",
 	previewVolume: 100,
 	deeplApiKey: "",
 	translateApiUrl: "",
@@ -78,6 +85,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	dmmApiUrl: "",
 	dmmApiKey: "",
 	dmmEnabled: false,
+	d2passApiUrl: "",
+	d2passApiKey: "",
+	d2passEnabled: false,
 	falenoPrefixes: ["FNS"],
 	embyUrl: "",
 	embyApiKey: "",
@@ -241,6 +251,18 @@ export function getSettings(): ExtensionSettings {
 				typeof parsed.dmmEnabled === "boolean"
 					? parsed.dmmEnabled
 					: DEFAULT_SETTINGS.dmmEnabled,
+			d2passApiUrl:
+				typeof parsed.d2passApiUrl === "string"
+					? parsed.d2passApiUrl.trim()
+					: "",
+			d2passApiKey:
+				typeof parsed.d2passApiKey === "string"
+					? parsed.d2passApiKey.trim()
+					: "",
+			d2passEnabled:
+				typeof parsed.d2passEnabled === "boolean"
+					? parsed.d2passEnabled
+					: DEFAULT_SETTINGS.d2passEnabled,
 			// 旧存储无此字段时补默认;字段存在但为空数组 = 用户主动关闭兜底,保持为空
 			falenoPrefixes: Array.isArray(parsed.falenoPrefixes)
 				? parsed.falenoPrefixes
@@ -262,6 +284,13 @@ export function getSettings(): ExtensionSettings {
 				typeof parsed.customRegex === "string" && parsed.customRegex.trim()
 					? parsed.customRegex.trim()
 					: DEFAULT_SETTINGS.customRegex,
+			// 手工写坏的非法正则读回时降级为空：注入端不能因为一个坏正则整页失败
+			uncensoredExcludeRegex:
+				typeof parsed.uncensoredExcludeRegex === "string" &&
+				parsed.uncensoredExcludeRegex.trim() &&
+				isValidRegex(parsed.uncensoredExcludeRegex)
+					? parsed.uncensoredExcludeRegex.trim()
+					: DEFAULT_SETTINGS.uncensoredExcludeRegex,
 		};
 	} catch {
 		return { ...DEFAULT_SETTINGS };
@@ -366,6 +395,25 @@ export function saveSettings(
 				settings.dmmEnabled !== undefined
 					? settings.dmmEnabled
 					: current.dmmEnabled,
+			d2passApiUrl:
+				settings.d2passApiUrl !== undefined
+					? settings.d2passApiUrl.trim()
+					: current.d2passApiUrl,
+			d2passApiKey:
+				settings.d2passApiKey !== undefined
+					? settings.d2passApiKey.trim()
+					: current.d2passApiKey,
+			d2passEnabled:
+				settings.d2passEnabled !== undefined
+					? settings.d2passEnabled
+					: current.d2passEnabled,
+			// 非法正则不落盘：丢弃本次输入、保留旧值（留空是合法值，= 不排除）
+			uncensoredExcludeRegex:
+				settings.uncensoredExcludeRegex !== undefined &&
+				(!settings.uncensoredExcludeRegex.trim() ||
+					isValidRegex(settings.uncensoredExcludeRegex))
+					? settings.uncensoredExcludeRegex.trim()
+					: current.uncensoredExcludeRegex,
 			// 与读取端一致的宽松校验：外部传入 null/非字符串时保留原值，不让整次保存抛错被吞
 			embyUrl:
 				typeof settings.embyUrl === "string"
@@ -536,6 +584,10 @@ export function configSignature(settings: ExtensionSettings): string {
 		trim(settings.dmmApiUrl),
 		trim(settings.dmmApiKey),
 		settings.dmmEnabled,
+		trim(settings.d2passApiUrl),
+		trim(settings.d2passApiKey),
+		settings.d2passEnabled,
+		trim(settings.uncensoredExcludeRegex),
 		trim(settings.embyUrl),
 		trim(settings.embyApiKey),
 		settings.embyEnabled,

@@ -44,6 +44,43 @@ describe("settings", () => {
 		expect(settings).toEqual(DEFAULT_SETTINGS);
 	});
 
+	it("D2PASS 三字段与排除正则：默认值、保存、读回、trim", () => {
+		expect(DEFAULT_SETTINGS.d2passApiUrl).toBe("");
+		expect(DEFAULT_SETTINGS.d2passApiKey).toBe("");
+		expect(DEFAULT_SETTINGS.d2passEnabled).toBe(false);
+		expect(DEFAULT_SETTINGS.uncensoredExcludeRegex).toBe("");
+
+		saveSettings({
+			d2passApiUrl: "  https://d2pass-api.vercel.app/  ",
+			d2passApiKey: "  key-123  ",
+			d2passEnabled: true,
+			uncensoredExcludeRegex: "  HEYZO|3dw  ",
+		});
+
+		const saved = getSettings();
+		expect(saved.d2passApiUrl).toBe("https://d2pass-api.vercel.app/");
+		expect(saved.d2passApiKey).toBe("key-123");
+		expect(saved.d2passEnabled).toBe(true);
+		expect(saved.uncensoredExcludeRegex).toBe("HEYZO|3dw");
+	});
+
+	it("非法排除正则不保存（保留原值），留空 = 不排除", () => {
+		saveSettings({ uncensoredExcludeRegex: "^HEYZO-" });
+		// 非法：saveSettings 直接丢弃这次输入，旧值不变
+		saveSettings({ uncensoredExcludeRegex: "([bad" });
+		expect(getSettings().uncensoredExcludeRegex).toBe("^HEYZO-");
+		// 留空是合法值（= 不排除）
+		saveSettings({ uncensoredExcludeRegex: "" });
+		expect(getSettings().uncensoredExcludeRegex).toBe("");
+	});
+
+	it("读回时挡住手工写坏存储的非法排除正则", () => {
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+			uncensoredExcludeRegex: "([bad",
+		});
+		expect(getSettings().uncensoredExcludeRegex).toBe("");
+	});
+
 	it("saves and retrieves custom templates", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.com/{code}",
@@ -400,6 +437,10 @@ describe("settings", () => {
 				{ excludedHosts: ["example.com"] },
 				{ falenoPrefixes: [] },
 				{ customRegex: "\\bFC2-\\d+\\b" },
+				{ d2passApiUrl: "https://d2pass-api.vercel.app" },
+				{ d2passApiKey: "key" },
+				{ d2passEnabled: true },
+				{ uncensoredExcludeRegex: "^HEYZO-" },
 			];
 			for (const patch of patches) {
 				expect(configSignature({ ...base, ...patch })).not.toBe(
