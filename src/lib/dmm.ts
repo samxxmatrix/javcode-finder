@@ -64,6 +64,18 @@ export function buildFalenoLookupUrl(
 }
 
 /**
+ * 拼接 D2PASS 查询 URL：GET {base}/{code}?key={key}。
+ * 接口侧 `/{code}` 与 `/api?code=` 等价，前者更短；与 DMM 同形，共用 buildProxyUrl。
+ */
+export function buildD2passLookupUrl(
+	baseUrl: string,
+	key: string,
+	code: string,
+): string {
+	return buildProxyUrl(baseUrl, [], key, code);
+}
+
+/**
  * 拼接健康检查 URL：cid-only 接口（只做搜索，最轻量）
  */
 export function buildDmmHealthUrl(

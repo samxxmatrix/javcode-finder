@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildD2passLookupUrl,
 	buildDmmHealthUrl,
 	buildDmmLookupUrl,
 	buildFalenoLookupUrl,
@@ -53,6 +54,24 @@ describe("buildFalenoLookupUrl", () => {
 
 	it("returns empty string when base URL is empty", () => {
 		expect(buildFalenoLookupUrl("", "k", "FNS-263")).toBe("");
+	});
+});
+
+describe("buildD2passLookupUrl", () => {
+	it("与 DMM 同形：GET {base}/{code}?key={key}", () => {
+		expect(
+			buildD2passLookupUrl("https://d2pass-api.vercel.app/", "my-key", "HEYZO-3953"),
+		).toBe("https://d2pass-api.vercel.app/HEYZO-3953?key=my-key");
+	});
+
+	it("URL-encodes the code", () => {
+		expect(buildD2passLookupUrl("https://x.test", "k", "100426_001")).toBe(
+			"https://x.test/100426_001?key=k",
+		);
+	});
+
+	it("returns empty string when base URL is empty", () => {
+		expect(buildD2passLookupUrl("", "k", "HEYZO-3953")).toBe("");
 	});
 });
 
