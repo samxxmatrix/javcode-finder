@@ -81,6 +81,19 @@ describe("settings", () => {
 		expect(getSettings().uncensoredExcludeRegex).toBe("");
 	});
 
+	it("读回时对手工写坏存储的 D2PASS 字段做 trim", () => {
+		// 绕过 saveSettings 直接落盘（模拟外部写坏/旧版残留）：trim 必须由读取端兜住
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+			d2passApiUrl: "  https://example.com  ",
+			d2passApiKey: "  key-123  ",
+			uncensoredExcludeRegex: "  HEYZO|3dw  ",
+		});
+		const settings = getSettings();
+		expect(settings.d2passApiUrl).toBe("https://example.com");
+		expect(settings.d2passApiKey).toBe("key-123");
+		expect(settings.uncensoredExcludeRegex).toBe("HEYZO|3dw");
+	});
+
 	it("saves and retrieves custom templates", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.com/{code}",

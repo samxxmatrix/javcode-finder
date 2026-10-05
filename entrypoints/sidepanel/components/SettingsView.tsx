@@ -538,6 +538,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	};
 
 	// 表单当前值 vs 已落盘配置：签名不同 = 有未保存改动，通知外层显示“请保存”提醒
+	// 本次渲染只读一次持久化设置：下面的 formConfig 与未保存比对共用同一份快照
+	const persistedSettings = getSettings();
 	const formConfig: ExtensionSettings = {
 		supjavName,
 		supjavTemplate: supjav,
@@ -563,9 +565,15 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		excludedHosts,
 		falenoPrefixes,
 		customRegex,
+		// D2PASS 四字段：Task 6 会接上受控输入；此处先用已持久化的值，
+		// 保证 formConfig 始终是完整的 ExtensionSettings（否则 tsc 报缺字段）
+		d2passApiUrl: persistedSettings.d2passApiUrl,
+		d2passApiKey: persistedSettings.d2passApiKey,
+		d2passEnabled: persistedSettings.d2passEnabled,
+		uncensoredExcludeRegex: persistedSettings.uncensoredExcludeRegex,
 	};
 	const hasUnsavedChanges =
-		configSignature(formConfig) !== configSignature(getSettings());
+		configSignature(formConfig) !== configSignature(persistedSettings);
 
 	// 挂载后先由上面的 effect 把已保存配置灌进表单，避免首帧用空表单误报“有改动”
 	useEffect(() => {
