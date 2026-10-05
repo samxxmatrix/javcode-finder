@@ -103,8 +103,9 @@ export function extractCandidatesFromText(
  * uncensored：无码匹配规则快照（面板用 buildUncensoredRules() 算好传进来）。
  * 传 null = D2PASS 开关关闭 —— 此时一行无码逻辑都不走，结果与接入前逐字一致。
  * 规则数据只能这样带进来：executeScript 只序列化函数源码、import 不跟随注入，
- * 所以下面按同一份数据自包含实现了一遍 uncensored-code.ts 的匹配引擎；
- * 两条路径的一致性由本文件 test 里的「交叉验证」用例守住。
+ * 所以下面按同一份数据自包含实现了一遍 uncensored-code.ts 的匹配引擎。
+ * **覆盖面写清楚，别把"守住了"说大**（Task 15 复核纠正）：「交叉验证」用例只守**无码识别
+ * 那一路**（它的有修正侧输入恒为空），**合并段**由本文件注入侧的单点用例守住。
  */
 export function extractCandidatesInTab(
 	customRegexPattern: string,
@@ -149,7 +150,7 @@ export function extractCandidatesInTab(
 		// 带页面位置的候选：`index` = 命中在页面文本里的起始偏移。
 		// 注入副本**自包含**：这里刻意不认识 uncensored-code.ts 的 IndexedCandidate，
 		// 只按同形结构本地声明一份（import 不跟随注入）。
-		type IndexedCandidate = { text: string; index: number };
+		type IndexedCandidate = { readonly text: string; readonly index: number };
 
 		// —— 有修正侧：既有 customRegex 扫描，过滤与去重口径保持不变（只额外保住位置）——
 		const customCandidates: IndexedCandidate[] = [];
@@ -296,12 +297,17 @@ export function extractCandidatesInTab(
 
 		// —— 合并：全局页面顺序（Task 15）；排除正则在合并去重之后、只对判定为无码的候选执行 ——
 		// 与模块端 mergeCandidateLists 同一算法（无码优先入选 → 有修正侧被无码 key 挡住 →
-		// 按 index 升序 → 取 text），两条路径的一致性由本文件 test 的「交叉验证」用例守住。
+		// 按 index 升序 → 取 text）。这一段**不在**「交叉验证」用例的射程内（那边的有修正侧
+		// 输入恒为空），由本文件注入侧的单点用例守住：页面顺序、排除与"被排除的号不复活"、
+		// 合并后按页面位置截断到 500。
+		// 排除模式的口径与模块端逐字对齐：同样 `(exclude || "").trim()`（纯空白 = 不排除，
+		// 排除正则也不吃模式的收尾空白），并且同样只算一次。
+		const excludePattern = (uncensored.exclude || "").trim();
 		const isExcluded = (candidate: string): boolean => {
-			if (!uncensored.exclude) return false;
+			if (!excludePattern) return false;
 			try {
 				// 不加 g：RegExp.test 带 g 会留 lastIndex 状态
-				return new RegExp(uncensored.exclude).test(candidate);
+				return new RegExp(excludePattern).test(candidate);
 			} catch {
 				return false;
 			}

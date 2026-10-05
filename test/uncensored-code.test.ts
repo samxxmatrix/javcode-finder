@@ -443,6 +443,11 @@ describe("mergeCandidateLists", () => {
 				"",
 			),
 		).toEqual(["HEYZO-3953"]);
+		// 纯空白同义（`(excludeRegex || "").trim()`）：模式里带连续空格的**无码**候选不受影响。
+		// 若哪天删掉那个 `.trim()`，`new RegExp("   ")` 会命中 `ABC   123` 并把它误排除。
+		expect(
+			mergeCandidateLists([], [{ text: "ABC   123", index: 10 }], "   "),
+		).toEqual(["ABC   123"]);
 	});
 
 	// Task 15 新增：钉住"真的按 index 排"——无码那条**夹在**两条有修正候选中间。
@@ -458,6 +463,18 @@ describe("mergeCandidateLists", () => {
 				"",
 			),
 		).toEqual(["ABP-123", "HEYZO-3953", "XYZ-999"]);
+	});
+
+	// trim 语义的网（Task 15 复核实测：`keyOf` 去掉 `.trim()` 时既有用例 **0 条变红**）。
+	// 两路的键必须"trim 后同口径"：否则同一个号只因为一边带首尾空白就会被当成两个号留下来。
+	it("去重键 trim 后同口径：带首尾空白的同一个号只留一条（取无码那一次）", () => {
+		expect(
+			mergeCandidateLists(
+				[{ text: "abp-123", index: 30 }],
+				[{ text: "  ABP-123  ", index: 10 }],
+				"",
+			),
+		).toEqual(["ABP-123"]);
 	});
 });
 

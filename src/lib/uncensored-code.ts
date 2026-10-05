@@ -17,8 +17,12 @@
  * executeScript 序列化后在页面里执行，import 不跟随注入，所以那边按同一份规则数据自包含地复写了
  * 这套匹配引擎；规则快照（本模块 UNCENSORED_RULES 的可注入副本）由 buildUncensoredRules() 算好后
  * 随 executeScript 的 args 一起进页面。
- * 两条路径的一致性由 test/extract-codes.test.ts 的「交叉验证」用例守住（16 组语料逐字比对）；
- * 该副本已实测自包含：with + Proxy 的自由标识符探针显示它只依赖 RegExp / Set / document。
+ * **覆盖面写清楚，别把"守住了"说大**（Task 15 复核纠正）：test/extract-codes.test.ts 的
+ * 「交叉验证」用例（16 组语料逐字比对）只守**无码识别那一路** —— 它的有修正侧输入恒为空
+ * （`neverMatch = "(?!)"` + `mergeCandidateLists([], …)`）。因此**合并段**（有修正候选的
+ * 入选/跳过、排序、500 截断）由该文件**注入侧的单点用例**守住，不是由交叉验证守住的。
+ * 该副本已实测自包含：with + Proxy 的自由标识符探针输出为 RegExp / Set / Map / document
+ * （Map 是 Task 15 合并段引入 `new Map` 后的复测结果）。
  */
 
 import { isValidRegex } from "./settings";

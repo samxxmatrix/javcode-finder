@@ -290,4 +290,45 @@ describe("extractCandidatesInTab", () => {
 			);
 		}
 	});
+
+	// Task 15 的第二个验收点：**这是本次唯一被削掉的旧保证** —— 500 截断的语义随排序一起变了。
+	// 旧口径"无码优先地截"保住了全部无码候选、优先截有修正侧；新口径按页面位置升序 ⇒
+	// 排在 500 名之后的候选（**哪怕是判定为无码的号**）会被截掉。
+	// 有修正侧扫描到 500 条会 break（本文件 `customCandidates.length >= MAX_CANDIDATES`），
+	// 所以"≥500 条有修正候选 + 无码命中在页面更靠后"时，无码候选必然落在队尾被截。
+	// 此前注入侧**完全没有** 500 的用例，这条把新语义钉住（含"不是无码一律被截"的对照）。
+	it("合并后按页面位置截断到 500：页面靠后的无码候选也会被截掉", () => {
+		const many: string[] = [];
+		for (let i = 100; i < 605; i++) many.push(`ABC-${i}`);
+
+		// 无码号（T1 日期型，任何页面启用）排在页面最后 ⇒ index 最大 ⇒ 被 500 截掉
+		stubPage(`${many.join(" ")} 100426-001`);
+		const tail = injectedExtract(DEFAULT_CODE_REGEX, buildUncensoredRules(""));
+		expect(tail.candidates.length).toBe(500);
+		expect(tail.truncated).toBe(true);
+		expect(tail.candidates).not.toContain("100426-001");
+
+		// 对照：同一个无码号排在最前 ⇒ 落在 500 名之内，必须保住
+		stubPage(`100426-001 ${many.slice(0, 500).join(" ")}`);
+		const head = injectedExtract(DEFAULT_CODE_REGEX, buildUncensoredRules(""));
+		expect(head.candidates.length).toBe(500);
+		expect(head.truncated).toBe(true);
+		expect(head.candidates[0]).toBe("100426-001");
+	});
+
+	// 排除模式的口径（Task 15 复核发现两路口径不一致后对齐，此前只靠 buildUncensoredRules 的
+	// trim "兜住"）：模块端是 `(excludeRegex || "").trim()`，纯空白 = 不排除；注入副本原来是
+	// 直接 `new RegExp(uncensored.exclude)`，纯空白模式会把含连续空格的候选误排除。
+	// 这里**绕开 buildUncensoredRules**（它会把纯空白 trim 成 ""）手工造快照，才观测得到该分支。
+	it("排除正则吃的是 trim 后的模式：纯空白 = 不排除（与模块端逐字同口径）", () => {
+		stubPage("無修正 HEYZO-3953 ABC   123");
+		const rules: UncensoredRules = {
+			...buildUncensoredRules(""),
+			exclude: "   ",
+		};
+		expect(injectedExtract(DEFAULT_CODE_REGEX, rules).candidates).toEqual([
+			"HEYZO-3953",
+			"ABC   123",
+		]);
+	});
 });
