@@ -158,7 +158,8 @@ export const App: React.FC = () => {
 			const results = await browser.scripting.executeScript({
 				target: { tabId: activeTab.id },
 				func: extractCandidatesInTab,
-				args: [settings.customRegex || DEFAULT_CODE_REGEX],
+				// 占位：Task 10 会把第二个参数换成 buildUncensoredRules(...) 算好的规则快照
+				args: [settings.customRegex || DEFAULT_CODE_REGEX, null],
 			});
 
 			const firstResult =
