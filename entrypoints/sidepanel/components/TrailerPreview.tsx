@@ -208,6 +208,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				dmmEnabled: settings.dmmEnabled,
 				dmmApiUrl: settings.dmmApiUrl,
 				dmmApiKey: settings.dmmApiKey,
+				d2passEnabled: settings.d2passEnabled,
+				d2passApiUrl: settings.d2passApiUrl,
+				d2passApiKey: settings.d2passApiKey,
 				falenoPrefixes: settings.falenoPrefixes,
 			})) as PreviewResolution | undefined;
 			if (requestId !== resolutionRequestRef.current) return;
