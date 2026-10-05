@@ -396,11 +396,11 @@ export function saveSettings(
 					? settings.dmmEnabled
 					: current.dmmEnabled,
 			d2passApiUrl:
-				settings.d2passApiUrl !== undefined
+				typeof settings.d2passApiUrl === "string"
 					? settings.d2passApiUrl.trim()
 					: current.d2passApiUrl,
 			d2passApiKey:
-				settings.d2passApiKey !== undefined
+				typeof settings.d2passApiKey === "string"
 					? settings.d2passApiKey.trim()
 					: current.d2passApiKey,
 			d2passEnabled:
@@ -409,7 +409,7 @@ export function saveSettings(
 					: current.d2passEnabled,
 			// 非法正则不落盘：丢弃本次输入、保留旧值（留空是合法值，= 不排除）
 			uncensoredExcludeRegex:
-				settings.uncensoredExcludeRegex !== undefined &&
+				typeof settings.uncensoredExcludeRegex === "string" &&
 				(!settings.uncensoredExcludeRegex.trim() ||
 					isValidRegex(settings.uncensoredExcludeRegex))
 					? settings.uncensoredExcludeRegex.trim()

@@ -94,6 +94,51 @@ describe("settings", () => {
 		expect(settings.uncensoredExcludeRegex).toBe("HEYZO|3dw");
 	});
 
+	it("ignores a non-string D2PASS URL instead of dropping the whole save", () => {
+		// 外部传入 null 时只有该字段回退原值，其余字段照常落盘（不能抛错吞掉整次保存）
+		saveSettings({ d2passApiUrl: "https://keep.example/" });
+		saveSettings({ supjavName: "Z", d2passApiUrl: null as unknown as string });
+		expect(getSettings().supjavName).toBe("Z");
+		expect(getSettings().d2passApiUrl).toBe("https://keep.example/");
+	});
+
+	it("ignores non-string D2PASS key and exclude regex instead of dropping the whole save", () => {
+		// 与 d2passApiUrl 同口径：非字符串一律保留旧值，合法字段照常落盘
+		saveSettings({
+			d2passApiKey: "keep-key",
+			uncensoredExcludeRegex: "^HEYZO-",
+		});
+		saveSettings({
+			supjavName: "Z",
+			d2passApiKey: null as unknown as string,
+			uncensoredExcludeRegex: null as unknown as string,
+		});
+		expect(getSettings().supjavName).toBe("Z");
+		expect(getSettings().d2passApiKey).toBe("keep-key");
+		expect(getSettings().uncensoredExcludeRegex).toBe("^HEYZO-");
+	});
+
+	it("keeps D2PASS settings when other fields are saved", () => {
+		// 未传的 D2PASS 字段不应被覆盖（对照 Emby 的同名用例）
+		saveSettings({
+			d2passApiUrl: "https://d.example/",
+			d2passApiKey: "K",
+			d2passEnabled: true,
+			uncensoredExcludeRegex: "^HEYZO-",
+		});
+		saveSettings({ supjavName: "X" });
+		expect(getSettings().d2passApiUrl).toBe("https://d.example/");
+		expect(getSettings().d2passApiKey).toBe("K");
+		expect(getSettings().d2passEnabled).toBe(true);
+		expect(getSettings().uncensoredExcludeRegex).toBe("^HEYZO-");
+	});
+
+	it("can explicitly disable D2PASS", () => {
+		saveSettings({ d2passEnabled: true });
+		saveSettings({ d2passEnabled: false });
+		expect(getSettings().d2passEnabled).toBe(false);
+	});
+
 	it("saves and retrieves custom templates", () => {
 		saveSettings({
 			supjavTemplate: "https://custom.example.com/{code}",
@@ -459,6 +504,15 @@ describe("settings", () => {
 				expect(configSignature({ ...base, ...patch })).not.toBe(
 					baseSignature,
 				);
+			}
+			// 穷尽性守卫：接口新增字段却漏进 patches（= 漏进签名）时，这里必须失败
+			expect(patches.map((patch) => Object.keys(patch)[0]).sort()).toEqual(
+				Object.keys(DEFAULT_SETTINGS).sort(),
+			);
+			// 上一条的守卫：patch 值不得等于该字段默认值，否则它只是自比自
+			for (const patch of patches) {
+				const key = Object.keys(patch)[0] as keyof ExtensionSettings;
+				expect(patch[key]).not.toEqual(DEFAULT_SETTINGS[key]);
 			}
 		});
 
