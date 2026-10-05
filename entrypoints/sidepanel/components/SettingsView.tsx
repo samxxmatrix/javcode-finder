@@ -87,6 +87,13 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [dmmEnabled, setDmmEnabled] = useState(false);
 	// DMM 验证错误（错误汇总区显示，可关闭）
 	const [dmmVerifyError, setDmmVerifyError] = useState<string | null>(null);
+	// D2PASS 无码源配置（地址与 Key 均空 = 未配置）
+	const [d2passApiUrl, setD2passApiUrl] = useState("");
+	const [d2passApiKey, setD2passApiKey] = useState("");
+	// D2PASS 开关（打开才让无码番号优先走 D2PASS，打开时校验地址与 Key 非空）
+	const [d2passEnabled, setD2passEnabled] = useState(false);
+	// D2PASS 验证错误（错误汇总区显示，可关闭）；开关只做“地址与 Key 非空”即时校验
+	const [d2passVerifyError, setD2passVerifyError] = useState<string | null>(null);
 	// Emby 媒体库配置
 	const [embyUrl, setEmbyUrl] = useState("");
 	const [embyApiKey, setEmbyApiKey] = useState("");
@@ -105,6 +112,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 	const [newPrefixInput, setNewPrefixInput] = useState("");
 	const [customRegex, setCustomRegex] = useState("");
 	const [regexError, setRegexError] = useState<string | null>(null);
+	// 无修正番号排除正则（命中则不视为无码番号，不交给 D2PASS）
+	const [uncensoredExcludeRegex, setUncensoredExcludeRegex] = useState("");
+	const [uncensoredRegexError, setUncensoredRegexError] = useState<
+		string | null
+	>(null);
 	const [previewVolume, setPreviewVolume] = useState(DEFAULT_SETTINGS.previewVolume);
 	const [savedMessage, setSavedMessage] = useState(false);
 	// 表单是否已灌入已保存配置：灌入前不做“未保存改动”判断
@@ -200,6 +212,34 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		} catch {
 			setDmmVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setDmmEnabled(false);
+		}
+	};
+
+	// D2PASS 开关：接口没有独立健康检查端点，只做“地址与 Key 非空”的即时校验；
+	// 失败回弹关闭并显示可关闭的错误行（与 DMM 的即时校验一致）
+	const handleToggleD2pass = async (checked: boolean) => {
+		setD2passVerifyError(null);
+		if (!checked) {
+			setD2passEnabled(false);
+			return;
+		}
+		const url = d2passApiUrl.trim();
+		const key = d2passApiKey.trim();
+		if (!url || !key) {
+			setD2passVerifyError(t.d2passIncomplete);
+			setD2passEnabled(false);
+			return;
+		}
+		setD2passEnabled(true);
+	};
+
+	// 排除正则的即时语法校验（与番号识别正则同款）
+	const handleUncensoredRegexChange = (val: string) => {
+		setUncensoredExcludeRegex(val);
+		if (val.trim() && !isValidRegex(val)) {
+			setUncensoredRegexError(t.regexSyntaxError);
+		} else {
+			setUncensoredRegexError(null);
 		}
 	};
 
@@ -300,6 +340,9 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setDmmApiUrl(current.dmmApiUrl);
 		setDmmApiKey(current.dmmApiKey);
 		setDmmEnabled(current.dmmEnabled);
+		setD2passApiUrl(current.d2passApiUrl);
+		setD2passApiKey(current.d2passApiKey);
+		setD2passEnabled(current.d2passEnabled);
 		setEmbyUrl(current.embyUrl);
 		setEmbyApiKey(current.embyApiKey);
 		setEmbyEnabled(current.embyEnabled);
@@ -319,6 +362,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setFalenoPrefixes(current.falenoPrefixes);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
+		setUncensoredExcludeRegex(current.uncensoredExcludeRegex);
+		setUncensoredRegexError(null);
 		setPreviewVolume(current.previewVolume);
 		// 表单已与已保存配置对齐，从这里开始才比较“未保存改动”
 		setInitialized(true);
@@ -437,6 +482,10 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			setRegexError(t.regexSyntaxError);
 			return false;
 		}
+		if (uncensoredExcludeRegex.trim() && !isValidRegex(uncensoredExcludeRegex)) {
+			setUncensoredRegexError(t.regexSyntaxError);
+			return false;
+		}
 		// 云端三项必须全空或全填
 		const urlTrimmed = webdavUrl.trim();
 		const userTrimmed = webdavUser.trim();
@@ -465,6 +514,10 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			dmmApiUrl,
 			dmmApiKey,
 			dmmEnabled,
+			d2passApiUrl,
+			d2passApiKey,
+			d2passEnabled,
+			uncensoredExcludeRegex: uncensoredExcludeRegex.trim(),
 			falenoPrefixes,
 			embyUrl,
 			embyApiKey,
@@ -515,6 +568,10 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setDmmApiKey("");
 		setDmmEnabled(false);
 		setDmmVerifyError(null);
+		setD2passApiUrl("");
+		setD2passApiKey("");
+		setD2passEnabled(false);
+		setD2passVerifyError(null);
 		setEmbyUrl(DEFAULT_SETTINGS.embyUrl);
 		setEmbyApiKey(DEFAULT_SETTINGS.embyApiKey);
 		setEmbyEnabled(DEFAULT_SETTINGS.embyEnabled);
@@ -526,6 +583,8 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		setNewPrefixInput("");
 		setCustomRegex(DEFAULT_CODE_REGEX);
 		setRegexError(null);
+		setUncensoredExcludeRegex(DEFAULT_SETTINGS.uncensoredExcludeRegex);
+		setUncensoredRegexError(null);
 		setPreviewVolume(DEFAULT_SETTINGS.previewVolume);
 		setNewHostInput("");
 		saveLocale("auto");
@@ -565,12 +624,11 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 		excludedHosts,
 		falenoPrefixes,
 		customRegex,
-		// D2PASS 四字段：Task 6 会接上受控输入；此处先用已持久化的值，
-		// 保证 formConfig 始终是完整的 ExtensionSettings（否则 tsc 报缺字段）
-		d2passApiUrl: persistedSettings.d2passApiUrl,
-		d2passApiKey: persistedSettings.d2passApiKey,
-		d2passEnabled: persistedSettings.d2passEnabled,
-		uncensoredExcludeRegex: persistedSettings.uncensoredExcludeRegex,
+		// D2PASS 四字段：受控输入，签名比对据此提示“未保存改动”
+		d2passApiUrl,
+		d2passApiKey,
+		d2passEnabled,
+		uncensoredExcludeRegex,
 	};
 	const hasUnsavedChanges =
 		configSignature(formConfig) !== configSignature(persistedSettings);
@@ -617,7 +675,7 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 			</section>
 
 			{/* 所有错误信息统一显示在版本信息下方，均可关闭 */}
-			{(translateVerifyError || regexError || webdavError || dmmVerifyError || embyVerifyError) && (
+			{(translateVerifyError || regexError || uncensoredRegexError || webdavError || dmmVerifyError || d2passVerifyError || embyVerifyError) && (
 				<div className="settings-errors" role="alert">
 					{translateVerifyError && (
 						<div className="settings-field__error settings-field__error--dismissible">
@@ -663,6 +721,28 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 							</button>
 						</div>
 					)}
+					{uncensoredRegexError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{uncensoredRegexError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setUncensoredRegexError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
 					{webdavError && (
 						<div className="settings-field__error settings-field__error--dismissible">
 							<span>{webdavError}</span>
@@ -692,6 +772,28 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 								type="button"
 								className="settings-field__error-close"
 								onClick={() => setDmmVerifyError(null)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
+								<svg
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									width="11"
+									height="11"
+									aria-hidden="true"
+								>
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+								</svg>
+							</button>
+						</div>
+					)}
+					{d2passVerifyError && (
+						<div className="settings-field__error settings-field__error--dismissible">
+							<span>{d2passVerifyError}</span>
+							<button
+								type="button"
+								className="settings-field__error-close"
+								onClick={() => setD2passVerifyError(null)}
 								title={t.closeError}
 								aria-label={t.closeError}
 							>
@@ -932,6 +1034,72 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 					<ClearButton
 						show={Boolean(dmmApiKey)}
 						onClick={() => setDmmApiKey("")}
+						title={t.clearInput}
+					/>
+				</div>
+			</div>
+
+			<div className="settings-field">
+				<div className="settings-field__header-row">
+					<label className="settings-field__label" htmlFor="d2pass-api-url">
+						{t.d2passApiUrlLabel}
+					</label>
+					{/* 苹果开关：打开时校验地址与 Key 非空；开启后无码番号优先走 D2PASS */}
+					<label
+						className="settings-field__switch"
+						title={t.d2passEnableLabel}
+					>
+						<input
+							type="checkbox"
+							checked={d2passEnabled}
+							onChange={(e) => void handleToggleD2pass(e.target.checked)}
+							aria-label={t.d2passEnableLabel}
+						/>
+						<span
+							className="settings-field__switch-track"
+							aria-hidden="true"
+						/>
+					</label>
+				</div>
+				<div className="settings-field__input-wrap">
+					<input
+						id="d2pass-api-url"
+						type="text"
+						className="settings-field__input settings-field__input--code"
+						value={d2passApiUrl}
+						onChange={(e) => setD2passApiUrl(e.target.value)}
+						placeholder="https://d2pass-api.vercel.app"
+						spellCheck={false}
+						autoComplete="off"
+					/>
+					<ClearButton
+						show={Boolean(d2passApiUrl)}
+						onClick={() => setD2passApiUrl("")}
+						title={t.clearInput}
+					/>
+				</div>
+			</div>
+
+			<div className="settings-field">
+				<div className="settings-field__header-row">
+					<label className="settings-field__label" htmlFor="d2pass-api-key">
+						{t.d2passApiKeyLabel}
+					</label>
+				</div>
+				<div className="settings-field__input-wrap">
+					<input
+						id="d2pass-api-key"
+						type="text"
+						className="settings-field__input settings-field__input--code"
+						value={d2passApiKey}
+						onChange={(e) => setD2passApiKey(e.target.value)}
+						placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+						spellCheck={false}
+						autoComplete="off"
+					/>
+					<ClearButton
+						show={Boolean(d2passApiKey)}
+						onClick={() => setD2passApiKey("")}
 						title={t.clearInput}
 					/>
 				</div>
@@ -1272,6 +1440,36 @@ export const SettingsView = forwardRef<SettingsViewHandle, SettingsViewProps>(
 						<ClearButton
 							show={Boolean(customRegex)}
 							onClick={() => handleRegexChange("")}
+							title={t.clearInput}
+						/>
+					</div>
+				</div>
+
+				<div className="settings-field">
+					<div className="settings-field__header-row">
+						<label
+							className="settings-field__label"
+							htmlFor="uncensored-exclude-regex"
+						>
+							{t.uncensoredExcludeRegexLabel}
+						</label>
+					</div>
+					<div className="settings-field__input-wrap">
+						<input
+							id="uncensored-exclude-regex"
+							type="text"
+							className={`settings-field__input settings-field__input--code ${
+								uncensoredRegexError ? "settings-field__input--error" : ""
+							}`}
+							value={uncensoredExcludeRegex}
+							onChange={(e) => handleUncensoredRegexChange(e.target.value)}
+							placeholder="HEYZO|3dw"
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<ClearButton
+							show={Boolean(uncensoredExcludeRegex)}
+							onClick={() => handleUncensoredRegexChange("")}
 							title={t.clearInput}
 						/>
 					</div>
