@@ -12,6 +12,9 @@ export interface ResolvePreviewOptions {
 	javtrailersLookup: () => Promise<PreviewMedia | null>;
 	// FALENO 兜底:调用方仅在番号前缀命中时提供实现;未提供时保持原有两级链路
 	falenoLookup?: () => Promise<PreviewMedia | null>;
+	// D2PASS(无码链首):调用方仅在开关打开且番号是无码形态时打开
+	d2passEnabled?: boolean;
+	d2passLookup?: () => Promise<PreviewMedia | null>;
 }
 
 function isLookupErrorKind(value: unknown): value is PreviewLookupErrorKind {
@@ -61,16 +64,40 @@ export function normalizeLookupError(
 
 /**
  * Resolves preview data in source priority order without losing lookup failures.
- * 链路:DMM(启用时)→ JavTrailers → FALENO(可选兜底)。
+ * 链路:D2PASS(开关打开且番号是无码形态时,链首) → DMM(启用时) → JavTrailers → FALENO(可选兜底)。
+ * D2PASS 的 not_found 等同查无、其余失败留在 errors。
  * 前级未命中或抛错都继续下一级;DMM 查无不算错误,DMM 抛错保留在 errors。
  */
 export async function resolvePreview({
+	d2passEnabled,
+	d2passLookup,
 	dmmEnabled,
 	dmmLookup,
 	javtrailersLookup,
 	falenoLookup,
 }: ResolvePreviewOptions): Promise<PreviewResolution> {
 	const errors: PreviewLookupError[] = [];
+	// failed 记录"非查无的失败":兜底后仍未命中时据此报 error 而非 not_found
+	let failed = false;
+
+	// 无码链首:D2PASS 只在开关打开且番号是无码形态时启用(FC2 号在调用方已提前返回)
+	if (d2passEnabled && d2passLookup) {
+		try {
+			const d2passMedia = await d2passLookup();
+			if (d2passMedia) {
+				return { status: "resolved", media: d2passMedia, errors };
+			}
+		} catch (error) {
+			const lookupError = normalizeLookupError("d2pass", error);
+			// 404 ITEM_NOT_FOUND(含带 class 的早退响应)= 确认查无,链继续走下一源;
+			// 503 SOURCE_UNAVAILABLE / 401 / 403 / 429 绝不能降级成 not_found ——
+			// 那会落进"此号无预告片"的终态,源站恢复后也不会重查
+			if (lookupError.kind !== "not_found") {
+				failed = true;
+				errors.push(lookupError);
+			}
+		}
+	}
 
 	if (dmmEnabled) {
 		try {
@@ -84,9 +111,7 @@ export async function resolvePreview({
 		}
 	}
 
-	// failed 记录 javtrailers/faleno 是否抛错:兜底后仍未命中时据此报 error 而非 not_found
-	let failed = false;
-
+	// javtrailers/faleno 是否抛错沿用上面的 failed 标记
 	try {
 		const javtrailersMedia = await javtrailersLookup();
 		if (javtrailersMedia) {

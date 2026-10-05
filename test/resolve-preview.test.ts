@@ -287,4 +287,123 @@ describe("resolvePreview", () => {
 			errors: [javtrailersError],
 		});
 	});
+
+	it("D2PASS 命中即返回，且不再问 DMM/JavTrailers", async () => {
+		const d2passMedia: PreviewMedia = {
+			source: "d2pass",
+			detailUrl: "https://www.d2pass.com/product/movies/226138",
+			contentId: "HEYZO-3953",
+			title: "長い説明",
+			shortTitle: "短いタイトル",
+			coverUrl: "https://images.d2pass.com/cover.webp",
+			previewUrl: "https://smovie.heyzo.com/contents/3000/3953/sample_low.mp4",
+			previewType: "mp4",
+		};
+		const dmmLookup = vi.fn(async () => media);
+		const javtrailersLookup = vi.fn(async () => media);
+		const result = await resolvePreview({
+			d2passEnabled: true,
+			d2passLookup: async () => d2passMedia,
+			dmmEnabled: true,
+			dmmLookup,
+			javtrailersLookup,
+		});
+
+		expect(result).toEqual({
+			status: "resolved",
+			media: d2passMedia,
+			errors: [],
+		});
+		expect(dmmLookup).not.toHaveBeenCalled();
+		expect(javtrailersLookup).not.toHaveBeenCalled();
+	});
+
+	it("D2PASS 查无（404）不进 errors，链继续走下一源", async () => {
+		const result = await resolvePreview({
+			d2passEnabled: true,
+			d2passLookup: async () => null,
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => media,
+		});
+
+		expect(result).toEqual({ status: "resolved", media, errors: [] });
+	});
+
+	it("D2PASS 503 保留在 errors，且整轮判成 error 而不是 not_found", async () => {
+		const d2passError: PreviewLookupError = {
+			source: "d2pass",
+			kind: "api",
+			status: 503,
+			code: 50301,
+			error: "SOURCE_UNAVAILABLE",
+			message: "Upstream unavailable.",
+		};
+		const result = await resolvePreview({
+			d2passEnabled: true,
+			d2passLookup: async () => {
+				throw d2passError;
+			},
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => null,
+		});
+
+		expect(result).toEqual({
+			status: "error",
+			media: null,
+			errors: [d2passError],
+		});
+	});
+
+	it("D2PASS 503 之后命中其他源：状态是 resolved，错误仍然保留", async () => {
+		const result = await resolvePreview({
+			d2passEnabled: true,
+			d2passLookup: async () => {
+				throw {
+					source: "d2pass",
+					kind: "api",
+					status: 503,
+					code: 50301,
+					error: "SOURCE_UNAVAILABLE",
+				} satisfies PreviewLookupError;
+			},
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => media,
+		});
+
+		expect(result.status).toBe("resolved");
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.source).toBe("d2pass");
+	});
+
+	it("开关关闭（d2passEnabled 为 false）时一次都不调用 d2passLookup", async () => {
+		const d2passLookup = vi.fn(async () => null);
+		const result = await resolvePreview({
+			d2passEnabled: false,
+			d2passLookup,
+			dmmEnabled: false,
+			dmmLookup: async () => null,
+			javtrailersLookup: async () => media,
+		});
+
+		expect(d2passLookup).not.toHaveBeenCalled();
+		expect(result).toEqual({ status: "resolved", media, errors: [] });
+	});
+
+	it("d2passEnabled 为 true 但未提供 d2passLookup 时也一次都不调用", async () => {
+		const javtrailersLookup = vi.fn(async () => media);
+		const result = await resolvePreview({
+			d2passEnabled: true,
+			dmmEnabled: true,
+			dmmLookup: async () => null,
+			javtrailersLookup,
+		});
+
+		// 没传 d2passLookup 时链首整段被 if (d2passEnabled && d2passLookup) 挡掉：
+		// 若误调 undefined 会抛 TypeError，被记成 d2pass/network 并把整轮拖成 error
+		expect(result).toEqual({ status: "resolved", media, errors: [] });
+		expect(javtrailersLookup).toHaveBeenCalledOnce();
+	});
 });
