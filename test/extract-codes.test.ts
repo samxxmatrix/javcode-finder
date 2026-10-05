@@ -8,7 +8,7 @@ import {
 import {
 	UNCENSORED_RULES,
 	buildUncensoredRules,
-	findUncensoredCandidates,
+	findUncensoredCandidatesWithIndex,
 	mergeCandidateLists,
 } from "../src/lib/uncensored-code";
 import type { UncensoredRules } from "../src/lib/uncensored-code";
@@ -210,6 +210,17 @@ describe("extractCandidatesInTab", () => {
 		]);
 	});
 
+	// Task 15 的验收用例：合并后**统一按页面位置**排，不再把无码整组提到最前面。
+	// `ABP-123` 走有修正那一路（`[A-Z][A-Z0-9]{1,5}[- ]+\d{3,6}` 命中），
+	// `100426-001` 走无码那一路（日期型 T1：`1004` + `26` + `-001`），页面里有修正号在前。
+	// 旧实现把无码组提前 ⇒ Received 是 ["100426-001", "ABP-123"]。
+	it("开关打开时列表按页面顺序：无码候选不再被整体提到最前", () => {
+		stubPage("ABP-123 そして 100426-001");
+		expect(
+			injectedExtract(DEFAULT_CODE_REGEX, buildUncensoredRules("")).candidates,
+		).toEqual(["ABP-123", "100426-001"]);
+	});
+
 	it("排除正则命中即丢弃；双命中的号被彻底移出；有修正侧误报不受影响", () => {
 		stubPage("無修正 HEYZO-3953 ABC-12345");
 		const rules = buildUncensoredRules("^HEYZO-");
@@ -253,6 +264,8 @@ describe("extractCandidatesInTab", () => {
 	// 限的是**单个页面**产出的不同候选数）。某一页一旦超过 500，本用例就必然变红，
 	// 而失败信息看起来像"注入副本漂移"，实际只是这条上限口径差异
 	// （要放宽就得先裁决两边的上限口径，而不是改这条断言）。
+	// Task 15 起合并结果已按页面位置升序 ⇒ 同一条上限截掉的是**页面靠后的候选**
+	// （旧口径是"无码优先地截"，把无码全保住、优先截有修正侧），截断的**条数**口径没变。
 	it("交叉验证：注入函数（页面上下文）与模块纯函数结果逐字一致", () => {
 		const rules = buildUncensoredRules("^HEYZO-");
 		// 自定义正则用一条永不匹配的表达式，隔离出无码这一路
@@ -271,7 +284,7 @@ describe("extractCandidatesInTab", () => {
 			expect(injectedExtract(neverMatch, rules).candidates).toEqual(
 				mergeCandidateLists(
 					[],
-					findUncensoredCandidates(text),
+					findUncensoredCandidatesWithIndex(text),
 					rules.exclude,
 				),
 			);

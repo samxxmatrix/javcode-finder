@@ -375,24 +375,37 @@ describe("锚点表分组（A6）", () => {
 });
 
 describe("mergeCandidateLists", () => {
-	it("同一号两边都命中：只留一条且按无码那一路（无码在前）", () => {
+	it("同一号两边都命中：只留一条、保留无码那一路的写法，整表仍按页面位置升序", () => {
+		// Task 15 起排序口径是**全局页面顺序**：`IPX-118` 在页面里比 `HEYZO-3953` 更靠前
+		// （index 10 < 50）⇒ 无码那条不再被整体提到最前面，保留的是它的写法与位置。
 		expect(
-			mergeCandidateLists(["IPX-118", "HEYZO-3953"], ["HEYZO-3953"], ""),
-		).toEqual(["HEYZO-3953", "IPX-118"]);
+			mergeCandidateLists(
+				[
+					{ text: "IPX-118", index: 10 },
+					{ text: "HEYZO-3953", index: 50 },
+				],
+				[{ text: "HEYZO-3953", index: 50 }],
+				"",
+			),
+		).toEqual(["IPX-118", "HEYZO-3953"]);
 	});
 
 	it("排除命中即丢弃，且只作用于无码侧", () => {
 		expect(
 			mergeCandidateLists(
 				[],
-				["HEYZO-3953", "3dw-315", "100426-001"],
+				[
+					{ text: "HEYZO-3953", index: 10 },
+					{ text: "3dw-315", index: 20 },
+					{ text: "100426-001", index: 30 },
+				],
 				"^(?:HEYZO-3953|3dw-315)$",
 			),
 		).toEqual(["100426-001"]);
 		// 有修正侧的误报（`ABC-12345` 这种形状）不受无码排除正则影响
-		expect(mergeCandidateLists(["ABC-12345"], [], "^ABC-")).toEqual([
-			"ABC-12345",
-		]);
+		expect(
+			mergeCandidateLists([{ text: "ABC-12345", index: 10 }], [], "^ABC-"),
+		).toEqual(["ABC-12345"]);
 	});
 
 	it("双命中的号被排除后彻底移出列表，且不因有修正那一路而残留", () => {
@@ -401,21 +414,50 @@ describe("mergeCandidateLists", () => {
 		//  ② 去重键大小写不敏感 ⇒ 有修正侧的 `heyzo-3953` 认得出它就是同一个号；
 		//  ③ 排除正则只作用无码侧 ⇒ `ABP-123` 即使自己命中 `^ABP-` 也不受影响。
 		expect(
-			mergeCandidateLists(["ABP-123", "heyzo-3953"], ["HEYZO-3953"], "^HEYZO-"),
+			mergeCandidateLists(
+				[
+					{ text: "ABP-123", index: 10 },
+					{ text: "heyzo-3953", index: 20 },
+				],
+				[{ text: "HEYZO-3953", index: 20 }],
+				"^HEYZO-",
+			),
 		).toEqual(["ABP-123"]);
 		expect(
 			mergeCandidateLists(
-				["ABP-123", "heyzo-3953"],
-				["HEYZO-3953"],
+				[
+					{ text: "ABP-123", index: 10 },
+					{ text: "heyzo-3953", index: 20 },
+				],
+				[{ text: "HEYZO-3953", index: 20 }],
 				"^(?:HEYZO-|ABP-)",
 			),
 		).toEqual(["ABP-123"]);
 	});
 
 	it("留空 = 不排除；去重大小写不敏感", () => {
-		expect(mergeCandidateLists(["heyzo-3953"], ["HEYZO-3953"], "")).toEqual([
-			"HEYZO-3953",
-		]);
+		expect(
+			mergeCandidateLists(
+				[{ text: "heyzo-3953", index: 10 }],
+				[{ text: "HEYZO-3953", index: 10 }],
+				"",
+			),
+		).toEqual(["HEYZO-3953"]);
+	});
+
+	// Task 15 新增：钉住"真的按 index 排"——无码那条**夹在**两条有修正候选中间。
+	// 这一条同时排除掉两种"另一种整体排列"的假实现：无码组在前、无码组在后。
+	it("合并后统一按页面位置升序：无码候选可以夹在两条有修正候选中间", () => {
+		expect(
+			mergeCandidateLists(
+				[
+					{ text: "ABP-123", index: 5 },
+					{ text: "XYZ-999", index: 100 },
+				],
+				[{ text: "HEYZO-3953", index: 40 }],
+				"",
+			),
+		).toEqual(["ABP-123", "HEYZO-3953", "XYZ-999"]);
 	});
 });
 
@@ -594,7 +636,7 @@ describe("性能回归（防止 dropContained 退回 O(n²)）", () => {
 		const candidates = findUncensoredCandidates(text);
 		const elapsed = performance.now() - started;
 
-		// 同文本（同跨度）重复项由 sortAndDedupe 收成 1 条
+		// 同文本（同跨度）重复项由 sortAndDedupeWithIndex 收成 1 条
 		expect(candidates).toEqual(["04684"]);
 		// 上限 1500ms（新实现实测数十 ms）：只为挡住 O(n²)，不给 CI 抖动留假红
 		expect(elapsed).toBeLessThan(1500);

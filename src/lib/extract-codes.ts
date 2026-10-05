@@ -146,8 +146,13 @@ export function extractCandidatesInTab(
 			return true;
 		};
 
-		// —— 有修正侧：既有 customRegex 扫描，过滤与去重口径保持不变 ——
-		const customCandidates: string[] = [];
+		// 带页面位置的候选：`index` = 命中在页面文本里的起始偏移。
+		// 注入副本**自包含**：这里刻意不认识 uncensored-code.ts 的 IndexedCandidate，
+		// 只按同形结构本地声明一份（import 不跟随注入）。
+		type IndexedCandidate = { text: string; index: number };
+
+		// —— 有修正侧：既有 customRegex 扫描，过滤与去重口径保持不变（只额外保住位置）——
+		const customCandidates: IndexedCandidate[] = [];
 		{
 			const seen = new Set<string>();
 			let match: RegExpExecArray | null;
@@ -161,7 +166,8 @@ export function extractCandidatesInTab(
 				const upper = rawCandidate.toUpperCase();
 				if (!seen.has(upper)) {
 					seen.add(upper);
-					customCandidates.push(rawCandidate);
+					// index 用正则命中的**原始偏移**（不是 trim 之后的位置）：两路的页面序必须同尺子
+					customCandidates.push({ text: rawCandidate, index: match.index });
 					if (customCandidates.length >= MAX_CANDIDATES) {
 						truncated = true;
 						break;
@@ -171,7 +177,7 @@ export function extractCandidatesInTab(
 		}
 
 		if (!uncensored) {
-			return { candidates: customCandidates, truncated };
+			return { candidates: customCandidates.map((c) => c.text), truncated };
 		}
 
 		// —— 无码侧：T1 强特征任何页面启用；T2 弱特征仅当全页命中锚点表 ——
@@ -276,16 +282,21 @@ export function extractCandidatesInTab(
 			(m) => uncensored.anchorNumbers.indexOf(m.text) < 0,
 		);
 
-		const uncensoredSeen = new Set<string>();
-		const uncensoredCandidates: string[] = [];
+		// 无码侧：按页面顺序去重（大小写不敏感）+ 保留位置。
+		// `uncensoredKeys` 顺带就是合并段要用的"无码侧 key 集合"（用 trim 后的 text 算），
+		// 口径与模块端 mergeCandidateLists 一致。
+		const uncensoredKeys = new Set<string>();
+		const uncensoredCandidates: IndexedCandidate[] = [];
 		for (const m of kept.slice().sort((a, b) => a.index - b.index)) {
-			const key = m.text.toUpperCase();
-			if (uncensoredSeen.has(key)) continue;
-			uncensoredSeen.add(key);
-			uncensoredCandidates.push(m.text);
+			const key = m.text.trim().toUpperCase();
+			if (uncensoredKeys.has(key)) continue;
+			uncensoredKeys.add(key);
+			uncensoredCandidates.push({ text: m.text, index: m.index });
 		}
 
-		// —— 合并：无码优先；排除正则在合并去重之后、只对判定为无码的候选执行 ——
+		// —— 合并：全局页面顺序（Task 15）；排除正则在合并去重之后、只对判定为无码的候选执行 ——
+		// 与模块端 mergeCandidateLists 同一算法（无码优先入选 → 有修正侧被无码 key 挡住 →
+		// 按 index 升序 → 取 text），两条路径的一致性由本文件 test 的「交叉验证」用例守住。
 		const isExcluded = (candidate: string): boolean => {
 			if (!uncensored.exclude) return false;
 			try {
@@ -296,22 +307,28 @@ export function extractCandidatesInTab(
 			}
 		};
 
-		const merged: string[] = [];
-		const mergedSeen = new Set<string>();
+		// key → 入选候选；Map 的插入序 = 入选顺序（无码在前）
+		const winners = new Map<string, IndexedCandidate>();
 		for (const candidate of uncensoredCandidates) {
-			const key = candidate.toUpperCase();
-			if (mergedSeen.has(key) || isExcluded(candidate)) continue;
-			mergedSeen.add(key);
-			merged.push(candidate);
+			const trimmed = candidate.text.trim();
+			const key = trimmed.toUpperCase();
+			if (!trimmed || winners.has(key) || isExcluded(trimmed)) continue;
+			winners.set(key, { text: trimmed, index: candidate.index });
 		}
 		for (const candidate of customCandidates) {
-			const key = candidate.toUpperCase();
+			const trimmed = candidate.text.trim();
+			const key = trimmed.toUpperCase();
 			// 双命中的号已经在无码那一路判定过（含被排除的情况），绝不能从有修正这路复活
-			if (uncensoredSeen.has(key) || mergedSeen.has(key)) continue;
-			mergedSeen.add(key);
-			merged.push(candidate);
+			if (!trimmed || winners.has(key) || uncensoredKeys.has(key)) continue;
+			winners.set(key, { text: trimmed, index: candidate.index });
 		}
+		// index 相同则保持入选顺序（无码在前）：sort 稳定，行为确定
+		const merged = [...winners.values()]
+			.sort((a, b) => a.index - b.index)
+			.map((candidate) => candidate.text);
 
+		// 上限截断保留；合并结果已按页面位置升序 ⇒ 现在截掉的是**页面靠后的候选**
+		// （旧口径是"无码优先地截"，等于把无码全保住、优先截有修正侧）。
 		if (merged.length > MAX_CANDIDATES) {
 			return { candidates: merged.slice(0, MAX_CANDIDATES), truncated: true };
 		}

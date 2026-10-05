@@ -243,7 +243,7 @@ function lastMatchAtOrBefore(
  * 去重规则①：长匹配优先——被更长匹配完整包含的短匹配丢弃。
  *
  * 语义与最初的 O(n²) 双重遍历**逐字一致**：容器必须**严格更长**、边界比较都取等号、
- * 同跨度的重复项不在这里去重（交给后面的 sortAndDedupe）。
+ * 同跨度的重复项不在这里去重（交给后面的 sortAndDedupeWithIndex）。
  *
  * 为什么能去掉内层全表扫描：本函数跑在**被注入页面的主线程**上，2 MiB 页面能产生 30 万+
  * 条命中，O(n²) 会把页面卡死（实测 2 万条 2.6s、35 万条 10 分钟以上跑不完）。而按上面的
@@ -290,35 +290,54 @@ function dropAnchorNumbers(
 	return matches.filter((match) => !rules.anchorNumbers.includes(match.text));
 }
 
-/** 按页面出现顺序去重（大小写不敏感，保留首次出现的原文写法） */
-function sortAndDedupe(matches: RawMatch[]): string[] {
+/** 带页面位置的候选：`index` = 命中在页面文本里的起始偏移 */
+export interface IndexedCandidate {
+	readonly text: string;
+	readonly index: number;
+}
+
+/** 按页面出现顺序去重（大小写不敏感，保留首次出现的原文写法**与位置**） */
+function sortAndDedupeWithIndex(matches: RawMatch[]): IndexedCandidate[] {
 	const seen = new Set<string>();
-	const candidates: string[] = [];
+	const candidates: IndexedCandidate[] = [];
 	for (const match of [...matches].sort((a, b) => a.index - b.index)) {
 		const key = match.text.toUpperCase();
 		if (seen.has(key)) continue;
 		seen.add(key);
-		candidates.push(match.text);
+		candidates.push({ text: match.text, index: match.index });
 	}
 	return candidates;
 }
 
 /**
  * 两层匹配：T1 任何页面启用；T2 仅当**页面文本**命中锚点表时启用（与 host 无关）。
- * 返回按页面出现顺序排好的候选番号（已套用两条去重规则）。
+ * 返回按页面出现顺序排好的候选番号**及其在页面文本里的起始偏移**
+ * （已套用与 `findUncensoredCandidates` **完全相同**的规则集与两条去重规则）。
+ * 位置是「全局页面顺序」的唯一依据：`mergeCandidateLists` 靠它把两路候选合成一个页面序列表。
  * `rules` 可整份替换（测试用合成规则验证去重规则②这类内置语料覆盖不到的链路）。
+ */
+export function findUncensoredCandidatesWithIndex(
+	text: string,
+	rules: UncensoredRules = UNCENSORED_RULES,
+): IndexedCandidate[] {
+	const scanText = text || "";
+	const sources = hasAnyAnchor(scanText, rules.anchors)
+		? [...rules.t1, ...rules.t2]
+		: [...rules.t1];
+	return sortAndDedupeWithIndex(
+		dropAnchorNumbers(dropContained(collectMatches(scanText, sources)), rules),
+	);
+}
+
+/**
+ * 只要番号字符串的薄包装（对外行为与改造前**逐字一致**）：位置信息在这里被丢掉，
+ * 需要位置的下游（合并候选列表）请用 `findUncensoredCandidatesWithIndex`。
  */
 export function findUncensoredCandidates(
 	text: string,
 	rules: UncensoredRules = UNCENSORED_RULES,
 ): string[] {
-	const scanText = text || "";
-	const sources = hasAnyAnchor(scanText, rules.anchors)
-		? [...rules.t1, ...rules.t2]
-		: [...rules.t1];
-	return sortAndDedupe(
-		dropAnchorNumbers(dropContained(collectMatches(scanText, sources)), rules),
-	);
+	return findUncensoredCandidatesWithIndex(text, rules).map((m) => m.text);
 }
 
 /**
@@ -370,17 +389,26 @@ function keyOf(candidate: string): string {
 }
 
 /**
- * 合并有修正（customRegex）与无码两路候选：
- * ① 无码优先：同一个号两边都命中时只留一条，保留无码那一路的写法，且排在前面；
- * ② 排除正则在**合并去重之后**执行，只对**判定为无码**的候选生效
+ * 合并有修正（customRegex）与无码两路候选。**Task 15 起口径为「全局页面顺序」**
+ * （重新定义 spec 决策①「无码优先」，不是废弃它）：
+ *
+ * ① **排序 = 合并后统一按页面位置 `index` 升序** —— 两路各自本来就按页面顺序产出，
+ *    合并后再排一次即得到"目标页面从上到下"的候选列表。**不再**把无码整组提到最前面
+ *    （那会让面板列表在开关打开时不再是页面顺序，用户已明确要求改掉）。
+ * ② **无码优先的新定义**：同一个号两边都命中时，保留**无码那一次**的写法**与位置**
+ *    —— 写法保住（去重键大小写不敏感，但输出的是无码侧首次出现的原文），
+ *    位置则尊重无码那一次的 `index`（两路对同一个号算出的 `index` 本应相同，
+ *    这条规则让"相同 index 时谁在前面"也成为确定行为：先遍历无码 ⇒ 无码在前）。
+ * ③ 排除语义**完全不变**：排除正则只作用于**判定为无码**的候选、匹配候选串本身、
+ *    大小写敏感（见 `keyOf` 的大小写口径），且在**合并去重之后**执行
  *    —— 双命中的号（HEYZO-3953）因此会被彻底移出列表，而不是从无码那路消失、
- *    又从有修正那路活下来（用户看到的就是"我明明排除了它还在列表里"）；
- * ③ 有修正侧的误报不受排除影响（不做全局排除的自然后果）；
- * ④ 大小写口径见 `keyOf`：排除吃原始大小写、去重键大小写不敏感。
+ *    又从有修正那路活下来（用户看到的就是"我明明排除了它还在列表里"）。
+ * ④ 有修正侧的误报不受排除影响（不做全局排除的自然后果）。
+ * ⑤ 大小写口径见 `keyOf`：排除吃原始大小写、去重键大小写不敏感。
  */
 export function mergeCandidateLists(
-	customCandidates: string[],
-	uncensoredCandidates: string[],
+	customCandidates: readonly IndexedCandidate[],
+	uncensoredCandidates: readonly IndexedCandidate[],
 	excludeRegex: string,
 ): string[] {
 	const pattern = (excludeRegex || "").trim();
@@ -394,30 +422,38 @@ export function mergeCandidateLists(
 		}
 	};
 
+	/**
+	 * 无码侧的键集合：**用 trim 后的 text 计算**（与下面入选判定的口径一致）。
+	 * 它的唯一用途是"挡住有修正侧的同号"——无论那条无码候选最终是被保留还是**被排除**，
+	 * 只要无码侧出现过这个号，有修正侧就绝不能让它复活。
+	 */
 	const uncensoredKeys = new Set(
-		uncensoredCandidates.map((candidate) => keyOf(candidate)),
+		uncensoredCandidates.map((candidate) => keyOf(candidate.text)),
 	);
-	const merged: string[] = [];
-	const seen = new Set<string>();
+	/** key → 入选候选（保留原文写法与页面位置）；Map 的插入序 = 入选顺序 */
+	const winners = new Map<string, IndexedCandidate>();
 
+	// ① 先遍历无码（输入已按页面顺序 ⇒ 每个 key 取到的是**首次**出现）
 	for (const candidate of uncensoredCandidates) {
-		const trimmed = candidate.trim();
+		const trimmed = candidate.text.trim();
 		const key = keyOf(trimmed);
-		if (!trimmed || seen.has(key)) continue;
+		if (!trimmed || winners.has(key)) continue;
 		if (isExcluded(trimmed)) continue;
-		seen.add(key);
-		merged.push(trimmed);
+		winners.set(key, { text: trimmed, index: candidate.index });
 	}
 
+	// ② 再遍历有修正：被无码侧的同号挡住（含无码那条被排除的情况），其余照常入选
 	for (const candidate of customCandidates) {
-		const trimmed = candidate.trim();
+		const trimmed = candidate.text.trim();
 		const key = keyOf(trimmed);
-		if (!trimmed || seen.has(key)) continue;
-		// 判定为无码的号已经在上面处理过（含被排除的情况），绝不能从有修正这路复活
+		if (!trimmed || winners.has(key)) continue;
 		if (uncensoredKeys.has(key)) continue;
-		seen.add(key);
-		merged.push(trimmed);
+		winners.set(key, { text: trimmed, index: candidate.index });
 	}
 
-	return merged;
+	// ③ 统一按页面位置升序。`Array.prototype.sort` 稳定：index 相同则保持入选顺序（无码在前），
+	//    行为确定（这条是"同一个号两边都命中时位置也取无码那一次"的落地方式）。
+	return [...winners.values()]
+		.sort((a, b) => a.index - b.index)
+		.map((candidate) => candidate.text);
 }
