@@ -1007,7 +1007,7 @@ export default defineBackground(() => {
 						} satisfies PreviewLookupError;
 					}
 
-					// 404 = 确认查无（接口侧连缓存都不写），按查无返回、链继续
+					// 404 / 40401 / ITEM_NOT_FOUND = 确认查无（接口侧连缓存都不写），按查无返回、链继续
 					if (!res.ok) {
 						let data: unknown = null;
 						try {

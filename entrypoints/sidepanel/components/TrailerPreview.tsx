@@ -452,7 +452,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		video.volume = getSettings().previewVolume / 100;
 
 		setStatus("loading");
-		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 均为 mp4 直链)
+		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 / d2pass 均为 mp4 直链)
 		if (isDirectMp4Source(media?.source) && trailerUrl) {
 			// 预取地址可用就沿用不重置（重置会丢掉已缓冲的 moov，白等一遍）；
 			// 但同一地址 + 已失败/错误态必须 load() 复位，否则 play() 不会重新走资源选择，
