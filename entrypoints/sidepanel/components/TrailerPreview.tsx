@@ -351,7 +351,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return result;
 	};
 
-	// 封面加载失败：dmm 源无备用封面直接判定失败；javtrailers 源尝试详情页备用封面
+	// 封面加载失败：**仅** javtrailers 源尝试详情页备用封面；dmm / fc2 / d2pass 都没有兜底，直接判失败。
+	// ⚠️ 这是本文件唯一一处未走 preview-source.ts 的来源硬编码比较，且历史上接入 FC2 时就已经漏过。
+	// 行为恰好正确（这些源的番号在 javtrailers 上没有对应页），所以**不要**把 d2pass / fc2 加进下面这个判断，
+	// 否则会为一个无码号去拉一个不存在的详情页。
 	const handleCoverError = () => {
 		if (media?.source !== "javtrailers" || coverSrc) {
 			// 备用封面也失败，或 dmm 源无兜底
@@ -517,8 +520,10 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const platforms = configuredPlatforms(getSettings());
 	const externalSearchCode = toExternalSearchCode(code);
 
-	// 短标题行：dmm 商品名，或 javtrailers/faleno/fc2 的标题（这三个源没有独立短标题字段）；
-	// 长标题行：仅 dmm 长文。来源判定统一走 preview-source.ts，避免新增源漏登记。
+	// 短标题行（金色）：优先 media.shortTitle（dmm / d2pass 有独立短标题字段），
+	// 否则按 canUseTitleAsShortTitle 用 title 兜底（javtrailers / faleno / fc2 无独立短标题字段）；
+	// 长标题行（灰色）：以 shortTitle 是否存在为开关 —— 有独立短标题的源（dmm / d2pass）在这里显示其剧情长文。
+	// 来源判定统一走 preview-source.ts，避免新增源漏登记。
 	const displayShortTitle =
 		media?.shortTitle ||
 		(media && canUseTitleAsShortTitle(media.source) ? media.title : null);

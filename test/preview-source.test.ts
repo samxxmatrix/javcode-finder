@@ -3,7 +3,9 @@ import {
 	canUseTitleAsShortTitle,
 	isDirectMp4Source,
 	sourceLabelKey,
+	type SourceLabelKey,
 } from "../src/lib/preview-source";
+import type { PreviewLookupSource } from "../src/lib/types";
 
 describe("isDirectMp4Source", () => {
 	it("marks mp4 direct-link sources", () => {
@@ -44,5 +46,45 @@ describe("sourceLabelKey", () => {
 		expect(sourceLabelKey("faleno")).toBe("falenoSourceLabel");
 		expect(sourceLabelKey("fc2")).toBe("fc2SourceLabel");
 		expect(sourceLabelKey("d2pass")).toBe("d2passSourceLabel");
+	});
+});
+
+/**
+ * 三张手工真值表（上面）只能证明"我记得加的那些"是对的，抓不住"新增源时忘了登记"：
+ * `sourceLabelKey` 的 `default` 会静默伪装成 JavTrailers，两个谓词会静默落 `false`。
+ * 下面这张 `Record<PreviewLookupSource, …>` 总表把这件事变成**编译期**约束 ——
+ * 往 `src/lib/types.ts` 的 `PreviewLookupSource` 加一个源，
+ * `npm run compile`（`tsc --noEmit`，`.wxt/tsconfig.json` 的 include 覆盖 test/）立刻报
+ * `Property 'xxx' is missing in type …`，逼作者同时决定三件事：是否直链、是否用 title 当短标题、错误标签用哪个键。
+ */
+const SOURCE_MATRIX: Record<
+	PreviewLookupSource,
+	{ directMp4: boolean; titleAsShort: boolean; labelKey: SourceLabelKey }
+> = {
+	dmm: { directMp4: true, titleAsShort: false, labelKey: "dmmSourceLabel" },
+	javtrailers: {
+		directMp4: false,
+		titleAsShort: true,
+		labelKey: "javtrailersSourceLabel",
+	},
+	faleno: { directMp4: true, titleAsShort: true, labelKey: "falenoSourceLabel" },
+	fc2: { directMp4: true, titleAsShort: true, labelKey: "fc2SourceLabel" },
+	d2pass: { directMp4: true, titleAsShort: false, labelKey: "d2passSourceLabel" },
+};
+
+describe("来源穷尽性（新增源时的编译期护栏）", () => {
+	it("谓词与标签映射对每个源都与总表一致", () => {
+		for (const source of Object.keys(SOURCE_MATRIX) as PreviewLookupSource[]) {
+			const expected = SOURCE_MATRIX[source];
+			expect(isDirectMp4Source(source)).toBe(expected.directMp4);
+			expect(canUseTitleAsShortTitle(source)).toBe(expected.titleAsShort);
+			expect(sourceLabelKey(source)).toBe(expected.labelKey);
+		}
+	});
+
+	it("总表列全五个源，不多不少", () => {
+		expect(Object.keys(SOURCE_MATRIX).sort()).toEqual(
+			["dmm", "d2pass", "faleno", "fc2", "javtrailers"].sort(),
+		);
 	});
 });
