@@ -24,6 +24,8 @@ export const RELEASES_REPO: string =
 
 export const LATEST_VERSION_URL = `https://github.com/${RELEASES_REPO}/releases/latest/download/version.json`;
 export const RELEASES_PAGE_URL = `https://github.com/${RELEASES_REPO}/releases/latest`;
+/** 项目主页：设置页底部的 GitHub 入口。与更新检查共用 RELEASES_REPO，避免两处各写一个地址 */
+export const PROJECT_HOME_URL = `https://github.com/${RELEASES_REPO}`;
 
 /** 检查节流：24 小时内不重复请求 */
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;

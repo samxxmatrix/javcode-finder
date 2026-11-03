@@ -64,6 +64,8 @@ export interface LocaleMessages {
 	upToDateLabel: string;
 	updateAvailableShort: string;
 	downloadUpdate: string;
+	/** 基础设置页底部 GitHub 图标链接的无障碍标签 / 悬停提示 */
+	openProjectRepo: string;
 	updateCheckFailed: string;
 	updateAvailableTitle: (version: string) => string;
 	updateAvailableDesc: string;
@@ -243,6 +245,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     upToDateLabel: "已是最新",
     updateAvailableShort: "有更新",
     downloadUpdate: "下载更新",
+    openProjectRepo: "在 GitHub 打开项目",
     updateCheckFailed: "检查更新失败，请稍后重试",
     updateAvailableTitle: (version) => `发现新版本 v${version}`,
     updateAvailableDesc: "扩展每 24 小时检查一次；前往 GitHub Release 下载新包并解压覆盖。",
@@ -432,6 +435,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     upToDateLabel: "已是最新",
     updateAvailableShort: "有更新",
     downloadUpdate: "下載更新",
+    openProjectRepo: "在 GitHub 開啟專案",
     updateCheckFailed: "檢查更新失敗，請稍後重試",
     updateAvailableTitle: (version) => `發現新版本 v${version}`,
     updateAvailableDesc: "擴充功能每 24 小時檢查一次；前往 GitHub Release 下載新包並解壓覆蓋。",
@@ -623,6 +627,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     upToDateLabel: "Up to date",
     updateAvailableShort: "Update available",
     downloadUpdate: "Download update",
+    openProjectRepo: "Open project on GitHub",
     updateCheckFailed: "Update check failed. Try again later.",
     updateAvailableTitle: (version) => `Version ${version} is available`,
     updateAvailableDesc:

@@ -807,6 +807,34 @@ button:focus-visible {
 	color: var(--accent-red);
 }
 
+/* 基础设置页页脚：项目主页入口。低视觉权重，hover 才点亮，避免抢版本号的注意力 */
+.settings-footer {
+	display: flex;
+	justify-content: center;
+	padding: 2px 0;
+}
+
+.settings-footer__link {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	color: var(--text-muted);
+	transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.settings-footer__link svg {
+	width: 18px;
+	height: 18px;
+}
+
+.settings-footer__link:hover {
+	color: var(--accent-gold);
+	background-color: var(--bg-surface-hover);
+}
+
 .settings-view__form {
 	display: flex;
 	flex-direction: column;
