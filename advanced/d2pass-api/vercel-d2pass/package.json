@@ -1,0 +1,16 @@
+{
+	"name": "d2pass-api",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "番号 → 标题/封面/预告片/D2Pass 商品页 查询 API（无码源，18 家加盟站）",
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"test:local": "node test-local.mjs"
+	},
+	"dependencies": {
+		"redis": "^5.0.0"
+	}
+}

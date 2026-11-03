@@ -1,0 +1,7 @@
+# Deployment excludes (Vercel CLI respects this file in addition to .gitignore)
+# Rationale: ordinary files in the project root ARE served publicly as static assets
+# (verified: a canary.txt was fetchable with 200), so never let local secrets ship.
+# Verified 2026-10-03: canary.txt -> 200 (not excluded), canary.log -> 401 (*.log excluded).
+.env*
+node_modules
+*.log

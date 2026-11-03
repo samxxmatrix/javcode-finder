@@ -1,0 +1,8 @@
+{
+  "name": "vercel-dmm",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "redis": "^5.0.0"
+  }
+}
