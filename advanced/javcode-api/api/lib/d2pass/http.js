@@ -114,6 +114,9 @@ export async function probeStatus(url, { timeoutMs = 6000, referer } = {}) {
 	const classify = (status) => {
 		if (status >= 200 && status < 300) return "ok";
 		if (status === 404 || status === 410) return "notfound";
+		// 403 / 429 是 WAF 拦或风控限流，不是"这个号不存在"：
+		// 判成 notfound 会让大陆出口的每个号都显示"查无"，且误导路由去试兄弟形态
+		if (status === 403 || status === 429) return "error";
 		if (status >= 500) return "error";
 		return "notfound";
 	};

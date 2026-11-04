@@ -1,17 +1,16 @@
 /**
- * D2Pass（无码源）番号查询 API —— Vercel Node Function 入口。
+ * D2Pass（无码源）番号查询 —— 纯业务 handler。
  *
- * 路由（见 vercel.json 的 rewrites）：
- *   GET /:code                按番号查询
- *   GET /api?code=xxx         等价写法
- *   GET /batch?codes=A,B,C    批量
+ * 合并后入口层（api/index.js）统一处理 OPTIONS / CORS / 鉴权 / 错误映射 / 响应发送，
+ * 这里只接收 req、返回 {status, body, headers?}，不接触响应对象。
+ * 批量与单查由入口按 mode 分发到两个导出函数，故本文件不再根据 pathname 自行分流。
  *
  * 设计文档：docs/d2pass-api接口文档.md ／ 部署与配置：docs/d2pass-api部署指南.md
  */
 
-import { normalizeCode, classifyCode, routeCandidates, alternateCodes } from "./lib/codes.js";
-import { SITES, resolveSite, siteExists, pickPlayablePreview, titleFromHtml } from "./lib/sites.js";
-import { lookupOnD2Pass } from "./lib/d2pass.js";
+import { normalizeCode, classifyCode, routeCandidates, alternateCodes } from "../lib/d2pass/codes.js";
+import { SITES, resolveSite, siteExists, pickPlayablePreview, titleFromHtml } from "../lib/d2pass/sites.js";
+import { lookupOnD2Pass } from "../lib/d2pass/d2pass.js";
 import {
 	cacheGet,
 	cacheGetMany,
@@ -20,7 +19,10 @@ import {
 	cacheSetNegative,
 	rateLimit,
 	cacheBackend,
-} from "./lib/cache.js";
+} from "../lib/d2pass/cache.js";
+import { ERRORS, errorResult, okResult } from "../shared/errors.js";
+import { readConfig } from "../shared/config.js";
+import { normalizeQuery } from "../shared/router.js";
 
 /**
  * 缓存载荷版本。**改动响应字段口径时必须递增**。
@@ -34,63 +36,6 @@ import {
  * 4 = caribbeancom 老页面（无 og:image）启用模板封面兜底（2026-10-10）：3 的条目里 cover_url 可能是 null。
  */
 const SCHEMA_VERSION = 4;
-
-const ERRORS = {
-	MISSING_CODE: { status: 400, code: 40001, error: "MISSING_CODE", message: "Please provide a code, e.g. /HEYZO-3953 or /?code=HEYZO-3953" },
-	INVALID_CODE: { status: 400, code: 40002, error: "INVALID_CODE", message: "Code could not be normalized into a known format." },
-	TOO_MANY_CODES: { status: 400, code: 40003, error: "TOO_MANY_CODES", message: "Batch size exceeded." },
-	MISSING_API_KEY: { status: 401, code: 40101, error: "MISSING_API_KEY", message: "API Key is missing. Provide via query parameter ?key= or Header x-api-key." },
-	INVALID_API_KEY: { status: 403, code: 40301, error: "INVALID_API_KEY", message: "Invalid API Key provided." },
-	ITEM_NOT_FOUND: { status: 404, code: 40401, error: "ITEM_NOT_FOUND", message: "Item not found for the requested code." },
-	/**
-	 * 源站**无法定性**（超时 / 网络错误 / 5xx / 地域拦截）——与 404 严格区分。
-	 *
-	 * 绝不能报成 404：那会被负缓存 6 小时，而且会诱导调用方去试别的分隔符形态/站点，
-	 * 在另一个站上命中同数字的**另一部影片**。此响应不写任何缓存，并带 `Retry-After`。
-	 */
-	SOURCE_UNAVAILABLE: {
-		status: 503,
-		code: 50301,
-		error: "SOURCE_UNAVAILABLE",
-		message: "Upstream source is unreachable or blocked right now. Retry later.",
-	},
-	RATE_LIMITED: { status: 429, code: 42901, error: "RATE_LIMITED", message: "Too many requests. Slow down." },
-	SERVER_ERROR: { status: 500, code: 50001, error: "INTERNAL_SERVER_ERROR", message: "An internal error occurred while processing your request." },
-};
-
-// ---------- 环境配置（每次调用读取，便于本地测试改 env） ----------
-function config() {
-	const num = (key, fallback) => {
-		const v = Number(process.env[key]);
-		return Number.isFinite(v) && v > 0 ? v : fallback;
-	};
-	const list = (key, fallback) =>
-		(process.env[key] || "")
-			.split(",")
-			.map((s) => s.trim())
-			.filter(Boolean)
-			.length
-			? process.env[key]
-					.split(",")
-					.map((s) => s.trim())
-					.filter(Boolean)
-			: fallback;
-	return {
-		apiKey: process.env.API_KEY || "",
-		sourceTimeoutMs: num("SOURCE_TIMEOUT_MS", 6000),
-		d2passTimeoutMs: num("D2PASS_TIMEOUT_MS", 4000),
-		budgetMs: num("TOTAL_BUDGET_MS", 12000),
-		negativeTtlHours: process.env.NEGATIVE_TTL_HOURS === undefined ? 6 : Number(process.env.NEGATIVE_TTL_HOURS),
-		rateLimitPerMin: num("RATE_LIMIT_PER_MIN", 120),
-		batchMax: num("BATCH_MAX", 50),
-		useRsc: process.env.D2PASS_USE_RSC !== "false",
-		previewEnabled: process.env.PREVIEW_ENABLED !== "false",
-		previewVerify: process.env.PREVIEW_VERIFY !== "false",
-		previewOrder: list("PREVIEW_QUALITY_ORDER", ["480p", "360p", "240p", "720p", "1080p"]),
-		heyzoOrder: list("PREVIEW_HEYZO_ORDER", ["sample_low", "sample", "sample_hd"]),
-		disabledSites: list("DISABLED_SITES", []),
-	};
-}
 
 const qualityOf = (url) => {
 	// 必须锚定文件名：`sample.heyzo.com` 主机名里也含 "sample"
@@ -277,7 +222,6 @@ async function resolveCode(rawCode, cfg, debugInfo) {
 	};
 }
 
-/** 带缓存的单条查询 */
 /**
  * 把请求指定的清晰度提到偏好列表最前面（`?quality=720p`）。
  *
@@ -367,110 +311,6 @@ async function pool(items, limit, worker) {
 	return out;
 }
 
-export default async function handler(req, res) {
-	const cfg = config();
-	const url = new URL(req.url || "/", `https://${req.headers?.host || "localhost"}`);
-	const query = Object.fromEntries(url.searchParams.entries());
-
-	setCommonHeaders(res);
-
-	if (req.method === "OPTIONS") {
-		res.statusCode = 204;
-		res.end();
-		return;
-	}
-
-	// 鉴权
-	if (cfg.apiKey) {
-		const provided = query.key || req.headers["x-api-key"];
-		if (!provided) return send(res, ERRORS.MISSING_API_KEY);
-		if (provided !== cfg.apiKey) return send(res, ERRORS.INVALID_API_KEY);
-	}
-
-	const identity = query.key || req.headers["x-forwarded-for"] || "anonymous";
-	// debug=1 直接生效（接口本身由 API Key 保护，不再需要额外开关）；
-	// refresh=1 绕过缓存重抓；no_preview=1 只取元数据；quality= 覆盖本档清晰度偏好。
-	// 后三者都会改变输出内容，故响应一律 no-store，且不进 CDN。
-	const debug = query.debug === "1";
-	const refresh = query.refresh === "1";
-	const noPreview = query.no_preview === "1";
-	const qualityOverride = query.quality ? String(query.quality).trim() : "";
-	const bustCache = debug || refresh || noPreview || Boolean(qualityOverride);
-	const startedAt = Date.now();
-
-	// 本请求生效的配置（不改全局 config）：清晰度偏好按请求覆盖，no_preview 关掉预告片解析
-	const reqCfg = {
-		...cfg,
-		previewEnabled: noPreview ? false : cfg.previewEnabled,
-		previewOrder: prioritizeQuality(cfg.previewOrder, qualityOverride),
-		heyzoOrder: prioritizeQuality(cfg.heyzoOrder, qualityOverride),
-	};
-	const lookupOpts = { refresh, wantPreview: reqCfg.previewEnabled, quality: qualityOverride || null };
-
-	try {
-		// ---- 批量 ----
-		if (url.pathname === "/batch" || query.mode === "batch") {
-			const raw = (query.codes || "").split(",").map((s) => s.trim()).filter(Boolean);
-			if (raw.length === 0) return send(res, ERRORS.MISSING_CODE);
-			if (raw.length > cfg.batchMax) return send(res, ERRORS.TOO_MANY_CODES);
-
-			// 先按类别分流：无关番号（有码/素人/乱码）就地拒绝，不进限流、不碰缓存
-			const codes = [...new Set(raw.map(normalizeCode).filter(Boolean))];
-			const errors = {};
-			const routed = [];
-			for (const code of codes) {
-				const early = earlyReject(code, reqCfg);
-				if (early) errors[code] = early;
-				else routed.push(code);
-			}
-			if (routed.length === 0) return send(res, null, { results: {}, errors, cached: {} }, bustCache);
-
-			const limit = await rateLimit(identity, reqCfg.rateLimitPerMin);
-			if (!limit.allowed) return send(res, ERRORS.RATE_LIMITED);
-			const result = await handleBatch(routed, reqCfg, debug, errors, lookupOpts);
-			return send(res, null, result, bustCache);
-		}
-
-		// ---- 单个 ----
-		const pathCode = url.pathname.replace(/^\/+/, "").split("/")[0];
-		const rawCode = query.code || (pathCode && pathCode !== "api" ? decodeURIComponent(pathCode) : "");
-		if (!rawCode) return send(res, ERRORS.MISSING_CODE);
-		const normalized = normalizeCode(rawCode);
-		if (!normalized) return send(res, ERRORS.INVALID_CODE);
-
-		// 早退发生在限流之前：无关番号零 Redis 命令、零上游流量（有码号远多于无码号，这是主路径）
-		const early = earlyReject(normalized, reqCfg);
-		if (early) {
-			const body = debug
-				? {
-						...early,
-						debug: { code: normalized, rejectedAt: "routing", cacheSkipped: true, elapsedMs: Date.now() - startedAt },
-					}
-				: early;
-			return send(res, early, body, bustCache);
-		}
-
-		const limit = await rateLimit(identity, reqCfg.rateLimitPerMin);
-		if (!limit.allowed) return send(res, ERRORS.RATE_LIMITED);
-
-		const debugInfo = { startedAt };
-		if (qualityOverride) debugInfo.qualityOverride = qualityOverride;
-		if (noPreview) debugInfo.noPreview = true;
-		const { result, error } = await lookup(rawCode, reqCfg, debugInfo, lookupOpts);
-		if (error) {
-			const body = debug ? { ...error, debug: { ...debugInfo, elapsedMs: Date.now() - startedAt } } : error;
-			return send(res, error, body, bustCache);
-		}
-		const body = debug
-			? { ...result, debug: { ...debugInfo, elapsedMs: Date.now() - startedAt, backend: cacheBackend() } }
-			: result;
-		return send(res, null, body, bustCache);
-	} catch (err) {
-		console.error("[handler] failed:", err);
-		return send(res, ERRORS.SERVER_ERROR);
-	}
-}
-
 async function handleBatch(rawCodes, cfg, debug, preErrors = {}, opts = {}) {
 	const codes = [...new Set(rawCodes.map(normalizeCode).filter(Boolean))];
 	// refresh 时不读缓存；no_preview 时只读"完整条目"，残缺条目不能当命中
@@ -503,35 +343,118 @@ async function handleBatch(rawCodes, cfg, debug, preErrors = {}, opts = {}) {
 	return { results, errors, cached: cachedMapOut };
 }
 
-function setCommonHeaders(res) {
-	res.setHeader("Content-Type", "application/json; charset=utf-8");
-	res.setHeader("Access-Control-Allow-Origin", "*");
-	res.setHeader("Access-Control-Allow-Headers", "x-api-key, content-type");
-	res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+/**
+ * 内部业务函数沿用共享错误对象做标识（含引用相等比较与展开副本），边界需要把它还原成
+ * errorResult 认识的错误名 —— 用数字错误码反查，避免为每种错误再维护一张映射表。
+ */
+function errorNameOf(error) {
+	return Object.keys(ERRORS).find((name) => ERRORS[name].code === error.code) || "SERVER_ERROR";
 }
 
-function send(res, error, body, bustCache = false) {
-	if (error) {
-		res.statusCode = error.status;
-		res.setHeader("Cache-Control", "no-store");
-		// 上游不可达是暂时性的：让调用方知道可以稍后重试（也避免被中间层当永久失败缓存）
-		if (error.status === 503) res.setHeader("Retry-After", "5");
-		res.end(
-			JSON.stringify(
-				body && typeof body === "object" && !body.code
-					? body
-					: { code: error.code, error: error.error, message: error.message, ...(body || {}) },
-			),
-		);
-		return;
+/**
+ * 两个 handler 共用同一套请求级配置派生：清晰度覆盖与 no_preview 都会改变输出内容，
+ * 必须在这里一并决定是否 no-store，否则一次带参查询会污染默认口径的 CDN 缓存。
+ */
+function prepare(req) {
+	const cfg = readConfig();
+	const q = normalizeQuery(req);
+	const bustCache = q.debug || q.refresh || q.noPreview || Boolean(q.quality);
+	const reqCfg = {
+		...cfg,
+		previewEnabled: q.noPreview ? false : cfg.previewEnabled,
+		previewOrder: prioritizeQuality(cfg.previewOrder, q.quality),
+		heyzoOrder: prioritizeQuality(cfg.heyzoOrder, q.quality),
+	};
+	return {
+		cfg,
+		q,
+		debug: q.debug,
+		noPreview: q.noPreview,
+		qualityOverride: q.quality,
+		bustCache,
+		startedAt: Date.now(),
+		reqCfg,
+		lookupOpts: { refresh: q.refresh, wantPreview: reqCfg.previewEnabled, quality: q.quality || null },
+		identity: req.query?.key || req.headers?.["x-forwarded-for"] || "anonymous",
+	};
+}
+
+/** 会改变输出内容的请求一律不进 CDN；其余成功响应不自带缓存头，交给入口层按 src 补 s-maxage。 */
+function cacheHeaders(bustCache) {
+	return bustCache ? { "Cache-Control": "no-store" } : {};
+}
+
+/** 单条查询：只做业务，返回 {status, body, headers?}。 */
+export async function handleD2pass(req) {
+	const { debug, noPreview, qualityOverride, bustCache, startedAt, reqCfg, lookupOpts, identity, q } = prepare(req);
+	const headers = cacheHeaders(bustCache);
+	try {
+		const rawCode = q.code;
+		if (!rawCode) return errorResult("MISSING_CODE");
+		const normalized = normalizeCode(rawCode);
+		if (!normalized) return errorResult("INVALID_CODE");
+
+		// 早退发生在限流之前：无关番号零 Redis 命令、零上游流量（有码号远多于无码号，这是主路径）
+		const early = earlyReject(normalized, reqCfg);
+		if (early) {
+			const body = debug
+				? {
+						...early,
+						debug: { code: normalized, rejectedAt: "routing", cacheSkipped: true, elapsedMs: Date.now() - startedAt },
+					}
+				: early;
+			return errorResult("ITEM_NOT_FOUND", { body });
+		}
+
+		const limit = await rateLimit(identity, reqCfg.rateLimitPerMin);
+		if (!limit.allowed) return errorResult("RATE_LIMITED");
+
+		const debugInfo = { startedAt };
+		if (qualityOverride) debugInfo.qualityOverride = qualityOverride;
+		if (noPreview) debugInfo.noPreview = true;
+		const { result, error } = await lookup(rawCode, reqCfg, debugInfo, lookupOpts);
+		if (error) {
+			const body = debug ? { ...error, debug: { ...debugInfo, elapsedMs: Date.now() - startedAt } } : error;
+			return errorResult(errorNameOf(error), { body });
+		}
+		const body = debug
+			? { ...result, debug: { ...debugInfo, elapsedMs: Date.now() - startedAt, backend: cacheBackend() } }
+			: result;
+		return okResult(body, headers);
+	} catch (err) {
+		console.error("[d2pass] failed:", err);
+		return errorResult("SERVER_ERROR");
 	}
-	res.statusCode = 200;
-	// ?key= 走 query（不是 Authorization 头），CDN 才愿意缓存
-	res.setHeader(
-		"Cache-Control",
-		bustCache ? "no-store" : "public, s-maxage=86400, stale-while-revalidate=604800",
-	);
-	res.end(JSON.stringify(body));
+}
+
+/** 批量查询：整批只计 1 次限流，返回 {status, body, headers?}。 */
+export async function handleD2passBatch(req) {
+	const { cfg, debug, bustCache, reqCfg, lookupOpts, identity, q } = prepare(req);
+	const headers = cacheHeaders(bustCache);
+	try {
+		const raw = q.codes;
+		if (raw.length === 0) return errorResult("MISSING_CODE");
+		if (raw.length > cfg.batchMax) return errorResult("TOO_MANY_CODES");
+
+		// 先按类别分流：无关番号（有码/素人/乱码）就地拒绝，不进限流、不碰缓存
+		const codes = [...new Set(raw.map(normalizeCode).filter(Boolean))];
+		const errors = {};
+		const routed = [];
+		for (const code of codes) {
+			const early = earlyReject(code, reqCfg);
+			if (early) errors[code] = early;
+			else routed.push(code);
+		}
+		if (routed.length === 0) return okResult({ results: {}, errors, cached: {} }, headers);
+
+		const limit = await rateLimit(identity, reqCfg.rateLimitPerMin);
+		if (!limit.allowed) return errorResult("RATE_LIMITED");
+		const result = await handleBatch(routed, reqCfg, debug, errors, lookupOpts);
+		return okResult(result, headers);
+	} catch (err) {
+		console.error("[d2pass/batch] failed:", err);
+		return errorResult("SERVER_ERROR");
+	}
 }
 
 export { resolveCode, lookup };

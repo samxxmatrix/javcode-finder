@@ -485,6 +485,8 @@ export async function resolveSite(siteId, code, { qualityOrder, heyzoOrder, time
 			throw new Error(`source unreachable: ${site.host} (${err?.message || err})`);
 		}
 		if (res?.status >= 500) throw new Error(`source ${res.status}: ${site.host}`);
+		// 403 / 429 = 被拦或限流，与"没收录"不同：抛错让上层报 503
+		if (res?.status === 403 || res?.status === 429) throw new Error(`source blocked: ${site.host} (${res.status})`);
 		if (res?.status !== 200 || !res.json?.Title) return null;
 		const j = res.json;
 		const candidates = previewCandidates(site, code, order, {
@@ -519,6 +521,9 @@ export async function resolveSite(siteId, code, { qualityOrder, heyzoOrder, time
 		throw new Error(`source unreachable: ${site.host} (${err?.message || err})`);
 	}
 	if (page?.status >= 500) throw new Error(`source ${page.status}: ${site.host}`);
+	// 403 / 429 必须抛错，不能 return null：null 表示"确认没有这个号"，
+	// 而 403 是出口被 WAF 拦（大陆宽带访问受限站点就是这种），报 404 会让用户以为片源不存在
+	if (page?.status === 403 || page?.status === 429) throw new Error(`source blocked: ${site.host} (${page.status})`);
 	if (page?.status !== 200) return null;
 	const rawTitle = site.extractTitle ? site.extractTitle(page.text) : titleFromHtml(page.text);
 	if (!rawTitle) return null;
@@ -572,6 +577,7 @@ export async function siteExists(siteId, code, { timeoutMs = 6000 } = {}) {
 		try {
 			const res = await fetchJson(site.json(parts), { headers: { Referer: `https://${site.host}/` }, timeoutMs });
 			if (res.status >= 500) return "error";
+			if (res.status === 403 || res.status === 429) return "error";
 			return res.status === 200 && Boolean(res.json?.Title) ? "ok" : "notfound";
 		} catch {
 			return "error";

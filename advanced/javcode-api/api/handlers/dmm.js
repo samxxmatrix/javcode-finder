@@ -1,23 +1,20 @@
 /**
- * Vercel Function: DMM / FALENO 番号查询 API
- * 部署区域：东京 hnd1（见 vercel.json）——CF Worker 出口被 DMM geo 拦截，改用东京部署
- * 环境变量：API_KEY（可选，设置后请求必须携带）；REDIS_URL（Redis 存储自动注入，可选）；
- *          FALENO_ORIGIN（可选，FALENO 源站，默认 https://faleno.jp）；
- *          可选调参：PREVIEW_HEIGHT_MIN / PREVIEW_HEIGHT_MAX（档位区间，默认 320/600）、
- *          PROBE_BUDGET_MS（playlist 探测总预算，默认 12000）、
- *          INCOMPLETE_CACHE_TTL_SECONDS（资料不全条目的缓存秒数，默认 21600，0 = 关闭该策略）
- * 请求示例:
- * GET /BDSM-091?key=YOUR_KEY           （由 vercel.json rewrite 支持，与 Worker 版一致）
- * GET /faleno/FNS-263?key=YOUR_KEY     （FALENO 作品页，返回与 DMM 相同的字段形状）
- * GET /api?code=BDSM-091&key=YOUR_KEY
- * GET /api?code=BDSM-091&key=YOUR_KEY&debug=1    （调试：返回抓取中间状态）
- * GET /api?code=BDSM-091&key=YOUR_KEY&refresh=1  （强制绕过缓存重新抓取）
+ * DMM / FALENO 番号查询 —— 纯业务 handler。
+ *
+ * 合并后入口层（api/index.js）统一处理 OPTIONS / CORS / 鉴权 / 错误映射 / 响应发送，
+ * 这里只接收 req、返回 {status, body, headers?}，不接触响应对象。
+ * 批量与单查由入口按 mode 分发到两个导出函数。
+ *
+ * 部署区域：东京 hnd1（见 vercel.json）——CF Worker 出口被 DMM geo 拦截，改用东京部署。
+ * 环境变量见 shared/config.js：REDIS_URL / FALENO_ORIGIN / PREVIEW_QUALITY /
+ * PROBE_BUDGET_MS / INCOMPLETE_CACHE_TTL_SECONDS / BATCH_MAX。
  */
 
-import { createClient } from 'redis';
+import { errorResult, okResult } from '../shared/errors.js';
+import { readConfig } from '../shared/config.js';
+import { cacheGetRaw, cacheSetRaw } from '../shared/cache.js';
+import { normalizeQuery } from '../shared/router.js';
 import {
-  DEFAULT_MAX_HEIGHT,
-  DEFAULT_MIN_HEIGHT,
   familyVariants,
   orderByPreference,
   parseHlsVariants,
@@ -25,7 +22,7 @@ import {
   qualityLabel,
   shapeQualities,
   toMp4Url,
-} from '../lib/preview-quality.js';
+} from '../lib/dmm/preview-quality.js';
 import {
   HIT,
   NOT_FOUND,
@@ -34,16 +31,13 @@ import {
   combineRouteOutcomes,
   hasDetailContent,
   isBlockedPage,
-} from '../lib/upstream-outcome.js';
-import { SCHEMA_VERSION, cacheKeyFrom, entryTtlSeconds, INCOMPLETE_TTL_SECONDS, usableEntry } from '../lib/cache-entry.js';
+} from '../lib/dmm/upstream-outcome.js';
+import { SCHEMA_VERSION, cacheKeyFrom, entryTtlSeconds, usableEntry } from '../lib/dmm/cache-entry.js';
 
 const COMMON_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
 };
-
-// FALENO 作品页源站；换源只改环境变量 FALENO_ORIGIN
-const FALENO_ORIGIN = (process.env.FALENO_ORIGIN || 'https://faleno.jp').replace(/\/+$/, '');
 
 // 上游超时（毫秒）：接入前只有 FALENO 那一路有超时，DMM 四条上游全无 —— 挂住就挂到平台时限，
 // "无法定性"的分类逻辑永远拿不到信号。取值参考 d2pass 实测（源站冷连接 1.7–2.8s，3s 会假 404）。
@@ -66,190 +60,191 @@ const CHANNELS = {
   },
 };
 
-// 错误码字典定义（与 Worker 版保持一致）
-const ERRORS = {
-  MISSING_CODE: { status: 400, code: 40001, error: 'MISSING_CODE', message: 'Please provide a valid code, e.g. /BDSM-091 or /?code=BDSM-091' },
-  MISSING_API_KEY: { status: 401, code: 40101, error: 'MISSING_API_KEY', message: 'API Key is missing. Provide via query parameter ?key= or Header x-api-key.' },
-  INVALID_API_KEY: { status: 403, code: 40301, error: 'INVALID_API_KEY', message: 'Invalid API Key provided.' },
-  ITEM_NOT_FOUND: { status: 404, code: 40401, error: 'ITEM_NOT_FOUND', message: 'Item not found for the requested code.' },
-  // 上游查不动（超时/网络错/WAF 403/拦截页）：不能报成"番号不存在"，否则客户端把接口抖动当查无
-  SOURCE_UNAVAILABLE: { status: 503, code: 50301, error: 'SOURCE_UNAVAILABLE', message: 'DMM source is temporarily unavailable. Please retry later.' },
-  SERVER_ERROR: { status: 500, code: 50001, error: 'INTERNAL_SERVER_ERROR', message: 'An internal error occurred while processing your request.' }
-};
+// 错误码字典已收归 shared/errors.js：两边共用一张表，避免新增错误要改两处
 
-export default async function handler(req, res) {
-  // 浏览器跨域带自定义头 x-api-key 会先发 OPTIONS 预检，不放行则请求直接失败
-  if (req.method === 'OPTIONS') {
-    sendJson(res, 204, {});
-    return;
+/** 会改变输出内容的请求一律不进 CDN；DMM 分支本就不设 Cache-Control，这里只标 no-store。 */
+function cacheHeaders(q) {
+  return q.debug || q.refresh || q.quality ? { 'Cache-Control': 'no-store' } : {};
+}
+
+/** ?quality=432p → 432；非法/缺省 → null（走默认区间取中点）。 */
+function qualityOf(q) {
+  const match = /^(\d{3,4})p$/i.exec(q.quality);
+  return match ? Number(match[1]) : null;
+}
+
+/** 单条查询：只做业务，返回 {status, body, headers?}。 */
+export async function handleDmm(req) {
+  const q = normalizeQuery(req);
+  const headers = cacheHeaders(q);
+  if (!q.code) return errorResult('MISSING_CODE');
+
+  try {
+    // 调试模式：返回 DMM 抓取过程的中间状态，排查反爬/拦截用
+    if (q.debug) return okResult(await debugProbe(q.code), headers);
+
+    // 仅查 CID（/cid/:code）与 FALENO（/faleno/:code）走独立分支，
+    // 返回与完整查询一致的字段形状，扩展侧复用同一套解析与错误处理
+    if (q.only === 'cid') return await handleCidOnly(q.code, q.refresh);
+    if (q.only === 'faleno') return await handleFaleno(q.code, q.refresh);
+
+    return await lookupDmm(q.code, qualityOf(q), q.refresh);
+  } catch (err) {
+    console.error('[dmm] failed:', err);
+    return errorResult('SERVER_ERROR');
   }
+}
 
-  // ----------------------------------------------------
-  // 1. API Key 身份验证
-  // ----------------------------------------------------
-  const clientKey = req.headers['x-api-key'] || req.query.key;
-  const validKey = process.env.API_KEY;
+/**
+ * 批量查询：部分成功，固定 HTTP 200。
+ * 单条失败只进 errors，不影响其他条目；results 里保留 `cached` 标记，另给一份 cached 映射。
+ */
+export async function handleDmmBatch(req) {
+  const q = normalizeQuery(req);
+  const config = readConfig();
+  const headers = cacheHeaders(q);
 
-  if (validKey) {
-    if (!clientKey) {
-      return sendError(res, ERRORS.MISSING_API_KEY);
+  if (q.codes.length === 0) return errorResult('MISSING_CODE');
+  if (q.codes.length > config.batchMax) return errorResult('TOO_MANY_CODES');
+
+  const quality = qualityOf(q);
+  const results = {};
+  const errors = {};
+  const cached = {};
+
+  // 并发上限 5：50 条同时打上游会触发 DMM 风控，也会把 Vercel 函数时长耗光。
+  // 响应体积实测每条约 1–3 KB（含 preview_qualities），50 条约 150 KB，远低于 4.5 MB 上限，
+  // 故批量条目不做裁剪，保持与单查完全相同的字段形状。
+  await runWithConcurrency(q.codes, 5, async (code) => {
+    try {
+      const result = await lookupDmm(code, quality, q.refresh);
+      if (result.status === 200) {
+        results[code] = result.body;
+        cached[code] = result.body?.cached === true;
+      } else {
+        errors[code] = result.body;
+      }
+    } catch (err) {
+      console.error('[dmm/batch] item failed:', err?.name || 'Error');
+      errors[code] = errorResult('SERVER_ERROR').body;
     }
-    if (clientKey !== validKey) {
-      return sendError(res, ERRORS.INVALID_API_KEY);
-    }
-  }
+  });
 
-  // ----------------------------------------------------
-  // 2. 解析番号 + 键卫生守门（纯语法；脏入参不产生缓存键）
-  // ----------------------------------------------------
-  const code = (req.query.code || '').toString().trim();
+  return okResult({ results, errors, cached }, headers);
+}
 
-  if (!code) {
-    return sendError(res, ERRORS.MISSING_CODE);
-  }
+/** 限并发执行，避免批量查询一次性打满上游。 */
+async function runWithConcurrency(items, limit, worker) {
+  const queue = [...items];
+  await Promise.all(
+    Array.from({ length: Math.min(limit, queue.length) }, async () => {
+      while (queue.length) await worker(queue.shift());
+    }),
+  );
+}
 
+/** 单条查询主体：缓存 → 搜索 → 详情 → 落盘。 */
+async function lookupDmm(code, quality, refresh) {
   // canonical 只在"入参本身就是干净短标识符"时非空；为空 = 不读也不写缓存。
   // 搜索仍用原始入参（DMM 搜索容忍分隔符/噪声，这是它能查到脏输入的原因，保留该宽容度）。
   const cacheKey = cacheKeyFrom(code);
 
-  // ?quality=432p → 432；非法/缺省 → null（走默认区间 [320,600] 取中点）
-  const qualityMatch = /^(\d{3,4})p$/i.exec(String(req.query.quality || '').trim());
-  const quality = qualityMatch ? Number(qualityMatch[1]) : null;
-
-  try {
-    // 调试模式：返回 DMM 抓取过程的中间状态，排查反爬/拦截用
-    if (req.query.debug === '1') {
-      return sendJson(res, 200, await debugProbe(code));
-    }
-
-    // ----------------------------------------------------
-    // 3. 仅查 CID 模式（?only=cid，由 /cid/:code rewrite 进入）：
-    //    跳过详情页抓取，只做搜索页 + cid 筛选
-    // ----------------------------------------------------
-    if (req.query.only === 'cid') {
-      // await 不可省：handleCidOnly 内部若有 rejection，只有 await 才落进下面的外层 catch
-      // （直接 return promise 的话异常逃出 handler，客户端一个响应都拿不到）
-      return await handleCidOnly(res, req, code);
-    }
-
-    // ----------------------------------------------------
-    // 3b. FALENO 作品页查询（?only=faleno，由 /faleno/:code rewrite 进入）：
-    //     返回与 DMM 完全相同的字段形状，扩展侧复用同一套解析与错误处理
-    // ----------------------------------------------------
-    if (req.query.only === 'faleno') {
-      // 同 ?only=cid：必须 await，否则 handleFaleno 的 rejection 连外层 catch 都观察不到
-      return await handleFaleno(res, req, code);
-    }
-
-    // ----------------------------------------------------
-    // 4. Redis 缓存匹配（?refresh=1 强制绕过；键为空 / 未配置 / 失败时静默跳过）
-    //    版本不符 / 键值不一致（脏条目）/ 档位不符都当未命中，重解析后覆盖写回
-    // ----------------------------------------------------
-    if (cacheKey && req.query.refresh !== '1') {
-      const cached = usableEntry(await getCached(cacheKey), cacheKey, quality);
-      if (cached) {
-        return sendJson(res, 200, { ...cached, cached: true });
-      }
-    }
-
-    // ----------------------------------------------------
-    // 5. 搜索番号：数字版 GraphQL 优先，无匹配回退 mono
-    // ----------------------------------------------------
-    const found = await searchCid(code, quality);
-    // 只有确认查无才是 404，其余一切（含未知 outcome）都按"上游查不动"报 503：
-    // 写成"非 HIT ⇒ 报错"而非两段式 === 判断，未知值才不会掉进下面的详情分支
-    if (found.outcome !== HIT) {
-      if (found.outcome === NOT_FOUND) {
-        return sendError(res, ERRORS.ITEM_NOT_FOUND, `Item not found for code: ${code}`);
-      }
-      return sendError(res, ERRORS.SOURCE_UNAVAILABLE, null, { 'Retry-After': '5' });
-    }
-    const { cid, cookieJar, channel, digitalData } = found;
-
-    // ----------------------------------------------------
-    // 6. 取详情：数字版用 GraphQL 详情数据，mono 抓详情页 HTML
-    // ----------------------------------------------------
-    let detail;
-    if (channel === 'digital') {
-      detail = {
-        title: digitalData.title,
-        shortTitle: digitalData.shortTitle,
-        coverUrl: digitalData.coverUrl,
-        previewUrl: digitalData.previewUrl,
-        previewQuality: digitalData.previewQuality,
-        previewQualities: digitalData.previewQualities,
-        // ⚠️ 三个封面浮条字段必须一起带过来：resultData 从 detail.* 取，
-        // 漏在重组的字面量里会让 digital 通道静默返回空元数据（本地 mono/faleno 检查抓不到）
-        actresses: digitalData.actresses,
-        deliveryDate: digitalData.deliveryDate,
-        saleDate: digitalData.saleDate,
-      };
-    } else {
-      const page = await fetchDetailPage(cid, cookieJar, channel);
-      if (page.outcome !== HIT) {
-        if (page.outcome === NOT_FOUND) {
-          return sendError(res, ERRORS.ITEM_NOT_FOUND, `Detail page not found for code: ${code}`);
-        }
-        return sendError(res, ERRORS.SOURCE_UNAVAILABLE, null, { 'Retry-After': '5' });
-      }
-      detail = extractDetail(page.html, cid);
-      // 详情页只给一个 mp4 地址（没有 playlist），按静态家族表在同目录逐档探测（spec §6）；
-      // 探测失败时 probeFamilyPreview 保留原 URL，不会降画质
-      detail = { ...detail, ...(await probeFamilyPreview(detail.previewUrl, quality)) };
-    }
-
-    // ----------------------------------------------------
-    // 7. 构造数据 & 写入缓存（永久保存：番号数据静态，容量管够；写入失败不影响响应）
-    //    脏入参（cacheKey 为空）照常响应，但绝不落盘 —— 脏键永远不会产生
-    // ----------------------------------------------------
-    const resultData = {
-      v: SCHEMA_VERSION,
-      code: cacheKey || code.toUpperCase(),
-      quality: quality ?? null,
-      cid: cid,
-      channel: channel,
-      title: detail.title,
-      short_title: detail.shortTitle,
-      cover_url: detail.coverUrl,
-      preview_url: detail.previewUrl,
-      preview_quality: detail.previewQuality ?? null,
-      preview_qualities: detail.previewQualities ?? [],
-      // 封面浮条用（spec §4.2）：出演者数组 + 两个**原始抓取值**的日期，扩展侧做优先级与归一化
-      actresses: detail.actresses || [],
-      delivery_date: detail.deliveryDate || null,
-      sale_date: detail.saleDate || null,
-      detail_url: CHANNELS[channel].detail(cid)
-    };
-
-    if (cacheKey) {
-      try {
-        await setCached(cacheKey, resultData, entryTtlSeconds(resultData, incompleteCacheTtl()));
-      } catch (err) {
-        // 写入失败不影响响应
-      }
-    }
-
-    sendJson(res, 200, { ...resultData, cached: false });
-  } catch (err) {
-    sendError(res, ERRORS.SERVER_ERROR, err.message);
+  // 版本不符 / 键值不一致（脏条目）/ 档位不符都当未命中，重解析后覆盖写回
+  if (cacheKey && !refresh) {
+    const cached = usableEntry(await getCached(cacheKey), cacheKey, quality);
+    if (cached) return okResult({ ...cached, cached: true });
   }
+
+  const found = await searchCid(code, quality);
+  // 只有确认查无才是 404，其余一切（含未知 outcome）都按"上游查不动"报 503：
+  // 写成"非 HIT ⇒ 报错"而非两段式 === 判断，未知值才不会掉进下面的详情分支
+  if (found.outcome !== HIT) {
+    return found.outcome === NOT_FOUND
+      ? errorResult('ITEM_NOT_FOUND', { message: `Item not found for code: ${code}` })
+      : errorResult('SOURCE_UNAVAILABLE');
+  }
+  const { cid, cookieJar, channel, digitalData } = found;
+
+  // 取详情：数字版用 GraphQL 详情数据，mono 抓详情页 HTML
+  let detail;
+  if (channel === 'digital') {
+    detail = {
+      title: digitalData.title,
+      shortTitle: digitalData.shortTitle,
+      coverUrl: digitalData.coverUrl,
+      previewUrl: digitalData.previewUrl,
+      previewQuality: digitalData.previewQuality,
+      previewQualities: digitalData.previewQualities,
+      // ⚠️ 三个封面浮条字段必须一起带过来：resultData 从 detail.* 取，
+      // 漏在重组的字面量里会让 digital 通道静默返回空元数据（本地 mono/faleno 检查抓不到）
+      actresses: digitalData.actresses,
+      deliveryDate: digitalData.deliveryDate,
+      saleDate: digitalData.saleDate,
+    };
+  } else {
+    const page = await fetchDetailPage(cid, cookieJar, channel);
+    if (page.outcome !== HIT) {
+      return page.outcome === NOT_FOUND
+        ? errorResult('ITEM_NOT_FOUND', { message: `Detail page not found for code: ${code}` })
+        : errorResult('SOURCE_UNAVAILABLE');
+    }
+    detail = extractDetail(page.html, cid);
+    // 详情页只给一个 mp4 地址（没有 playlist），按静态家族表在同目录逐档探测（spec §6）；
+    // 探测失败时 probeFamilyPreview 保留原 URL，不会降画质
+    detail = { ...detail, ...(await probeFamilyPreview(detail.previewUrl, quality)) };
+  }
+
+  // 构造数据 & 写入缓存（永久保存：番号数据静态，容量管够；写入失败不影响响应）
+  // 脏入参（cacheKey 为空）照常响应，但绝不落盘 —— 脏键永远不会产生
+  const resultData = {
+    v: SCHEMA_VERSION,
+    code: cacheKey || code.toUpperCase(),
+    quality: quality ?? null,
+    cid: cid,
+    channel: channel,
+    title: detail.title,
+    short_title: detail.shortTitle,
+    cover_url: detail.coverUrl,
+    preview_url: detail.previewUrl,
+    preview_quality: detail.previewQuality ?? null,
+    preview_qualities: detail.previewQualities ?? [],
+    // 封面浮条用（spec §4.2）：出演者数组 + 两个**原始抓取值**的日期，扩展侧做优先级与归一化
+    actresses: detail.actresses || [],
+    delivery_date: detail.deliveryDate || null,
+    sale_date: detail.saleDate || null,
+    detail_url: CHANNELS[channel].detail(cid)
+  };
+
+  if (cacheKey) await setCached(cacheKey, resultData, entryTtlSeconds(resultData, incompleteCacheTtl()));
+
+  return okResult({ ...resultData, cached: false });
 }
+
 
 /**
  * 仅查 CID：跳过详情页抓取，只返回 cid
  * 缓存优先复用完整查询的结果（key 相同），其次 cid 专属缓存（CID: 前缀）
  */
-async function handleCidOnly(res, req, code) {
+async function handleCidOnly(code, refresh) {
   const cacheKey = cacheKeyFrom(code);
 
-  if (cacheKey && req.query.refresh !== '1') {
+  if (cacheKey && !refresh) {
     // 普通键优先；其次 CID 专属键。两者都要过版本 + 键值一致性守卫（spec §14）。
     // 这里不校验 quality（cid 与档位无关），故 usableEntry 走两参形式。
     const cached =
       usableEntry(await getCached(cacheKey), cacheKey) ||
       usableEntry(await getCached(`CID:${cacheKey}`), cacheKey);
     if (cached) {
-      return sendJson(res, 200, { code: cacheKey, cid: cached.cid, channel: cached.channel, cached: true });
+      // 与未命中路径保持同一字段形状：/cid 恒有 v 与 quality（恒为 null），
+      // 否则调用方要为「这次是不是缓存命中」写两套解析
+      return okResult({
+        v: cached.v ?? SCHEMA_VERSION,
+        code: cacheKey,
+        quality: null,
+        cid: cached.cid,
+        channel: cached.channel,
+        cached: true,
+      });
     }
   }
 
@@ -257,10 +252,9 @@ async function handleCidOnly(res, req, code) {
   // 与全量查询路径同一套定性规则：非 HIT 一律走错误分支（查无 → 404，其余 → 503），
   // 不把非命中当命中回 200；键卫生守门本路径已接线：cacheKey 为空则不读也不写缓存
   if (found.outcome !== HIT) {
-    if (found.outcome === NOT_FOUND) {
-      return sendError(res, ERRORS.ITEM_NOT_FOUND, `Item not found for code: ${code}`);
-    }
-    return sendError(res, ERRORS.SOURCE_UNAVAILABLE, null, { 'Retry-After': '5' });
+    return found.outcome === NOT_FOUND
+      ? errorResult('ITEM_NOT_FOUND', { message: `Item not found for code: ${code}` })
+      : errorResult('SOURCE_UNAVAILABLE');
   }
 
   const result = {
@@ -275,7 +269,7 @@ async function handleCidOnly(res, req, code) {
     // 加短 TTL 只会让 only=cid 查询每隔几小时白跑一次源站（字段完整性判定不适用于它）
     await setCached(`CID:${cacheKey}`, result);
   }
-  sendJson(res, 200, { ...result, cached: false });
+  return okResult({ ...result, cached: false });
 }
 
 /**
@@ -286,24 +280,24 @@ async function handleCidOnly(res, req, code) {
  * 所以"带斜杠就能过"的旧经验已不成立；本函数必须跑在 hnd1 这类非大陆出口才有数据。
  * 响应与 DMM 对齐后，扩展侧复用同一套解析与错误处理。
  */
-async function handleFaleno(res, req, code) {
+async function handleFaleno(code, refresh) {
   const key = code.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!key) {
-    return sendError(res, ERRORS.MISSING_CODE);
+    return errorResult('MISSING_CODE');
   }
   const canonical = cacheKeyFrom(code);
   const cacheKey = canonical ? `FALENO:${canonical}` : null;
 
   // Redis 缓存优先（永久保存：作品页数据静态，容量管够）；键为空 / 未配置 / 失败时静默跳过，
   // 且必须过版本 + 键值一致性守卫（spec §14）—— 脏入参不读也不写
-  if (cacheKey && req.query.refresh !== '1') {
+  if (cacheKey && !refresh) {
     const cached = usableEntry(await getCached(cacheKey), canonical);
     if (cached) {
-      return sendJson(res, 200, { ...cached, cached: true });
+      return okResult({ ...cached, cached: true });
     }
   }
 
-  const worksUrl = `${FALENO_ORIGIN}/top/works/${key}/`;
+  const worksUrl = `${readConfig().falenoOrigin}/top/works/${key}/`;
 
   let upstream;
   try {
@@ -313,29 +307,33 @@ async function handleFaleno(res, req, code) {
       signal: AbortSignal.timeout(15000)
     });
   } catch (err) {
-    return sendError(res, ERRORS.SERVER_ERROR, `FALENO fetch failed: ${err.message}`);
+    // 网络层失败不是"查无"，按上游不可用返回，避免客户端把它缓存成不存在
+    console.error('[dmm/faleno] fetch failed:', err?.name || 'Error');
+    return errorResult('SOURCE_UNAVAILABLE');
   }
 
   // 404 = 作品不存在，按未找到返回（与 DMM 的 40401 语义一致）
   if (upstream.status === 404) {
-    return sendError(res, ERRORS.ITEM_NOT_FOUND, `Item not found for code: ${code}`);
+    return errorResult('ITEM_NOT_FOUND', { message: `Item not found for code: ${code}` });
   }
+  // 上游 5xx / WAF 403 同属"查不动"，与 DMM 分支保持同一套 503 语义
   if (!upstream.ok) {
-    return sendError(res, ERRORS.SERVER_ERROR, `FALENO upstream HTTP ${upstream.status}`);
+    console.error('[dmm/faleno] upstream HTTP', upstream.status);
+    return errorResult('SOURCE_UNAVAILABLE');
   }
 
-  // body 读取也可能 reject（流中断/超时），必须自己兜住：此前它在任何 try 之外，
-  // 加上 dispatcher 的 return 没有 await，失败时整个请求一个响应都发不出去。
+  // body 读取也可能 reject（流中断/超时），必须自己兜住
   let html;
   try {
     html = await upstream.text();
   } catch (err) {
-    return sendError(res, ERRORS.SERVER_ERROR, `FALENO body read failed: ${err.message}`);
+    console.error('[dmm/faleno] body read failed:', err?.name || 'Error');
+    return errorResult('SOURCE_UNAVAILABLE');
   }
   const detail = parseFalenoWorksHtml(html);
   // 以 200 返回的「ページが見つかりませんでした」页面同样判为查无
   if (!detail) {
-    return sendError(res, ERRORS.ITEM_NOT_FOUND, `Item not found for code: ${code}`);
+    return errorResult('ITEM_NOT_FOUND', { message: `Item not found for code: ${code}` });
   }
 
   const resultData = {
@@ -353,15 +351,9 @@ async function handleFaleno(res, req, code) {
     detail_url: worksUrl
   };
 
-  if (cacheKey) {
-    try {
-      await setCached(cacheKey, resultData, entryTtlSeconds(resultData, incompleteCacheTtl()));
-    } catch (err) {
-      // 写入失败不影响响应
-    }
-  }
+  if (cacheKey) await setCached(cacheKey, resultData, entryTtlSeconds(resultData, incompleteCacheTtl()));
 
-  sendJson(res, 200, { ...resultData, cached: false });
+  return okResult({ ...resultData, cached: false });
 }
 
 /**
@@ -500,20 +492,10 @@ async function searchCid(code, quality) {
   return { outcome: HIT, cid: monoCid, channel: 'mono', digitalData: null, cookieJar };
 }
 
-/** 读一个数字环境变量：空白/非法/缺失一律回落到默认值 */
-function readEnvNumber(name, fallback) {
-  const raw = process.env[name];
-  if (typeof raw !== 'string' || !raw.trim()) return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : fallback;
-}
-
-/** 档位区间：环境变量可覆盖，非法/空/缺失值回落到默认（320/600） */
+/** 档位区间：由单一 PREVIEW_QUALITY 推导（见 shared/config.js），非法值已在配置层回落 */
 function previewBounds() {
-  return {
-    minHeight: readEnvNumber('PREVIEW_HEIGHT_MIN', DEFAULT_MIN_HEIGHT),
-    maxHeight: readEnvNumber('PREVIEW_HEIGHT_MAX', DEFAULT_MAX_HEIGHT),
-  };
+  const config = readConfig();
+  return { minHeight: config.minHeight, maxHeight: config.maxHeight };
 }
 
 /**
@@ -522,7 +504,7 @@ function previewBounds() {
  * 资料齐全的条目没有这个风险，继续保持永久缓存（省源站与 Redis 往返）。
  */
 function incompleteCacheTtl() {
-  return readEnvNumber('INCOMPLETE_CACHE_TTL_SECONDS', INCOMPLETE_TTL_SECONDS);
+  return readConfig().incompleteTtlSeconds;
 }
 
 /**
@@ -536,7 +518,7 @@ function incompleteCacheTtl() {
  */
 async function probeFamilyPreview(originalUrl, quality) {
   // 预算在函数内读（不在模块加载时固化）：同一进程内的不同用例/请求可以给不同预算
-  const PROBE_BUDGET_MS = readEnvNumber('PROBE_BUDGET_MS', 12000);
+  const PROBE_BUDGET_MS = readConfig().probeBudgetMs;
   const candidates = orderByPreference(familyVariants(originalUrl), { ...previewBounds(), quality });
   const empty = { previewUrl: originalUrl, previewQuality: null, previewQualities: [] };
   if (candidates.length === 0) return empty;
@@ -1052,113 +1034,26 @@ function decodeHtmlEntities(text) {
     .replace(/&gt;/g, '>');
 }
 
-// 缓存层超时：已连接但对端不回包时 connectTimeout 不生效，必须自己掐表，
-// 否则整个请求会挂到平台时限，503 永远观测不到（见 spec §15.5 的同款理由）。
-const CACHE_TIMEOUT_MS = 1500;
-
-// 每次请求一建一毁的客户端，重连没有意义：node-redis 默认策略会无限重试，
-// 于是"Redis 连不上（ECONNREFUSED）"会变成 connect() 永不 settle（实测 114s 内重试 60+ 次仍无结果），
-// 只能靠上面的掐表兜底 —— 白白让每个请求多等 CACHE_TIMEOUT_MS。故关掉重连：连不上就立刻降级。
-const REDIS_SOCKET_OPTIONS = { connectTimeout: 3000, reconnectStrategy: false };
-
 /**
- * 给 promise 掐表：ms 内不 settle 就按 fallback 结算；超时后原 promise 的迟到结果/异常一律丢弃。
- * 计时器 unref：缓存层挂住时也不该拖住进程退出。
- */
-function withTimeout(promise, ms, fallback) {
-  let timer;
-  const timeout = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
-    timer.unref?.();
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-/**
- * 关掉本次请求的客户端。连接阶段失败时 destroy() 会抛 ClientClosedError
- * （socket.#shouldReconnect 已把 #isOpen 置 false，destroy 见未打开就抛），
- * 而这里在 finally 里调用 —— 抛出去会把 getCached 的静默降级变成 handler 的 500，必须吞掉。
- */
-function safeDestroy(client) {
-  if (!client) return;
-  try {
-    client.destroy();
-  } catch (err) {
-    // 已失败/已关闭：没有需要再关的东西
-  }
-}
-
-/**
- * 读取缓存：Serverless 无连接池，每次请求建连用完即断（个人低并发足够）
- * REDIS_URL 未配置或 Redis 故障时返回 null，主流程降级为直接抓取
+ * 读取缓存条目并反序列化。
+ * 缓存后端（Redis 单例 / 进程内降级）与超时策略由 shared/cache.js 统一负责，
+ * 这里只关心 JSON 编解码 —— 两条业务线的缓存值结构不同，序列化语义留在各自 lib。
  */
 async function getCached(key) {
-  let client;
+  const raw = await cacheGetRaw(key);
+  if (!raw) return null;
   try {
-    client = createClient({ url: process.env.REDIS_URL, socket: REDIS_SOCKET_OPTIONS });
-    client.on('error', () => {}); // 不监听 'error' 时，连接被重置会变成未捕获异常直接杀进程
-    return await withTimeout(
-      (async () => {
-        await client.connect();
-        const raw = await client.get(key);
-        return raw ? JSON.parse(raw) : null;
-      })(),
-      CACHE_TIMEOUT_MS,
-      null,
-    );
+    return JSON.parse(raw);
   } catch (err) {
+    // 半截/损坏条目按未命中处理，主流程重解析后覆盖写回
     return null;
-  } finally {
-    safeDestroy(client);
   }
 }
 
 /**
  * 写入缓存。默认永久保存（无 TTL）；传了 ttlSeconds > 0 时下发 EX（字段完整性分级 TTL，spec §7）。
- * Free 计划无持久化，数据丢失时自动重抓兜底。
+ * 写入失败不影响响应（shared/cache.js 内部已吞掉网络异常并保留内存副本）。
  */
 async function setCached(key, data, ttlSeconds) {
-  let client;
-  try {
-    client = createClient({ url: process.env.REDIS_URL, socket: REDIS_SOCKET_OPTIONS });
-    client.on('error', () => {}); // 同 getCached：写缓存出问题也必须静默降级，不能变成未捕获异常
-    await withTimeout(
-      (async () => {
-        await client.connect();
-        await client.set(key, JSON.stringify(data), ttlSeconds > 0 ? { EX: ttlSeconds } : {});
-      })(),
-      CACHE_TIMEOUT_MS,
-      null,
-    );
-  } catch (err) {
-    // 忽略写入失败（含超时：写不进去不影响响应）
-  } finally {
-    safeDestroy(client);
-  }
-}
-
-/**
- * 统一 JSON 响应（带 CORS 头）
- */
-function sendJson(res, status, data) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
-  res.status(status).json(data);
-}
-
-/**
- * 构造统一错误响应；headers 用于 503 的 Retry-After
- */
-function sendError(res, errorType, customMessage = null, headers = null) {
-  if (headers) {
-    for (const [name, value] of Object.entries(headers)) {
-      res.setHeader(name, value);
-    }
-  }
-  sendJson(res, errorType.status, {
-    code: errorType.code,
-    error: errorType.error,
-    message: customMessage || errorType.message
-  });
+  await cacheSetRaw(key, JSON.stringify(data), ttlSeconds);
 }

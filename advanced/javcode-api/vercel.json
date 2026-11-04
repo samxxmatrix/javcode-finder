@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "api/index.js": {
+      "regions": ["hnd1"],
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/health", "destination": "/api?src=health" },
+    { "source": "/dmm/batch", "destination": "/api?src=dmm&mode=batch" },
+    { "source": "/d2pass/batch", "destination": "/api?src=d2pass&mode=batch" },
+    { "source": "/dmm/:code", "destination": "/api?src=dmm&code=:code" },
+    { "source": "/cid/:code", "destination": "/api?src=dmm&only=cid&code=:code" },
+    { "source": "/faleno/:code", "destination": "/api?src=dmm&only=faleno&code=:code" },
+    { "source": "/d2pass/:code", "destination": "/api?src=d2pass&code=:code" }
+  ]
+}
