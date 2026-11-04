@@ -15,8 +15,7 @@
     "compile": "tsc --noEmit",
     "test": "vitest run",
     "commit": "node scripts/commit.ts",
-    "release": "node scripts/release.ts",
-    "e2e:proxy": "node tools/vercel-e2e.mjs"
+    "release": "node scripts/release.ts"
   },
   "dependencies": {
     "hls.js": "^1.7.3",

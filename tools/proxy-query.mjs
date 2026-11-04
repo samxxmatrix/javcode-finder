@@ -4,8 +4,8 @@
  * 用法：
  *   node tools/proxy-query.mjs <code> [--refresh] [--debug] [--cid] [--base=<url>]
  *
- * Key 取值同 vercel-e2e.mjs：PROXY_API_KEY 环境变量 → advanced/SECRETS.local.md 的 PROXY_API_KEY= / API_KEY=
- * base 取值同 vercel-e2e.mjs：--base= 参数 → PROXY_BASE 环境变量 → 私有文件里的 PROXY_BASE（都没有就报错退出）
+ * Key 取值：PROXY_API_KEY 环境变量 → advanced/SECRETS.local.md 的 PROXY_API_KEY= / API_KEY=
+ * base 取值：--base= 参数 → PROXY_BASE 环境变量 → 私有文件里的 PROXY_BASE（都没有就报错退出）
  * （打印的 URL 里 Key 一律替换为 ***，不泄露）
  */
 
