@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import handler from '../api/index.js';
-import { ROUTES } from '../api/shared/router.js';
+import { ROUTES } from '../server/shared/router.js';
 
 const KEY = 'test-key';
 
@@ -154,8 +154,8 @@ test('路由清单与 vercel.json 的 rewrite 一一对应', async () => {
 
 /** 往共享缓存底座里塞一条「资料齐全」的 dmm 条目；无 REDIS_URL 时落到进程内 Map。 */
 async function seedDmmEntry(code) {
-	const { cacheSetRaw } = await import('../api/shared/cache.js');
-	const { SCHEMA_VERSION } = await import('../api/lib/dmm/cache-entry.js');
+	const { cacheSetRaw } = await import('../server/shared/cache.js');
+	const { SCHEMA_VERSION } = await import('../server/lib/dmm/cache-entry.js');
 	const entry = {
 		v: SCHEMA_VERSION,
 		code,

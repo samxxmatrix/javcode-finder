@@ -122,7 +122,8 @@ npm test
 
 ```
 api/
-├── index.js          唯一入口：OPTIONS / 鉴权 / health / 分发 / 统一响应
+└── index.js          唯一入口：OPTIONS / 鉴权 / health / 分发 / 统一响应
+server/
 ├── handlers/
 │   ├── dmm.js        DMM、CID、FALENO 与有码批量
 │   └── d2pass.js     无码单查与批量
@@ -131,7 +132,9 @@ api/
 └── shared/           auth / errors / respond / config / cache / router
 ```
 
-分层约定：`handlers` 只做业务并返回 `{status, body, headers}`，不接触响应对象；协议层（CORS、缓存头、错误映射）全在 `shared/` 与入口。
+**只有 `api/index.js` 是 Vercel 函数**，其余代码都在 `server/` 下。这不是风格偏好：Vercel 会把 `api/` 目录里的每个 `.js` 都当成一个独立的 Serverless Function，Hobby 计划上限 12 个 —— 把 handler / lib / shared 放进去会直接超过限额、部署失败。
+
+分层约定：`handlers` 只做业务并返回 `{status, body, headers}`，不接触响应对象；协议层（CORS、缓存头、错误映射）全在 `server/shared/` 与入口。
 
 ## 行为与限制
 

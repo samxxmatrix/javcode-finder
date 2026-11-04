@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ROUTES, resolveSource, isBatch, normalizeQuery } from '../api/shared/router.js';
-import { errorResult, okResult } from '../api/shared/errors.js';
-import { sendResult, sendOptions, CORS_HEADERS } from '../api/shared/respond.js';
-import { checkApiKey } from '../api/shared/auth.js';
-import { parseQualityHeight, readConfig } from '../api/shared/config.js';
+import { ROUTES, resolveSource, isBatch, normalizeQuery } from '../server/shared/router.js';
+import { errorResult, okResult } from '../server/shared/errors.js';
+import { sendResult, sendOptions, CORS_HEADERS } from '../server/shared/respond.js';
+import { checkApiKey } from '../server/shared/auth.js';
+import { parseQualityHeight, readConfig } from '../server/shared/config.js';
 
 /** 最小响应对象，只实现入口层用到的三个方法。 */
 function mockRes() {

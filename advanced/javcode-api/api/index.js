@@ -5,12 +5,12 @@
  * 两个 handler 只返回 {status, body, headers}，不接触响应对象。
  */
 
-import { checkApiKey } from './shared/auth.js';
-import { errorResult, okResult } from './shared/errors.js';
-import { sendResult, sendOptions } from './shared/respond.js';
-import { resolveSource, isBatch } from './shared/router.js';
-import { handleDmm, handleDmmBatch } from './handlers/dmm.js';
-import { handleD2pass, handleD2passBatch } from './handlers/d2pass.js';
+import { checkApiKey } from '../server/shared/auth.js';
+import { errorResult, okResult } from '../server/shared/errors.js';
+import { sendResult, sendOptions } from '../server/shared/respond.js';
+import { resolveSource, isBatch } from '../server/shared/router.js';
+import { handleDmm, handleDmmBatch } from '../server/handlers/dmm.js';
+import { handleD2pass, handleD2passBatch } from '../server/handlers/d2pass.js';
 
 export default async function handler(req, res) {
 	if (req.method === 'OPTIONS') {
