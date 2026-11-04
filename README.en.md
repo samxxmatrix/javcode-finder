@@ -14,7 +14,7 @@ JavCode Finder scans the current page for video codes when you click the toolbar
 - **Quick navigation**: three customizable external platform buttons (name + URL template) that open a search page for the code; the template needs a placeholder (`{code}` or `{番号}`). For example, with `https://javdb.com/search?q={code}`, clicking `ABP-123` opens `https://javdb.com/search?q=ABP-123`
 - **Other**: Simplified Chinese / Traditional Chinese / English UI, adjustable preview volume, and an update check at most once every 24 hours
 
-> Covers and trailers for censored codes can be fetched from JavTrailers directly; the optional `javcode-api` backend is what adds DMM / FALENO and uncensored-code covers, trailers, and metadata. Their asset URLs usually still require the browser to reach the Japanese origin — see the “Optional backends” section below.
+> Without the optional `javcode-api` backend, censored codes fall back to direct platform lookups with limited data; with it, titles, descriptions, covers, and trailers for DMM / FALENO / uncensored codes are complete. Their asset URLs usually still require the browser to reach the Japanese origin — see the “Optional backends” section below.
 
 ## Install on Chrome or Edge
 
@@ -49,7 +49,7 @@ The extension **works without any backend**: code scanning, highlighting, librar
 
 | Backend | What it provides | Without it |
 |---|---|---|
-| [`javcode-api`](advanced/javcode-api/) | Titles, covers, trailer URLs, and metadata for DMM / FALENO / uncensored codes | Censored codes fall back to JavTrailers directly; uncensored codes get code detection only, with no cover or trailer |
+| [`javcode-api`](advanced/javcode-api/) | Detection for DMM / FALENO / uncensored codes, plus titles, descriptions, cover and trailer URLs, with caching | Censored codes fall back to direct platform lookups with limited data; uncensored codes are not detected or highlighted, and have no cover or trailer |
 | [`deepl-translate-api`](advanced/deepl-translate-api/) | Translation proxy for titles and performers (DeepL, with permanent cache) | Falls back to public translation endpoints — less reliable and rate-limited |
 
 **Wiring up `javcode-api`**: after deploying, open *Settings → Advanced → Data Sources → Code lookup*, fill in the service URL and API key, then flip the switch. The switch first calls `GET /health`, which validates both reachability and the API key in one request — auth failures and unreachable hosts are reported inline instead of failing silently. See the [`API reference`](advanced/javcode-api/接口文档.md) for parameters and response fields.

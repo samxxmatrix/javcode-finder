@@ -14,7 +14,7 @@ JavCode Finder 会在你主动点击浏览器工具栏图标后，识别当前�
 - **快捷跳转**：三个可自定义的外部平台按钮（名称 + 链接模板），按番号直达搜索页；模板里需要写占位符（`{code}` 或 `{番号}`）。例如链接规则填 `https://javdb.com/search?q={code}`，点击番号 `ABP-123` 时实际跳转 `https://javdb.com/search?q=ABP-123`
 - **其它**：简中 / 繁中 / 英文三语界面、预览音量可调、最多每 24 小时检查一次新版本并在面板提示
 
-> 有码号的封面与预告片可由 JavTrailers 直连获取；接入可选后端 `javcode-api` 后，DMM / FALENO 与无码号的封面、预告片与元数据才完整。资产直链通常仍需浏览器能访问日本源站——详见下文「可选后端」。
+> 有码号不接后端时走平台直连，数据有限；接入可选后端 `javcode-api` 后，DMM / FALENO / 无码号的标题、介绍、封面与预告片才完整。资产直链通常仍需浏览器能访问日本源站——详见下文「可选后端」。
 
 ## 安装 Chrome 或 Edge 版本
 
@@ -49,7 +49,7 @@ production ZIP 会输出到 `.output/`。构建产物不会提交到 Git。
 
 | 后端 | 提供什么 | 不部署时 |
 |---|---|---|
-| [`javcode-api`](advanced/javcode-api/) | DMM / FALENO / 无码站的标题、封面、预告片直链与元数据 | 有码号改走 JavTrailers 直连；无码号只有番号识别与标注，没有封面与预告片 |
+| [`javcode-api`](advanced/javcode-api/) | DMM / FALENO / 无码号的识别，影片标题、介绍，封面、预告片直链与缓存 | 有码号改走平台直连，数据有限；无码号无法识别与标注，没有封面与预告片 |
 | [`deepl-translate-api`](advanced/deepl-translate-api/) | 标题与出演者的翻译代理（DeepL，带永久缓存） | 退回公开翻译接口，稳定性与用量受限 |
 
 **接入 `javcode-api`**：部署后在「设置 → 进阶设置 → 数据源 → 番号查询」填入服务地址与 API Key，打开开关即生效。开关会先请求 `GET /health`，同时验证服务可达与 Key 正确 —— 鉴权失败、服务不可达会就地提示，不会静默失败。接口参数与响应字段见 [`接口文档`](advanced/javcode-api/接口文档.md)。

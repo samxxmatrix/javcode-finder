@@ -14,7 +14,7 @@ JavCode Finder 會在你主動點擊瀏覽器工具列圖示後，識別當前�
 - **快捷跳轉**：三個可自訂的外部平台按鈕（名稱 + 連結範本），依番號直達搜尋頁；範本裡需要寫佔位符（`{code}` 或 `{番号}`）。例如連結規則填 `https://javdb.com/search?q={code}`，點擊番號 `ABP-123` 時實際跳轉 `https://javdb.com/search?q=ABP-123`
 - **其他**：簡中／繁中／英文三語介面、預覽音量可調、最多每 24 小時檢查一次新版本並在面板提示
 
-> 有碼號的封面與預告片可由 JavTrailers 直連取得；接入可選後端 `javcode-api` 後，DMM／FALENO 與無碼號的封面、預告片與中繼資料才完整。資產直連通常仍需瀏覽器能存取日本源站——詳見下文「可選後端」。
+> 有碼號不接後端時走平台直連，資料有限；接入可選後端 `javcode-api` 後，DMM／FALENO／無碼號的標題、介紹、封面與預告片才完整。資產直連通常仍需瀏覽器能存取日本源站——詳見下文「可選後端」。
 
 ## 安裝 Chrome 或 Edge 版本
 
@@ -49,7 +49,7 @@ production ZIP 會輸出到 `.output/`。建置產物不會提交到 Git。
 
 | 後端 | 提供什麼 | 不部署時 |
 |---|---|---|
-| [`javcode-api`](advanced/javcode-api/) | DMM／FALENO／無碼站的標題、封面、預告片直連與中繼資料 | 有碼號改走 JavTrailers 直連；無碼號只有番號識別與標註，沒有封面與預告片 |
+| [`javcode-api`](advanced/javcode-api/) | DMM／FALENO／無碼號的識別，影片標題、介紹，封面、預告片直連與快取 | 有碼號改走平台直連，資料有限；無碼號無法識別與標註，沒有封面與預告片 |
 | [`deepl-translate-api`](advanced/deepl-translate-api/) | 標題與出演者的翻譯代理（DeepL，帶永久快取） | 退回公開翻譯介面，穩定性與用量受限 |
 
 **接入 `javcode-api`**：部署後在「設定 → 進階設定 → 資料來源 → 番號查詢」填入服務位址與 API Key，開啟開關即生效。開關會先請求 `GET /health`，同時驗證服務可達與 Key 正確 —— 鑑權失敗、服務不可達會就地在行內提示，不會靜默失敗。介面參數與回應欄位見 [`介面文件`](advanced/javcode-api/接口文档.md)。
