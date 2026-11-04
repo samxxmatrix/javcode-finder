@@ -6,7 +6,7 @@ JavCode Finder scans the current page for video codes when you click the toolbar
 
 - **Code scanning**: pulls every code on the page in one pass and de-duplicates them. Handles censored codes (`IPX-118`, `DLDSS-529`), uncensored codes, and all `FC2-*` spellings. Both the recognition regex and a **code blocklist regex** are editable in settings
 - **Cover & trailer preview**: clicking a code loads its cover, title and description, performers, and release date on demand, with inline trailer playback
-- **Title & performer translation**: in Chinese UI the Japanese title and performer names are translated automatically. You can plug in a self-hosted DeepL worker for reliability; without it the extension falls back to public translation endpoints
+- **Title & performer translation**: in Chinese UI the Japanese title and performer names are translated automatically. Public translation endpoints (Google / Microsoft, switchable in settings) are used by default; a self-hosted translation service can be configured for reliability
 - **Page locate**: find and highlight where the code appears on the current page; repeated clicks cycle through multiple occurrences
 - **Favorites**: bookmark the codes you care about; stored locally by default, with cloud sync available in settings
 - **Cloud sync**: with it enabled, your favorite codes and settings sync to the cloud (your own WebDAV space) and are shared across devices
@@ -45,16 +45,17 @@ Releases use `npm run release <patch|minor|major|x.y.z>`: it bumps the version (
 
 ## Optional backends (advanced)
 
-The extension **works without any backend**: code scanning, highlighting, library integration, settings sync, and previews all run inside the extension. Two capabilities can be improved by self-hosted backends — deploy either one you need:
+The extension **works without any backend**: code scanning, highlighting, library integration, settings sync, and previews all run inside the extension. Code lookup data can be enhanced by a self-hosted backend — deploy it if you need it:
 
 | Backend | What it provides | Without it |
 |---|---|---|
 | [`javcode-api`](advanced/javcode-api/) | Detection for DMM / FALENO / uncensored codes, plus titles, descriptions, cover and trailer URLs, with caching | Censored codes fall back to direct platform lookups with limited data; uncensored codes are not detected or highlighted, and have no cover or trailer |
-| [`deepl-translate-api`](advanced/deepl-translate-api/) | Translation proxy for titles and performers (DeepL, with permanent cache) | Falls back to public translation endpoints — less reliable and rate-limited |
 
 **Wiring up `javcode-api`**: after deploying, open *Settings → Advanced → Data Sources → Code lookup*, fill in the service URL and API key, then flip the switch. The switch first calls `GET /health`, which validates both reachability and the API key in one request — auth failures and unreachable hosts are reported inline instead of failing silently. See the [`API reference`](advanced/javcode-api/接口文档.md) for parameters and response fields.
 
-The two backends are independent; deploy only the one you need. `advanced/` also contains `adaptive-proxy.js` (an optional edge layer that puts your own domain in front of `*.vercel.app`); see [`advanced/README.md`](advanced/README.md) for the full list.
+`advanced/` also contains `adaptive-proxy.js` (an optional edge layer that puts your own domain in front of `*.vercel.app`); see [`advanced/README.md`](advanced/README.md) for the full list.
+
+> Translation needs no backend. The translation API URL / key in settings only connects to an existing self-hosted translation service; the DeepL worker this project used to ship (`deepl-translate-api`) is archived and no longer maintained, because DeepL has stopped issuing free API accounts. Existing deployments keep working, but the source and deployment guide are no longer part of this repository.
 
 Note: deploying means fetching public pages under your own account, so check compliance and platform terms yourself. Covers and trailers returned by the backend are **direct origin URLs**, so "lookup succeeded" does not mean "the image loads" — if the client's network cannot reach the Japanese origin, images and video will still fail, which is unrelated to the lookup API.
 

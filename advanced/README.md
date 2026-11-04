@@ -7,17 +7,17 @@
 ```
 advanced/
 ├── adaptive-proxy.js      通用边缘反代（Cloudflare Worker），把请求原样转发到某个上游域名
-├── javcode-api/           番号查询服务（Vercel Node Function）：DMM / FALENO / 无码站
-└── deepl-translate-api/   翻译服务（Cloudflare Worker）：DeepL 代理 + 永久缓存
+└── javcode-api/           番号查询服务（Vercel Node Function）：DMM / FALENO / 无码站
 ```
 
 | 目录 | 作用 | 平台 | 文档 |
 |---|---|---|---|
 | [`javcode-api/`](./javcode-api/) | 传入番号，返回标题、封面、预告片直链与元数据 | Vercel | [`README`](./javcode-api/README.md) · [`接口文档`](./javcode-api/接口文档.md) |
-| [`deepl-translate-api/`](./deepl-translate-api/) | 页面整段翻译，带永久缓存 | Cloudflare Workers | 见目录内文档 |
 | [`adaptive-proxy.js`](./adaptive-proxy.js) | 把请求原样转发到某个上游域名，上游由 `DOMAIN` 指定；与具体服务无关 | Cloudflare Workers | 见文件头注释 |
 
-`javcode-api` 与 `deepl-translate-api` 互相独立，可只部署其中一个，也可都部署。`adaptive-proxy.js` 是可选的入口层：当 `*.vercel.app` 直连不理想时，用它套一层自有域名。
+`adaptive-proxy.js` 是可选的入口层：当 `*.vercel.app` 直连不理想时，用它套一层自有域名。
+
+> 原 `deepl-translate-api/`（DeepL 翻译 Worker）已于 2026-11-05 归档并从仓库移除：DeepL 停止开放免费 API 账号注册，该方案失去低成本前提。已有部署可继续使用，扩展的翻译功能则默认走谷歌 / 微软公开翻译接口，不依赖任何后端。
 
 ## 部署 javcode-api 的两个前提
 
