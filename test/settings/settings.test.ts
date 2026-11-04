@@ -44,23 +44,23 @@ describe("settings", () => {
 		expect(settings).toEqual(DEFAULT_SETTINGS);
 	});
 
-	it("D2PASS 三字段与排除正则：默认值、保存、读回、trim", () => {
-		expect(DEFAULT_SETTINGS.d2passApiUrl).toBe("");
-		expect(DEFAULT_SETTINGS.d2passApiKey).toBe("");
-		expect(DEFAULT_SETTINGS.d2passEnabled).toBe(false);
+	it("反代地址与 Key 与排除正则：默认值、保存、读回、trim", () => {
+		expect(DEFAULT_SETTINGS.apiUrl).toBe("");
+		expect(DEFAULT_SETTINGS.apiKey).toBe("");
+		expect(DEFAULT_SETTINGS.lookupEnabled).toBe(false);
 		expect(DEFAULT_SETTINGS.codeExcludeRegex).toBe("");
 
 		saveSettings({
-			d2passApiUrl: "  https://d2pass.example.com/  ",
-			d2passApiKey: "  key-123  ",
-			d2passEnabled: true,
+			apiUrl: "  https://proxy.example.com/  ",
+			apiKey: "  key-123  ",
+			lookupEnabled: true,
 			codeExcludeRegex: "  HEYZO|3dw  ",
 		});
 
 		const saved = getSettings();
-		expect(saved.d2passApiUrl).toBe("https://d2pass.example.com/");
-		expect(saved.d2passApiKey).toBe("key-123");
-		expect(saved.d2passEnabled).toBe(true);
+		expect(saved.apiUrl).toBe("https://proxy.example.com/");
+		expect(saved.apiKey).toBe("key-123");
+		expect(saved.lookupEnabled).toBe(true);
 		expect(saved.codeExcludeRegex).toBe("HEYZO|3dw");
 	});
 
@@ -95,62 +95,78 @@ describe("settings", () => {
 		expect(getSettings().codeExcludeRegex).toBe("^NEW-");
 	});
 
-	it("读回时对手工写坏存储的 D2PASS 字段做 trim", () => {
+	it("读回时对手工写坏存储的反代字段做 trim", () => {
 		// 绕过 saveSettings 直接落盘（模拟外部写坏/旧版残留）：trim 必须由读取端兜住
 		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
-			d2passApiUrl: "  https://example.com  ",
-			d2passApiKey: "  key-123  ",
+			apiUrl: "  https://example.com  ",
+			apiKey: "  key-123  ",
 			codeExcludeRegex: "  HEYZO|3dw  ",
 		});
 		const settings = getSettings();
-		expect(settings.d2passApiUrl).toBe("https://example.com");
-		expect(settings.d2passApiKey).toBe("key-123");
+		expect(settings.apiUrl).toBe("https://example.com");
+		expect(settings.apiKey).toBe("key-123");
 		expect(settings.codeExcludeRegex).toBe("HEYZO|3dw");
 	});
 
-	it("ignores a non-string D2PASS URL instead of dropping the whole save", () => {
-		// 外部传入 null 时只有该字段回退原值，其余字段照常落盘（不能抛错吞掉整次保存）
-		saveSettings({ d2passApiUrl: "https://keep.example/" });
-		saveSettings({ supjavName: "Z", d2passApiUrl: null as unknown as string });
-		expect(getSettings().supjavName).toBe("Z");
-		expect(getSettings().d2passApiUrl).toBe("https://keep.example/");
+	it("旧版 DMM / D2PASS 字段一律忽略（合并后只认单一地址）", () => {
+		// 一刀切迁移：旧值无法判断该映射到哪个前缀，宁可让用户重填也不要猜错
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+			dmmApiUrl: "https://old-dmm.example.com/",
+			dmmApiKey: "old-key",
+			dmmEnabled: true,
+			d2passApiUrl: "https://old-d2p.example.com/",
+			d2passApiKey: "old-key-2",
+			d2passEnabled: true,
+		});
+		const settings = getSettings();
+		expect(settings.apiUrl).toBe("");
+		expect(settings.apiKey).toBe("");
+		expect(settings.lookupEnabled).toBe(false);
 	});
 
-	it("ignores non-string D2PASS key and exclude regex instead of dropping the whole save", () => {
-		// 与 d2passApiUrl 同口径：非字符串一律保留旧值，合法字段照常落盘
+	it("ignores a non-string proxy URL instead of dropping the whole save", () => {
+		// 外部传入 null 时只有该字段回退原值，其余字段照常落盘（不能抛错吞掉整次保存）
+		saveSettings({ apiUrl: "https://keep.example/" });
+		saveSettings({ supjavName: "Z", apiUrl: null as unknown as string });
+		expect(getSettings().supjavName).toBe("Z");
+		expect(getSettings().apiUrl).toBe("https://keep.example/");
+	});
+
+	it("ignores non-string proxy key and exclude regex instead of dropping the whole save", () => {
+		// 与 apiUrl 同口径：非字符串一律保留旧值，合法字段照常落盘
 		saveSettings({
-			d2passApiKey: "keep-key",
+			apiKey: "keep-key",
 			codeExcludeRegex: "^HEYZO-",
 		});
 		saveSettings({
 			supjavName: "Z",
-			d2passApiKey: null as unknown as string,
+			apiKey: null as unknown as string,
 			codeExcludeRegex: null as unknown as string,
 		});
 		expect(getSettings().supjavName).toBe("Z");
-		expect(getSettings().d2passApiKey).toBe("keep-key");
+		expect(getSettings().apiKey).toBe("keep-key");
 		expect(getSettings().codeExcludeRegex).toBe("^HEYZO-");
 	});
 
-	it("keeps D2PASS settings when other fields are saved", () => {
-		// 未传的 D2PASS 字段不应被覆盖（对照 Emby 的同名用例）
+	it("keeps proxy settings when other fields are saved", () => {
+		// 未传的反代字段不应被覆盖（对照 Emby 的同名用例）
 		saveSettings({
-			d2passApiUrl: "https://d.example/",
-			d2passApiKey: "K",
-			d2passEnabled: true,
+			apiUrl: "https://d.example/",
+			apiKey: "K",
+			lookupEnabled: true,
 			codeExcludeRegex: "^HEYZO-",
 		});
 		saveSettings({ supjavName: "X" });
-		expect(getSettings().d2passApiUrl).toBe("https://d.example/");
-		expect(getSettings().d2passApiKey).toBe("K");
-		expect(getSettings().d2passEnabled).toBe(true);
+		expect(getSettings().apiUrl).toBe("https://d.example/");
+		expect(getSettings().apiKey).toBe("K");
+		expect(getSettings().lookupEnabled).toBe(true);
 		expect(getSettings().codeExcludeRegex).toBe("^HEYZO-");
 	});
 
-	it("can explicitly disable D2PASS", () => {
-		saveSettings({ d2passEnabled: true });
-		saveSettings({ d2passEnabled: false });
-		expect(getSettings().d2passEnabled).toBe(false);
+	it("can explicitly disable the lookup switch", () => {
+		saveSettings({ lookupEnabled: true });
+		saveSettings({ lookupEnabled: false });
+		expect(getSettings().lookupEnabled).toBe(false);
 	});
 
 	it("saves and retrieves custom templates", () => {
@@ -288,33 +304,33 @@ describe("settings", () => {
 		expect(getSettings().webdavEnabled).toBe(false);
 	});
 
-	it("dmm lookup settings default off with empty URL/key and can be saved", () => {
+	it("lookup settings default off with empty URL/key and can be saved", () => {
 		// 默认：开关关闭、地址与 Key 为空（关闭时预览走 javtrailers 默认链路）
-		expect(DEFAULT_SETTINGS.dmmEnabled).toBe(false);
-		expect(DEFAULT_SETTINGS.dmmApiUrl).toBe("");
-		expect(DEFAULT_SETTINGS.dmmApiKey).toBe("");
-		expect(getSettings().dmmEnabled).toBe(false);
-		expect(getSettings().dmmApiUrl).toBe("");
-		expect(getSettings().dmmApiKey).toBe("");
+		expect(DEFAULT_SETTINGS.lookupEnabled).toBe(false);
+		expect(DEFAULT_SETTINGS.apiUrl).toBe("");
+		expect(DEFAULT_SETTINGS.apiKey).toBe("");
+		expect(getSettings().lookupEnabled).toBe(false);
+		expect(getSettings().apiUrl).toBe("");
+		expect(getSettings().apiKey).toBe("");
 
 		saveSettings({
-			dmmEnabled: true,
-			dmmApiUrl: "https://api.example.com/",
-			dmmApiKey: "test-key",
+			lookupEnabled: true,
+			apiUrl: "https://api.example.com/",
+			apiKey: "test-key",
 		});
-		expect(getSettings().dmmEnabled).toBe(true);
-		expect(getSettings().dmmApiUrl).toBe("https://api.example.com/");
-		expect(getSettings().dmmApiKey).toBe("test-key");
+		expect(getSettings().lookupEnabled).toBe(true);
+		expect(getSettings().apiUrl).toBe("https://api.example.com/");
+		expect(getSettings().apiKey).toBe("test-key");
 
 		// 清空与关闭 → 回默认（javtrailers 模式）
 		saveSettings({
-			dmmEnabled: false,
-			dmmApiUrl: "",
-			dmmApiKey: "",
+			lookupEnabled: false,
+			apiUrl: "",
+			apiKey: "",
 		});
-		expect(getSettings().dmmEnabled).toBe(false);
-		expect(getSettings().dmmApiUrl).toBe("");
-		expect(getSettings().dmmApiKey).toBe("");
+		expect(getSettings().lookupEnabled).toBe(false);
+		expect(getSettings().apiUrl).toBe("");
+		expect(getSettings().apiKey).toBe("");
 	});
 
 	it("saves and restores Emby settings", () => {
@@ -496,9 +512,9 @@ describe("settings", () => {
 				{ translateApiUrl: "https://translate.example/" },
 				{ translateEnabled: true },
 				{ fallbackService: "bing" },
-				{ dmmApiUrl: "https://dmm.example/" },
-				{ dmmApiKey: "key" },
-				{ dmmEnabled: true },
+				{ apiUrl: "https://proxy.example/" },
+				{ apiKey: "key" },
+				{ lookupEnabled: true },
 				{ embyUrl: "http://127.0.0.1:8096" },
 				{ embyApiKey: "key" },
 				{ embyEnabled: true },
@@ -509,9 +525,6 @@ describe("settings", () => {
 				{ excludedHosts: ["example.com"] },
 				{ falenoPrefixes: [] },
 				{ customRegex: "\\bFC2-\\d+\\b" },
-				{ d2passApiUrl: "https://d2pass.example.com" },
-				{ d2passApiKey: "key" },
-				{ d2passEnabled: true },
 				{ codeExcludeRegex: "^HEYZO-" },
 			];
 			for (const patch of patches) {

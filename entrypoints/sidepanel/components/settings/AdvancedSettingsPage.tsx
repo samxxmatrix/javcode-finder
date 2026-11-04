@@ -22,29 +22,28 @@ export function AdvancedSettingsPage() {
 	const d = useDraft();
 	const { t } = d;
 
-	const [dmmOpen, setDmmOpen] = useState(false);
-	const [d2passOpen, setD2passOpen] = useState(false);
+	const [lookupOpen, setLookupOpen] = useState(false);
 	const [embyOpen, setEmbyOpen] = useState(false);
 	const [translateOpen, setTranslateOpen] = useState(false);
 	const [webdavOpen, setWebdavOpen] = useState(false);
 
-	const dmmConfigured = Boolean(d.dmmApiUrl.trim() && d.dmmApiKey.trim());
-	const d2passConfigured = Boolean(
-		d.d2passApiUrl.trim() && d.d2passApiKey.trim(),
-	);
+	const lookupConfigured = Boolean(d.apiUrl.trim() && d.apiKey.trim());
 	const embyConfigured = Boolean(d.embyUrl.trim() && d.embyApiKey.trim());
 	const translateConfigured = Boolean(
 		d.translateUrl.trim() && d.deeplApiKey.trim(),
 	);
 
-	const stateText = (enabled: boolean, configured: boolean) =>
-		enabled
-			? t.statusEnabled
-			: configured
-				? t.statusConfiguredOff
-				: t.statusNotConfigured;
+	// 校验期间统一显示「连接中」：开关同时被禁用，用户不会重复点击
+	const stateText = (enabled: boolean, configured: boolean, busy = false) =>
+		busy
+			? t.statusConnecting
+			: enabled
+				? t.statusEnabled
+				: configured
+					? t.statusConfiguredOff
+					: t.statusNotConfigured;
 
-	const configuredCount = [dmmConfigured, d2passConfigured, embyConfigured].filter(
+	const configuredCount = [lookupConfigured, embyConfigured].filter(
 		Boolean,
 	).length;
 
@@ -52,130 +51,71 @@ export function AdvancedSettingsPage() {
 		<div className="settings-page">
 			<SettingsSection
 				title={t.settingsGroupSources}
-				meta={t.configuredCount(configuredCount, 3)}
+				meta={t.configuredCount(configuredCount, 2)}
 			>
 				<ServiceRow
-					title={t.dmmSourceLabel}
-					enabled={d.dmmEnabled}
-					open={dmmOpen}
-					onToggleOpen={() => setDmmOpen((v) => !v)}
-					onToggleEnabled={(checked) => void d.handleToggleDmm(checked)}
-					enabledLabel={t.dmmEnableLabel}
-					stateText={stateText(d.dmmEnabled, dmmConfigured)}
+					title={t.lookupSourceLabel}
+					enabled={d.lookupEnabled}
+					busy={d.lookupVerifying}
+					open={lookupOpen}
+					onToggleOpen={() => setLookupOpen((v) => !v)}
+					onToggleEnabled={(checked) => void d.handleToggleLookup(checked)}
+					enabledLabel={t.lookupEnableLabel}
+					stateText={stateText(
+						d.lookupEnabled,
+						lookupConfigured,
+						d.lookupVerifying,
+					)}
 					notice={
-						d.dmmVerifyError ? (
+						d.lookupVerifyError ? (
 							<FieldError
-								text={d.dmmVerifyError}
-								onDismiss={() => d.setDmmVerifyError(null)}
+								text={d.lookupVerifyError}
+								onDismiss={() => d.setLookupVerifyError(null)}
 								closeLabel={t.closeError}
 							/>
 						) : undefined
 					}
 				>
 					<div className="settings-field">
-						<label className="settings-field__label" htmlFor="dmm-api-url">
-							{t.dmmApiUrlLabel}
+						<label className="settings-field__label" htmlFor="api-url">
+							{t.apiUrlLabel}
 						</label>
 						<div className="settings-field__input-wrap">
 							<input
-								id="dmm-api-url"
+								id="api-url"
 								type="text"
 								className="settings-field__input settings-field__input--code"
-								value={d.dmmApiUrl}
-								onChange={(e) => d.setDmmApiUrl(e.target.value)}
-								placeholder="https://example.com/"
+								value={d.apiUrl}
+								onChange={(e) => d.setApiUrl(e.target.value)}
+								placeholder="https://your-proxy.vercel.app"
 								spellCheck={false}
 								autoComplete="off"
 							/>
 							<ClearButton
-								show={Boolean(d.dmmApiUrl)}
-								onClick={() => d.setDmmApiUrl("")}
+								show={Boolean(d.apiUrl)}
+								onClick={() => d.setApiUrl("")}
 								title={t.clearInput}
 							/>
 						</div>
 					</div>
 					<div className="settings-field">
-						<label className="settings-field__label" htmlFor="dmm-api-key">
-							{t.dmmApiKeyLabel}
+						<label className="settings-field__label" htmlFor="api-key">
+							{t.apiKeyLabel}
 						</label>
 						<div className="settings-field__input-wrap">
 							<input
-								id="dmm-api-key"
+								id="api-key"
 								type="text"
 								className="settings-field__input settings-field__input--code"
-								value={d.dmmApiKey}
-								onChange={(e) => d.setDmmApiKey(e.target.value)}
+								value={d.apiKey}
+								onChange={(e) => d.setApiKey(e.target.value)}
 								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 								spellCheck={false}
 								autoComplete="off"
 							/>
 							<ClearButton
-								show={Boolean(d.dmmApiKey)}
-								onClick={() => d.setDmmApiKey("")}
-								title={t.clearInput}
-							/>
-						</div>
-					</div>
-				</ServiceRow>
-
-				<ServiceRow
-					title={t.d2passSourceLabel}
-					enabled={d.d2passEnabled}
-					open={d2passOpen}
-					onToggleOpen={() => setD2passOpen((v) => !v)}
-					onToggleEnabled={(checked) => void d.handleToggleD2pass(checked)}
-					enabledLabel={t.d2passEnableLabel}
-					stateText={stateText(d.d2passEnabled, d2passConfigured)}
-					notice={
-						d.d2passVerifyError ? (
-							<FieldError
-								text={d.d2passVerifyError}
-								onDismiss={() => d.setD2passVerifyError(null)}
-								closeLabel={t.closeError}
-							/>
-						) : undefined
-					}
-				>
-					<div className="settings-field">
-						<label className="settings-field__label" htmlFor="d2pass-api-url">
-							{t.d2passApiUrlLabel}
-						</label>
-						<div className="settings-field__input-wrap">
-							<input
-								id="d2pass-api-url"
-								type="text"
-								className="settings-field__input settings-field__input--code"
-								value={d.d2passApiUrl}
-								onChange={(e) => d.setD2passApiUrl(e.target.value)}
-								placeholder="https://your-api.example.com"
-								spellCheck={false}
-								autoComplete="off"
-							/>
-							<ClearButton
-								show={Boolean(d.d2passApiUrl)}
-								onClick={() => d.setD2passApiUrl("")}
-								title={t.clearInput}
-							/>
-						</div>
-					</div>
-					<div className="settings-field">
-						<label className="settings-field__label" htmlFor="d2pass-api-key">
-							{t.d2passApiKeyLabel}
-						</label>
-						<div className="settings-field__input-wrap">
-							<input
-								id="d2pass-api-key"
-								type="text"
-								className="settings-field__input settings-field__input--code"
-								value={d.d2passApiKey}
-								onChange={(e) => d.setD2passApiKey(e.target.value)}
-								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-								spellCheck={false}
-								autoComplete="off"
-							/>
-							<ClearButton
-								show={Boolean(d.d2passApiKey)}
-								onClick={() => d.setD2passApiKey("")}
+								show={Boolean(d.apiKey)}
+								onClick={() => d.setApiKey("")}
 								title={t.clearInput}
 							/>
 						</div>
@@ -185,11 +125,12 @@ export function AdvancedSettingsPage() {
 				<ServiceRow
 					title={t.embySourceLabel}
 					enabled={d.embyEnabled}
+					busy={d.embyVerifying}
 					open={embyOpen}
 					onToggleOpen={() => setEmbyOpen((v) => !v)}
 					onToggleEnabled={(checked) => void d.handleToggleEmby(checked)}
 					enabledLabel={t.embyEnableLabel}
-					stateText={stateText(d.embyEnabled, embyConfigured)}
+					stateText={stateText(d.embyEnabled, embyConfigured, d.embyVerifying)}
 					notice={
 						d.embyVerifyError ? (
 							<FieldError
@@ -318,11 +259,16 @@ export function AdvancedSettingsPage() {
 			<ServiceRow
 				title={t.translateServiceLabel}
 				enabled={d.translateEnabled}
+				busy={d.translateVerifying}
 				open={translateOpen}
 				onToggleOpen={() => setTranslateOpen((v) => !v)}
 				onToggleEnabled={(checked) => void d.handleToggleTranslate(checked)}
 				enabledLabel={t.translateEnableLabel}
-				stateText={stateText(d.translateEnabled, translateConfigured)}
+				stateText={stateText(
+					d.translateEnabled,
+					translateConfigured,
+					d.translateVerifying,
+				)}
 				notice={
 					d.translateVerifyError ? (
 						<FieldError

@@ -113,7 +113,7 @@ describe("resolvePreview —— D2PASS 链首（回归，不参与合并）", ()
 		const result = await resolvePreview({
 			d2passEnabled: true,
 			d2passLookup: async () => d2passMedia,
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup,
 			javtrailersLookup,
 			falenoLookup,
@@ -133,7 +133,7 @@ describe("resolvePreview —— D2PASS 链首（回归，不参与合并）", ()
 		const result = await resolvePreview({
 			d2passEnabled: true,
 			d2passLookup: async () => null,
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => jtMedia,
 		});
@@ -154,7 +154,7 @@ describe("resolvePreview —— D2PASS 链首（回归，不参与合并）", ()
 			d2passLookup: async () => {
 				throw d2passError;
 			},
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => null,
 		});
@@ -171,7 +171,7 @@ describe("resolvePreview —— D2PASS 链首（回归，不参与合并）", ()
 		const result = await resolvePreview({
 			d2passEnabled: false,
 			d2passLookup,
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => jtMedia,
 		});
@@ -184,7 +184,7 @@ describe("resolvePreview —— D2PASS 链首（回归，不参与合并）", ()
 		const javtrailersLookup = vi.fn(async () => jtMedia);
 		const result = await resolvePreview({
 			d2passEnabled: true,
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => null,
 			javtrailersLookup,
 		});
@@ -197,7 +197,7 @@ describe("resolvePreview —— D2PASS 链首（回归，不参与合并）", ()
 describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 	it("JT 与 DMM 均命中：封面取 JT、标题组取 DMM，DMM 成为免费后备档", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => dmmMedia,
 			javtrailersLookup: async () => jtMedia,
 			// 非 FNS 号：调用方不会提供 falenoLookup（这里显式传 undefined 表示同一形态）
@@ -221,7 +221,7 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 
 	it("仅 DMM 命中：整条取 DMM、mp4 直链、无后备档（封面方自身不入后备）", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => dmmMedia,
 			javtrailersLookup: async () => null,
 		});
@@ -235,7 +235,7 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 
 	it("仅 JT 命中：整条取 JT、无后备档", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => jtMedia,
 		});
@@ -245,7 +245,7 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 
 	it("DMM 抛错 + JT 命中：封面/标题都取 JT，DMM 错误保留（used_fallback 依赖它）", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => {
 				throw dmmError;
 			},
@@ -261,7 +261,7 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 
 	it("DMM 抛错 + JT 查无：仍按历史口径判 not_found（DMM 故障不升级成 error）", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => {
 				throw dmmError;
 			},
@@ -277,7 +277,7 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 
 	it("DMM 抛 not_found + JT 查无：错误不进 errors，判 not_found", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => {
 				throw {
 					source: "dmm",
@@ -293,10 +293,10 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 		expect(result).toEqual({ status: "not_found", media: null, errors: [] });
 	});
 
-	it("dmmEnabled=false：一次都不调用 dmmLookup（非反代用户）", async () => {
+	it("lookupEnabled=false：一次都不调用 dmmLookup（非反代用户）", async () => {
 		const dmmLookup = vi.fn(async () => dmmMedia);
 		const result = await resolvePreview({
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup,
 			javtrailersLookup: async () => jtMedia,
 		});
@@ -312,7 +312,7 @@ describe("resolvePreview —— 非 FNS 号（第二路 = DMM）", () => {
 			status: 503,
 		};
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => {
 				throw javtrailersError;
@@ -331,7 +331,7 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 	it("JT 与 FALENO 均命中：封面取 JT、标题取 FALENO，且 DMM 一次都不查", async () => {
 		const dmmLookup = vi.fn(async () => dmmMedia);
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup,
 			javtrailersLookup: async () => jtMedia,
 			falenoLookup: async () => falenoMedia,
@@ -352,7 +352,7 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 	it("FALENO 查无 → 串行补查 DMM 恰好 1 次，标题取 DMM", async () => {
 		const dmmLookup = vi.fn(async () => dmmMedia);
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup,
 			javtrailersLookup: async () => jtMedia,
 			falenoLookup: async () => null,
@@ -369,7 +369,7 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 	it("FALENO 抛错（502）→ 同样补查 DMM；resolved 时 faleno 错误被抑制", async () => {
 		const dmmLookup = vi.fn(async () => dmmMedia);
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup,
 			javtrailersLookup: async () => jtMedia,
 			falenoLookup: async () => {
@@ -388,7 +388,7 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 
 	it("FALENO 抛 403（大陆直连常态）+ JT 命中 → resolved 且不出现 faleno 错误", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => jtMedia,
 			falenoLookup: async () => {
@@ -405,7 +405,7 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 
 	it("JT 查无、FALENO 命中：整条取 FALENO（mp4）、无第三档后备", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => null,
 			falenoLookup: async () => falenoMedia,
@@ -421,7 +421,7 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 	it("JT 与 FALENO 均查无、补查 DMM 命中：整条取 DMM", async () => {
 		const dmmLookup = vi.fn(async () => dmmMedia);
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup,
 			javtrailersLookup: async () => null,
 			falenoLookup: async () => null,
@@ -435,10 +435,10 @@ describe("resolvePreview —— FNS 号（第二路 = FALENO，DMM 仅补查）"
 		});
 	});
 
-	it("反代未启用（dmmEnabled=false）：FNS 号也绝不补查 DMM", async () => {
+	it("反代未启用（lookupEnabled=false）：FNS 号也绝不补查 DMM", async () => {
 		const dmmLookup = vi.fn(async () => dmmMedia);
 		const result = await resolvePreview({
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup,
 			javtrailersLookup: async () => jtMedia,
 			falenoLookup: async () => null,
@@ -460,7 +460,7 @@ describe("resolvePreview —— 错误归集（收集层不吞事实）", () => 
 			kind: "network",
 		};
 		const result = await resolvePreview({
-			dmmEnabled: true,
+			lookupEnabled: true,
 			dmmLookup: async () => {
 				throw dmmError;
 			},
@@ -483,7 +483,7 @@ describe("resolvePreview —— 错误归集（收集层不吞事实）", () => 
 			status: 503,
 		};
 		const result = await resolvePreview({
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => {
 				throw javtrailersError;
@@ -499,7 +499,7 @@ describe("resolvePreview —— 错误归集（收集层不吞事实）", () => 
 
 	it("JT 查无 + FALENO 抛错 + 无 DMM 可补查 → error（而不是 not_found）", async () => {
 		const result = await resolvePreview({
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => null,
 			falenoLookup: async () => {
@@ -521,7 +521,7 @@ describe("resolvePreview —— 错误归集（收集层不吞事实）", () => 
 			status: 503,
 		};
 		const result = await resolvePreview({
-			dmmEnabled: false,
+			lookupEnabled: false,
 			dmmLookup: async () => null,
 			javtrailersLookup: async () => {
 				throw javtrailersError;

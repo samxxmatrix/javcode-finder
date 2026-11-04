@@ -594,12 +594,9 @@ export default defineBackground(() => {
 					codes?: string[];
 					body?: string;
 					contentId?: string;
-					dmmApiUrl?: string;
-					dmmApiKey?: string;
-					dmmEnabled?: boolean;
-					d2passApiUrl?: string;
-					d2passApiKey?: string;
-					d2passEnabled?: boolean;
+					apiUrl?: string;
+					apiKey?: string;
+					lookupEnabled?: boolean;
 					falenoPrefixes?: string[];
 				};
 
@@ -1142,6 +1139,52 @@ export default defineBackground(() => {
 					return true;
 				}
 
+				// 反代健康检查：一次请求同时验证「服务活着」与「API Key 正确」。
+				// 面板开关打开前调用它，所以这里必须把三类失败分开上报，界面才能给出准确文案。
+				if (msg?.type === "jt:lookup-health") {
+					const base = (msg.apiUrl || "").trim().replace(/\/+$/, "");
+					const key = (msg.apiKey || "").trim();
+					void (async () => {
+						if (!base || !key) {
+							sendResponse({ ok: false, reason: "incomplete" });
+							return;
+						}
+						try {
+							const res = await fetch(
+								`${base}/health?key=${encodeURIComponent(key)}`,
+								{ signal: AbortSignal.timeout(8000) },
+							);
+							if (res.ok) {
+								sendResponse({ ok: true, reason: "ok" });
+								return;
+							}
+							// 503 = 服务端没配 Key（部署问题）；401/403 = 客户端 Key 不匹配。
+							// 先看状态码再看 body，避免非 JSON 响应（如 Vercel 错误页）无法定性。
+							if (res.status === 503) {
+								sendResponse({ ok: false, reason: "config" });
+								return;
+							}
+							if (
+								res.status === 401 ||
+								res.status === 403
+							) {
+								sendResponse({ ok: false, reason: "unauthorized" });
+								return;
+							}
+							sendResponse({ ok: false, reason: "server" });
+						} catch (error) {
+							sendResponse({
+								ok: false,
+								reason:
+									error instanceof Error && error.name === "TimeoutError"
+										? "timeout"
+										: "network",
+							});
+						}
+					})();
+					return true;
+				}
+
 				if (msg?.type !== "jt:resolve-detail" || !msg.code) return undefined;
 				const code = msg.code;
 				const falenoPrefixes = Array.isArray(msg.falenoPrefixes)
@@ -1173,16 +1216,14 @@ export default defineBackground(() => {
 						return;
 					}
 
-					const dmmBase = (msg.dmmApiUrl || "").trim();
-					const dmmKey = (msg.dmmApiKey || "").trim();
-					const d2passBase = (msg.d2passApiUrl || "").trim();
-					const d2passKey = (msg.d2passApiKey || "").trim();
-					// 无码链首只在开关打开、地址与 Key 齐备、且番号是无码形态时启用；
+					// 单一反代：一个地址一把 Key，所有查询路径由它派生
+					const apiBase = (msg.apiUrl || "").trim();
+					const apiKey = (msg.apiKey || "").trim();
+					// 反代可用 = 开关打开 + 地址与 Key 齐备；三者缺一即回到接入前的直连行为
+					const proxyOn = msg.lookupEnabled === true && Boolean(apiBase && apiKey);
+					// 无码链首在反代可用的前提下，还需番号是无码形态；
 					// 有码号（IPX-118 等）照旧直接走 DMM → JavTrailers → FALENO
-					const d2passOn =
-						msg.d2passEnabled === true &&
-						Boolean(d2passBase && d2passKey) &&
-						isUncensoredCode(code);
+					const d2passOn = proxyOn && isUncensoredCode(code);
 					// 番号类型决定第二路：前缀命中 FALENO → FNS 分支（JT ∥ FALENO）；
 					// 未命中 → DMM 分支（JT ∥ DMM）。**由这里决定分支，而不是在 falenoLookup 内部返回 null**：
 					// resolve-preview 用"是否提供了 falenoLookup"判定分支，内部返回 null 会被当成
@@ -1191,7 +1232,7 @@ export default defineBackground(() => {
 					const resolution = await resolvePreview({
 						d2passEnabled: d2passOn,
 						d2passLookup: async () => {
-							const hit = await lookupD2pass(d2passBase, d2passKey, code);
+							const hit = await lookupD2pass(apiBase, apiKey, code);
 							if (!hit) return null;
 							return {
 								source: "d2pass",
@@ -1206,10 +1247,9 @@ export default defineBackground(() => {
 								releaseDate: hit.releaseDate,
 							} satisfies PreviewMedia;
 						},
-						dmmEnabled:
-							msg.dmmEnabled === true && Boolean(dmmBase && dmmKey),
+						lookupEnabled: proxyOn,
 						dmmLookup: async () => {
-							const dmm = await lookupDmm(dmmBase, dmmKey, code);
+							const dmm = await lookupDmm(apiBase, apiKey, code);
 							if (!dmm) return null;
 							return {
 								source: "dmm",
@@ -1282,14 +1322,14 @@ export default defineBackground(() => {
 									// 会话级负缓存：上一轮已确认"faleno.jp 没有此号"→ 直接查无，
 									// 0 网络请求，等价于本轮就是 JT ∥ DMM（比"先问 faleno 再补查"省一整个 RTT）
 									if (falenoMiss.has(code)) return null;
-									// DMM API 已启用（开关 + 地址 + Key）→ 复用同一反代：
-									// 东京出口不受地域拦截，且有永久缓存，用户侧不再直连 faleno.jp。
-									// ⚠️ 这个门闸就是"是否使用反代"的唯一权威开关，不要与 dmmEnabled 解耦：
-									// 关掉 DMM 源 == 放弃反代出口，FALENO 一律直连（大陆必 403，属预期行为）。
-									if (msg.dmmEnabled === true && dmmBase && dmmKey) {
+									// 反代已启用 → 复用同一反代：东京出口不受地域拦截，且有永久缓存，
+									// 用户侧不再直连 faleno.jp。
+									// ⚠️ 这个门闸就是"是否使用反代"的唯一权威开关，不要与 lookupEnabled 解耦：
+									// 关掉番号查询 == 放弃反代出口，FALENO 一律直连（大陆必 403，属预期行为）。
+									if (proxyOn) {
 										const proxied = await lookupFalenoViaProxy(
-											dmmBase,
-											dmmKey,
+											apiBase,
+											apiKey,
 											code,
 										);
 										if (!proxied) {

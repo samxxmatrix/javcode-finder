@@ -131,12 +131,9 @@ export interface LocaleMessages {
 	cloudEnableAndUpload: string;
 	showPassword: string;
 	hidePassword: string;
-	dmmApiUrlLabel: string;
-	dmmApiKeyLabel: string;
-	dmmEnableLabel: string;
-	d2passApiUrlLabel: string;
-	d2passApiKeyLabel: string;
-	d2passEnableLabel: string;
+	apiUrlLabel: string;
+	apiKeyLabel: string;
+	lookupEnableLabel: string;
 	codeExcludeRegexLabel: string;
 	codeExcludeRegexDesc: string;
 	embyUrlLabel: string;
@@ -151,14 +148,14 @@ export interface LocaleMessages {
 	embyNotSynced: string;
 	embySyncFailed: string;
 	embyTooLarge: string;
-	dmmIncomplete: string;
-	d2passIncomplete: string;
+	lookupIncomplete: string;
+	lookupUnauthorized: string;
+	lookupConfigError: string;
 	falenoPrefixesLabel: string;
 	falenoPrefixesDesc: string;
 	falenoPrefixPlaceholder: string;
 	falenoSourceLabel: string;
 	fc2SourceLabel: string;
-	d2passSourceLabel: string;
 	// ---- 两页式设置页（基础/进阶）----
 	settingsTabBasic: string;
 	settingsTabAdvanced: string;
@@ -173,6 +170,9 @@ export interface LocaleMessages {
 	settingsGroupCodeRules: string;
 	settingsGroupSync: string;
 	settingsGroupDanger: string;
+	statusConnecting: string;
+	lookupSourceLabel: string;
+	d2passSourceLabel: string;
 	statusEnabled: string;
 	statusConfiguredOff: string;
 	statusNotConfigured: string;
@@ -324,12 +324,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     cloudEnableAndUpload: "启用同步并上传",
     showPassword: "显示密码",
     hidePassword: "隐藏密码",
-    dmmApiUrlLabel: "DMM API 地址",
-    dmmApiKeyLabel: "DMM API Key",
-    dmmEnableLabel: "启用 DMM 查询（预览/详情优先官方数据）",
-    d2passApiUrlLabel: "D2PASS API 地址",
-    d2passApiKeyLabel: "D2PASS API Key",
-    d2passEnableLabel: "启用 D2PASS 查询（无码番号优先自建无码源）",
+    apiUrlLabel: "API 地址",
+    apiKeyLabel: "API Key",
+    lookupEnableLabel: "启用番号查询服务",
     codeExcludeRegexLabel: "番号排除正则",
     codeExcludeRegexDesc:
       "全局黑名单：扫描识别出的番号若匹配此正则，将从候选列表移除。匹配番号字符串本身（不是页面文本），大小写敏感，留空则不排除。仅对页面扫描生效，手动查询不受影响。",
@@ -345,8 +342,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embyNotSynced: "尚未同步",
     embySyncFailed: "同步失败（索引未更新）",
     embyTooLarge: "库条目超过 3 万，已改为逐个番号查询（不缓存索引）",
-    dmmIncomplete: "请补全 DMM API 地址和 Key",
-    d2passIncomplete: "请补全 D2PASS API 地址和 Key",
+    lookupIncomplete: "请先填写 API 地址与 Key",
+    lookupUnauthorized: "密钥无效，请核对 API Key",
+    lookupConfigError: "服务端未配置密钥，请检查反代部署",
     falenoPrefixesLabel: "FALENO 番号前缀复查",
     falenoPrefixesDesc:
       "番号前缀以设置开头的，若普通查询无结果将至 FALENO 官网查询。清空即不启用。",
@@ -368,6 +366,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsGroupCodeRules: "番号规则",
     settingsGroupSync: "同步与备份",
     settingsGroupDanger: "恢复默认",
+    statusConnecting: "连接中",
+    lookupSourceLabel: "番号查询",
     statusEnabled: "已启用",
     statusConfiguredOff: "未启用",
     statusNotConfigured: "未配置",
@@ -517,12 +517,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     cloudEnableAndUpload: "啟用同步並上傳",
     showPassword: "顯示密碼",
     hidePassword: "隱藏密碼",
-    dmmApiUrlLabel: "DMM API 位址",
-    dmmApiKeyLabel: "DMM API Key",
-    dmmEnableLabel: "啟用 DMM 查詢（預覽/詳情優先官方資料）",
-    d2passApiUrlLabel: "D2PASS API 位址",
-    d2passApiKeyLabel: "D2PASS API Key",
-    d2passEnableLabel: "啟用 D2PASS 查詢（無碼番號優先自建無碼源）",
+    apiUrlLabel: "API 位址",
+    apiKeyLabel: "API Key",
+    lookupEnableLabel: "啟用番號查詢服務",
     codeExcludeRegexLabel: "番號排除正則",
     codeExcludeRegexDesc:
       "全域黑名單：掃描辨識出的番號若符合此正則，將從候選清單移除。比對番號字串本身（非頁面文字），大小寫敏感，留空則不排除。僅對頁面掃描生效，手動查詢不受影響。",
@@ -538,8 +535,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embyNotSynced: "尚未同步",
     embySyncFailed: "同步失敗（索引未更新）",
     embyTooLarge: "庫條目超過 3 萬，已改為逐個番號查詢（不建立索引）",
-    dmmIncomplete: "請補全 DMM API 位址與 Key",
-    d2passIncomplete: "請補全 D2PASS API 位址與 Key",
+    lookupIncomplete: "請先填寫 API 位址與 Key",
+    lookupUnauthorized: "金鑰無效，請核對 API Key",
+    lookupConfigError: "服務端未設定金鑰，請檢查反向代理部署",
     falenoPrefixesLabel: "FALENO 番號前綴複查",
     falenoPrefixesDesc:
       "番號前綴以設定開頭的，若普通查詢無結果將至 FALENO 官網查詢。清空即不啟用。",
@@ -561,6 +559,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsGroupCodeRules: "番號規則",
     settingsGroupSync: "同步與備份",
     settingsGroupDanger: "恢復預設",
+    statusConnecting: "連線中",
+    lookupSourceLabel: "番號查詢",
     statusEnabled: "已啟用",
     statusConfiguredOff: "未啟用",
     statusNotConfigured: "未設定",
@@ -713,12 +713,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     cloudEnableAndUpload: "Enable sync and upload",
     showPassword: "Show password",
     hidePassword: "Hide password",
-    dmmApiUrlLabel: "DMM API URL",
-    dmmApiKeyLabel: "DMM API Key",
-    dmmEnableLabel: "Enable DMM lookup (official data first)",
-    d2passApiUrlLabel: "D2PASS API URL",
-    d2passApiKeyLabel: "D2PASS API Key",
-    d2passEnableLabel: "Enable D2PASS lookup (uncensored codes first)",
+    apiUrlLabel: "API URL",
+    apiKeyLabel: "API Key",
+    lookupEnableLabel: "Enable code lookup service",
     codeExcludeRegexLabel: "Code exclusion regex",
     codeExcludeRegexDesc:
       "Global blacklist: a code found by page scanning is dropped from the candidate list if it matches this regex. It matches the code string itself (not page text), is case-sensitive, and an empty value means no exclusion. It only affects page scanning; manual lookups are unaffected.",
@@ -735,8 +732,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncFailed: "Sync failed (index not updated)",
     embyTooLarge:
       "Library has over 30,000 items; using per-code lookup instead of a cached index",
-    dmmIncomplete: "Fill in the DMM API URL and Key",
-    d2passIncomplete: "Fill in the D2PASS API URL and Key",
+    lookupIncomplete: "Fill in the API URL and Key first",
+    lookupUnauthorized: "Invalid API Key, please check it",
+    lookupConfigError: "Server has no API Key configured, check the deployment",
     falenoPrefixesLabel: "FALENO code prefix check",
     falenoPrefixesDesc:
       "Codes whose prefixes match the settings fall back to the FALENO official site when the normal lookup finds nothing. Clearing the list disables it.",
@@ -758,6 +756,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsGroupCodeRules: "Code Rules",
     settingsGroupSync: "Sync & Backup",
     settingsGroupDanger: "Reset Defaults",
+    statusConnecting: "Connecting",
+    lookupSourceLabel: "Code Lookup",
     statusEnabled: "Enabled",
     statusConfiguredOff: "Off",
     statusNotConfigured: "Not configured",

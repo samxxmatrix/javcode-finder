@@ -196,10 +196,11 @@ export const App: React.FC = () => {
 				// （注入函数不能 import，规则只能这样当参数带过去）
 				args: [
 					settings.customRegex || DEFAULT_CODE_REGEX,
-					settings.d2passEnabled
+					// 无码规则与番号查询总开关同步：关掉总开关即不再识别无码号
+					settings.lookupEnabled
 						? buildUncensoredRules(settings.codeExcludeRegex)
 						: null,
-					// 全局黑名单与 D2PASS 开关无关：无论开关都传入，D2PASS 关闭时仍压有码误报
+					// 全局黑名单与总开关无关：无论开关都传入，关闭时仍压有码误报
 					settings.codeExcludeRegex,
 				],
 			});

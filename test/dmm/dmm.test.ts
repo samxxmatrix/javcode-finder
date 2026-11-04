@@ -13,16 +13,16 @@ describe("buildDmmLookupUrl", () => {
 	it("joins base URL with code, normalizing trailing slash", () => {
 		expect(
 			buildDmmLookupUrl("https://api.example.com/", "my-key", "BDSM-091"),
-		).toBe("https://api.example.com/BDSM-091?key=my-key");
+		).toBe("https://api.example.com/dmm/BDSM-091?key=my-key");
 		expect(
 			buildDmmLookupUrl("https://api.example.com", "my-key", "IPX-118"),
-		).toBe("https://api.example.com/IPX-118?key=my-key");
+		).toBe("https://api.example.com/dmm/IPX-118?key=my-key");
 	});
 
 	it("URL-encodes the code", () => {
 		expect(
 			buildDmmLookupUrl("https://api.example.com", "k", "ABP 123"),
-		).toBe("https://api.example.com/ABP%20123?key=k");
+		).toBe("https://api.example.com/dmm/ABP%20123?key=k");
 	});
 
 	it("returns empty string when base URL is empty", () => {
@@ -49,15 +49,15 @@ describe("buildFalenoLookupUrl", () => {
 });
 
 describe("buildD2passLookupUrl", () => {
-	it("与 DMM 同形：GET {base}/{code}?key={key}", () => {
+	it("走 d2pass 显式前缀：GET {base}/d2pass/{code}?key={key}", () => {
 		expect(
 			buildD2passLookupUrl("https://d2pass.example.com/", "my-key", "HEYZO-3953"),
-		).toBe("https://d2pass.example.com/HEYZO-3953?key=my-key");
+		).toBe("https://d2pass.example.com/d2pass/HEYZO-3953?key=my-key");
 	});
 
 	it("URL-encodes the code", () => {
 		expect(buildD2passLookupUrl("https://x.test", "k", "100426_001")).toBe(
-			"https://x.test/100426_001?key=k",
+			"https://x.test/d2pass/100426_001?key=k",
 		);
 	});
 

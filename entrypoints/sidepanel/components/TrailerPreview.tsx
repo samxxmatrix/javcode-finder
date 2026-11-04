@@ -259,12 +259,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			const response = (await browser.runtime.sendMessage({
 				type: "jt:resolve-detail",
 				code,
-				dmmEnabled: settings.dmmEnabled,
-				dmmApiUrl: settings.dmmApiUrl,
-				dmmApiKey: settings.dmmApiKey,
-				d2passEnabled: settings.d2passEnabled,
-				d2passApiUrl: settings.d2passApiUrl,
-				d2passApiKey: settings.d2passApiKey,
+				lookupEnabled: settings.lookupEnabled,
+				apiUrl: settings.apiUrl,
+				apiKey: settings.apiKey,
 				falenoPrefixes: settings.falenoPrefixes,
 			})) as PreviewResolution | undefined;
 			if (requestId !== resolutionRequestRef.current) return;

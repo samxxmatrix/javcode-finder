@@ -45,7 +45,7 @@ function buildProxyUrl(
 }
 
 /**
- * 拼接完整查询 URL：GET {base}/{code}?key={key}。
+ * 拼接完整查询 URL：GET {base}/dmm/{code}?key={key}。
  * base 为空（未配置）时返回空串，调用方跳过请求。
  */
 export function buildDmmLookupUrl(
@@ -53,7 +53,7 @@ export function buildDmmLookupUrl(
 	key: string,
 	code: string,
 ): string {
-	return buildProxyUrl(baseUrl, [], key, code);
+	return buildProxyUrl(baseUrl, ["dmm"], key, code);
 }
 
 /**
@@ -69,15 +69,15 @@ export function buildFalenoLookupUrl(
 }
 
 /**
- * 拼接 D2PASS 查询 URL：GET {base}/{code}?key={key}。
- * 接口侧 `/{code}` 与 `/api?code=` 等价，前者更短；与 DMM 同形，共用 buildProxyUrl。
+ * 拼接 D2PASS（无码源）查询 URL：GET {base}/d2pass/{code}?key={key}。
+ * 合并后三个查询各有显式前缀，不再有根路径通配。
  */
 export function buildD2passLookupUrl(
 	baseUrl: string,
 	key: string,
 	code: string,
 ): string {
-	return buildProxyUrl(baseUrl, [], key, code);
+	return buildProxyUrl(baseUrl, ["d2pass"], key, code);
 }
 
 /**

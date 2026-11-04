@@ -13,9 +13,9 @@ const customSettings: ExtensionSettings = {
 	...DEFAULT_SETTINGS,
 	supjavName: "Supjav",
 	supjavTemplate: "https://example.com/search?q={code}",
-	dmmApiUrl: "https://dmm.example.com/",
-	dmmApiKey: "dmm-key",
-	dmmEnabled: true,
+	apiUrl: "https://proxy.example.com/",
+	apiKey: "proxy-key",
+	lookupEnabled: true,
 	previewVolume: 40,
 	excludedHosts: ["example.org"],
 };
@@ -50,8 +50,8 @@ describe("serializeCloudSettings", () => {
 		expect(payload.settings.supjavTemplate).toBe(
 			"https://example.com/search?q={code}",
 		);
-		expect(payload.settings.dmmApiKey).toBe("dmm-key");
-		expect(payload.settings.dmmEnabled).toBe(true);
+		expect(payload.settings.apiKey).toBe("proxy-key");
+		expect(payload.settings.lookupEnabled).toBe(true);
 		expect(payload.settings.previewVolume).toBe(40);
 		expect(payload.settings.excludedHosts).toEqual(["example.org"]);
 	});
@@ -82,12 +82,12 @@ describe("parseCloudSettings", () => {
 			version: 1,
 			updatedAt: 1700000000000,
 			locale: "en",
-			settings: { supjavName: "Supjav", dmmApiKey: "key" },
+			settings: { supjavName: "Supjav", apiKey: "key" },
 		});
 		expect(cloud?.locale).toBe("en");
 		expect(cloud?.updatedAt).toBe(1700000000000);
 		expect(cloud?.settings.supjavName).toBe("Supjav");
-		expect(cloud?.settings.dmmApiKey).toBe("key");
+		expect(cloud?.settings.apiKey).toBe("key");
 		// 缺失字段回落到默认值，而不是留空
 		expect(cloud?.settings.customRegex).toBe(DEFAULT_SETTINGS.customRegex);
 		expect(cloud?.settings.falenoPrefixes).toEqual(DEFAULT_SETTINGS.falenoPrefixes);

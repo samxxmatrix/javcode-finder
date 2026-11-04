@@ -65,16 +65,23 @@ export function SettingsSwitch({
 	checked,
 	onChange,
 	label,
+	disabled = false,
 }: {
 	checked: boolean;
 	onChange: (checked: boolean) => void;
 	label: string;
+	/** 校验进行中：开关置灰，避免用户在外呼未回时反复点击 */
+	disabled?: boolean;
 }) {
 	return (
-		<label className="settings-field__switch" title={label}>
+		<label
+			className={`settings-field__switch${disabled ? " settings-field__switch--busy" : ""}`}
+			title={label}
+		>
 			<input
 				type="checkbox"
 				checked={checked}
+				disabled={disabled}
 				onChange={(e) => onChange(e.target.checked)}
 				aria-label={label}
 			/>
@@ -90,6 +97,7 @@ export function SettingsSwitch({
 export function ServiceRow({
 	title,
 	enabled,
+	busy = false,
 	open,
 	onToggleOpen,
 	onToggleEnabled,
@@ -100,11 +108,13 @@ export function ServiceRow({
 }: {
 	title: string;
 	enabled: boolean;
+	/** 校验进行中：开关禁用（状态文案由调用方显示「连接中」） */
+	busy?: boolean;
 	open: boolean;
 	onToggleOpen: () => void;
 	onToggleEnabled: (checked: boolean) => void;
 	enabledLabel: string;
-	/** 右侧状态文案（已启用 / 未启用 / 未配置），由调用方按语言传入 */
+	/** 右侧状态文案（已启用 / 未启用 / 未配置 / 连接中），由调用方按语言传入 */
 	stateText: string;
 	/** 行内错误提示：收起时也要可见，否则开关验证失败后看不出原因 */
 	notice?: ReactNode;
@@ -142,6 +152,7 @@ export function ServiceRow({
 					checked={enabled}
 					onChange={onToggleEnabled}
 					label={enabledLabel}
+					disabled={busy}
 				/>
 			</div>
 			{notice && <div className="settings-service__notice">{notice}</div>}

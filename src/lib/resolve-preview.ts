@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 export interface ResolvePreviewOptions {
-	dmmEnabled: boolean;
+	lookupEnabled: boolean;
 	dmmLookup: () => Promise<PreviewMedia | null>;
 	javtrailersLookup: () => Promise<PreviewMedia | null>;
 	/**
@@ -110,7 +110,7 @@ function buildFallbackTier(
  *
  * 第二路按番号类型二选一（由调用方决定并提供对应实现）：
  * - 提供 `falenoLookup`（前缀命中）→ `JT ∥ FALENO`；FALENO **查无或抛错都串行补查 DMM 一次**；
- * - 未提供 → `JT ∥ DMM`（`dmmEnabled` 为 false 时第二路为空）。
+ * - 未提供 → `JT ∥ DMM`（`lookupEnabled` 为 false 时第二路为空）。
  *
  * 错误口径：
  * - 查无（not_found / 返回 null）不算错误、不进 errors；
@@ -122,7 +122,7 @@ function buildFallbackTier(
 export async function resolvePreview({
 	d2passEnabled,
 	d2passLookup,
-	dmmEnabled,
+	lookupEnabled,
 	dmmLookup,
 	javtrailersLookup,
 	falenoLookup,
@@ -151,10 +151,10 @@ export async function resolvePreview({
 		}
 	}
 
-	// 第二路的判定：**不能**用"dmmEnabled"推断 FNS 分支 —— 非反代 + FNS 号同样提供
+	// 第二路的判定：**不能**用"lookupEnabled"推断 FNS 分支 —— 非反代 + FNS 号同样提供
 	// falenoLookup（直连 faleno.jp），此时 DMM 一次都不该查。
 	const useFaleno = Boolean(falenoLookup);
-	const useDmm = !useFaleno && dmmEnabled;
+	const useDmm = !useFaleno && lookupEnabled;
 
 	const [jtOutcome, secondOutcome] = await Promise.all([
 		runLookup("javtrailers", javtrailersLookup),
@@ -174,8 +174,8 @@ export async function resolvePreview({
 				errors.push(secondOutcome.error);
 			}
 			// 串行补查：FALENO 查无与抛错都补查一次 DMM —— 兜住"DMM 有、faleno.jp 无"的号，
-			// 也兜住反代抖动。仍然受 dmmEnabled 门闸约束（非反代用户不该因 FNS 号去查 DMM）。
-			if (dmmEnabled) {
+			// 也兜住反代抖动。仍然受 lookupEnabled 门闸约束（非反代用户不该因 FNS 号去查 DMM）。
+			if (lookupEnabled) {
 				const dmmRetry = await runLookup("dmm", dmmLookup);
 				secondMedia = dmmRetry.media;
 				if (dmmRetry.error && dmmRetry.error.kind !== "not_found") {

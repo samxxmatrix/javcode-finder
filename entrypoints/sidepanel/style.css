@@ -1048,6 +1048,13 @@ button:focus-visible {
 	transform: translateX(14px);
 }
 
+/* 校验进行中：开关置灰并禁用点击（状态文案此时显示「连接中」） */
+.settings-field__switch--busy {
+	cursor: progress;
+	opacity: 0.5;
+	pointer-events: none;
+}
+
 /* 版本信息下方的错误信息汇总区 */
 .settings-errors {
 	display: flex;

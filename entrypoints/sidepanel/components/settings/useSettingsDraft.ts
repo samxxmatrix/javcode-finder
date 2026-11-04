@@ -99,16 +99,16 @@ export function useSettingsDraft({
 		ok: boolean;
 		text: string;
 	} | null>(null);
-	// DMM 查询 API 配置（地址与 Key 均空 = 未配置）
-	const [dmmApiUrl, setDmmApiUrl] = useState("");
-	const [dmmApiKey, setDmmApiKey] = useState("");
-	const [dmmEnabled, setDmmEnabled] = useState(false);
-	const [dmmVerifyError, setDmmVerifyError] = useState<string | null>(null);
-	// D2PASS 无码源配置（地址与 Key 均空 = 未配置）
-	const [d2passApiUrl, setD2passApiUrl] = useState("");
-	const [d2passApiKey, setD2passApiKey] = useState("");
-	const [d2passEnabled, setD2passEnabled] = useState(false);
-	const [d2passVerifyError, setD2passVerifyError] = useState<string | null>(null);
+	// 番号查询（自建反代）：一个地址一把 Key，DMM / FALENO / 无码源三条路径由地址派生
+	const [apiUrl, setApiUrl] = useState("");
+	const [apiKey, setApiKey] = useState("");
+	const [lookupEnabled, setLookupEnabled] = useState(false);
+	const [lookupVerifyError, setLookupVerifyError] = useState<string | null>(null);
+	// 三个服务开关共用的「校验中」标记：期间开关禁用、状态文案显示「连接中」，
+	// 避免用户在校验未回时反复点击
+	const [lookupVerifying, setLookupVerifying] = useState(false);
+	const [embyVerifying, setEmbyVerifying] = useState(false);
+	const [translateVerifying, setTranslateVerifying] = useState(false);
 	// Emby 媒体库配置
 	const [embyUrl, setEmbyUrl] = useState("");
 	const [embyApiKey, setEmbyApiKey] = useState("");
@@ -210,6 +210,7 @@ export function useSettingsDraft({
 			setTranslateEnabled(false);
 			return;
 		}
+		setTranslateVerifying(true);
 		try {
 			const health = (await browser.runtime.sendMessage({
 				type: "jt:health",
@@ -230,41 +231,62 @@ export function useSettingsDraft({
 		} catch {
 			setTranslateVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setTranslateEnabled(false);
+		} finally {
+			setTranslateVerifying(false);
 		}
 	};
 
-	// DMM 开关：与 D2PASS 一致，打开时只做“地址与 Key 非空”的即时校验，不再调接口验证
-	const handleToggleDmm = async (checked: boolean) => {
-		setDmmVerifyError(null);
-		if (!checked) {
-			setDmmEnabled(false);
-			return;
+	/**
+	 * 调反代 /health：一次请求同时验证「服务活着」与「Key 正确」。
+	 * @returns 通过返回 null；失败返回可直接展示的错误文案
+	 */
+	const verifyLookupService = async (
+		url: string,
+		key: string,
+	): Promise<string | null> => {
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:lookup-health",
+				apiUrl: url,
+				apiKey: key,
+			})) as { ok?: boolean; reason?: string } | undefined;
+			if (res?.ok) return null;
+			if (res?.reason === "unauthorized") return t.lookupUnauthorized;
+			if (res?.reason === "config") return t.lookupConfigError;
+			if (res?.reason === "incomplete") return t.lookupIncomplete;
+			return `${t.verifyFailed}：${t.networkError}`;
+		} catch {
+			return `${t.verifyFailed}：${t.networkError}`;
 		}
-		const url = dmmApiUrl.trim();
-		const key = dmmApiKey.trim();
-		if (!url || !key) {
-			setDmmVerifyError(t.dmmIncomplete);
-			setDmmEnabled(false);
-			return;
-		}
-		setDmmEnabled(true);
 	};
 
-	// D2PASS 开关：接口没有独立健康检查端点，只做“地址与 Key 非空”的即时校验
-	const handleToggleD2pass = async (checked: boolean) => {
-		setD2passVerifyError(null);
+	// 番号查询开关：打开时先清空错误行，地址/Key 不全则就地提示；
+	// 齐备则调 /health，校验期间开关禁用并显示「连接中」，通过才真正打开
+	const handleToggleLookup = async (checked: boolean) => {
+		setLookupVerifyError(null);
 		if (!checked) {
-			setD2passEnabled(false);
+			setLookupEnabled(false);
 			return;
 		}
-		const url = d2passApiUrl.trim();
-		const key = d2passApiKey.trim();
+		const url = apiUrl.trim();
+		const key = apiKey.trim();
 		if (!url || !key) {
-			setD2passVerifyError(t.d2passIncomplete);
-			setD2passEnabled(false);
+			setLookupVerifyError(t.lookupIncomplete);
+			setLookupEnabled(false);
 			return;
 		}
-		setD2passEnabled(true);
+		setLookupVerifying(true);
+		try {
+			const error = await verifyLookupService(url, key);
+			if (error) {
+				setLookupVerifyError(error);
+				setLookupEnabled(false);
+				return;
+			}
+			setLookupEnabled(true);
+		} finally {
+			setLookupVerifying(false);
+		}
 	};
 
 	// 排除正则的即时语法校验（与番号识别正则同款）
@@ -332,6 +354,7 @@ export function useSettingsDraft({
 			setEmbyEnabled(false);
 			return;
 		}
+		setEmbyVerifying(true);
 		try {
 			const health = (await browser.runtime.sendMessage({
 				type: "jt:emby-test",
@@ -350,6 +373,8 @@ export function useSettingsDraft({
 		} catch {
 			setEmbyVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setEmbyEnabled(false);
+		} finally {
+			setEmbyVerifying(false);
 		}
 	};
 
@@ -370,12 +395,9 @@ export function useSettingsDraft({
 		setWebdavUser(current.webdavUser);
 		setWebdavPass(current.webdavPass);
 		setWebdavEnabled(current.webdavEnabled);
-		setDmmApiUrl(current.dmmApiUrl);
-		setDmmApiKey(current.dmmApiKey);
-		setDmmEnabled(current.dmmEnabled);
-		setD2passApiUrl(current.d2passApiUrl);
-		setD2passApiKey(current.d2passApiKey);
-		setD2passEnabled(current.d2passEnabled);
+		setApiUrl(current.apiUrl);
+		setApiKey(current.apiKey);
+		setLookupEnabled(current.lookupEnabled);
 		setEmbyUrl(current.embyUrl);
 		setEmbyApiKey(current.embyApiKey);
 		setEmbyEnabled(current.embyEnabled);
@@ -402,9 +424,9 @@ export function useSettingsDraft({
 		translateApiUrl: translateUrl,
 		translateEnabled,
 		fallbackService,
-		dmmApiUrl,
-		dmmApiKey,
-		dmmEnabled,
+		apiUrl,
+		apiKey,
+		lookupEnabled,
 		embyUrl,
 		embyApiKey,
 		embyEnabled,
@@ -415,9 +437,6 @@ export function useSettingsDraft({
 		excludedHosts,
 		falenoPrefixes,
 		customRegex: customRegex.trim() || DEFAULT_CODE_REGEX,
-		d2passApiUrl,
-		d2passApiKey,
-		d2passEnabled,
 		codeExcludeRegex,
 	});
 
@@ -676,14 +695,10 @@ export function useSettingsDraft({
 		setShowPass(false);
 		setWebdavEnabled(false);
 		setWebdavError(null);
-		setDmmApiUrl("");
-		setDmmApiKey("");
-		setDmmEnabled(false);
-		setDmmVerifyError(null);
-		setD2passApiUrl("");
-		setD2passApiKey("");
-		setD2passEnabled(false);
-		setD2passVerifyError(null);
+		setApiUrl(DEFAULT_SETTINGS.apiUrl);
+		setApiKey(DEFAULT_SETTINGS.apiKey);
+		setLookupEnabled(DEFAULT_SETTINGS.lookupEnabled);
+		setLookupVerifyError(null);
 		setEmbyUrl(DEFAULT_SETTINGS.embyUrl);
 		setEmbyApiKey(DEFAULT_SETTINGS.embyApiKey);
 		setEmbyEnabled(DEFAULT_SETTINGS.embyEnabled);
@@ -877,14 +892,13 @@ export function useSettingsDraft({
 		webdavError,
 		cloudConflict,
 		cloudStatus,
-		dmmApiUrl,
-		dmmApiKey,
-		dmmEnabled,
-		dmmVerifyError,
-		d2passApiUrl,
-		d2passApiKey,
-		d2passEnabled,
-		d2passVerifyError,
+		apiUrl,
+		apiKey,
+		lookupEnabled,
+		lookupVerifyError,
+		lookupVerifying,
+		embyVerifying,
+		translateVerifying,
 		embyUrl,
 		embyApiKey,
 		embyEnabled,
@@ -918,12 +932,9 @@ export function useSettingsDraft({
 		setWebdavPass,
 		setShowPass,
 		setWebdavError,
-		setDmmApiUrl,
-		setDmmApiKey,
-		setDmmVerifyError,
-		setD2passApiUrl,
-		setD2passApiKey,
-		setD2passVerifyError,
+		setApiUrl,
+		setApiKey,
+		setLookupVerifyError,
 		setEmbyUrl,
 		setEmbyApiKey,
 		setEmbyTooLarge,
@@ -933,8 +944,7 @@ export function useSettingsDraft({
 		setPreviewVolume,
 		// 动作
 		handleToggleTranslate,
-		handleToggleDmm,
-		handleToggleD2pass,
+		handleToggleLookup,
 		handleToggleEmby,
 		handleToggleWebdav,
 		handleEmbySyncNow,

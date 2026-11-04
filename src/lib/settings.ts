@@ -35,17 +35,14 @@ export interface ExtensionSettings {
 	webdavPass: string;
 	// 云盘同步开关：关闭时不存取云端（收藏仅本地）
 	webdavEnabled: boolean;
-	// DMM 查询 API 配置（地址与 Key 均空 = 未配置，走 javtrailers 默认链路）
-	dmmApiUrl: string;
-	dmmApiKey: string;
-	// DMM 开关：它同时是"是否使用自建反代"的唯一权威开关。打开时预览解析的
-	// 第二路走 DMM（番号非 FNS）或反代 FALENO（番号命中 falenoPrefixes），
-	// 且 DMM 只贡献标题与后备档 —— 封面仍优先全球可达的 JavTrailers
-	dmmEnabled: boolean;
-	// D2PASS 无码源配置（地址与 Key 均空 = 未配置）；开关关闭 = 回到接入前的行为
-	d2passApiUrl: string;
-	d2passApiKey: string;
-	d2passEnabled: boolean;
+	// 自建反代（番号查询服务）：一个地址 + 一把 Key，所有查询路径由地址派生。
+	// 任一为空 = 未配置，走 javtrailers 默认链路
+	apiUrl: string;
+	apiKey: string;
+	// 番号查询总开关：它是"是否使用自建反代"的唯一权威开关。打开时预览解析的第二路
+	// 走 DMM（番号非 FNS）或反代 FALENO（番号命中 falenoPrefixes），无码源查询同样归它管；
+	// DMM / FALENO 只贡献标题与后备档 —— 封面仍优先全球可达的 JavTrailers
+	lookupEnabled: boolean;
 	// FALENO 番号前缀：番号以任一前缀开头时，第二路取 FALENO（与 JavTrailers 并发，
 	// 不是"其他源都查不到才兜底"）；FALENO 查无时才串行补查一次 DMM。空数组 = 不启用
 	falenoPrefixes: string[];
@@ -85,12 +82,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	webdavUser: "",
 	webdavPass: "",
 	webdavEnabled: false,
-	dmmApiUrl: "",
-	dmmApiKey: "",
-	dmmEnabled: false,
-	d2passApiUrl: "",
-	d2passApiKey: "",
-	d2passEnabled: false,
+	apiUrl: "",
+	apiKey: "",
+	lookupEnabled: false,
 	falenoPrefixes: ["FNS"],
 	embyUrl: "",
 	embyApiKey: "",
@@ -269,26 +263,14 @@ export function normalizeSettings(parsed: unknown): ExtensionSettings {
 			typeof data.webdavEnabled === "boolean"
 				? data.webdavEnabled
 				: DEFAULT_SETTINGS.webdavEnabled,
-		dmmApiUrl:
-			typeof data.dmmApiUrl === "string" ? data.dmmApiUrl.trim() : "",
-		dmmApiKey:
-			typeof data.dmmApiKey === "string" ? data.dmmApiKey.trim() : "",
-		dmmEnabled:
-			typeof data.dmmEnabled === "boolean"
-				? data.dmmEnabled
-				: DEFAULT_SETTINGS.dmmEnabled,
-		d2passApiUrl:
-			typeof data.d2passApiUrl === "string"
-				? data.d2passApiUrl.trim()
-				: "",
-		d2passApiKey:
-			typeof data.d2passApiKey === "string"
-				? data.d2passApiKey.trim()
-				: "",
-		d2passEnabled:
-			typeof data.d2passEnabled === "boolean"
-				? data.d2passEnabled
-				: DEFAULT_SETTINGS.d2passEnabled,
+		// 旧版的 dmmApiUrl / d2passApiUrl 等字段一律忽略：合并后只有一个地址一把 Key，
+		// 旧值无法判断该映射到哪个前缀，宁可让用户重填一次也不要猜错（升级说明已告知）
+		apiUrl: typeof data.apiUrl === "string" ? data.apiUrl.trim() : "",
+		apiKey: typeof data.apiKey === "string" ? data.apiKey.trim() : "",
+		lookupEnabled:
+			typeof data.lookupEnabled === "boolean"
+				? data.lookupEnabled
+				: DEFAULT_SETTINGS.lookupEnabled,
 		// 旧存储无此字段时补默认;字段存在但为空数组 = 用户主动关闭兜底,保持为空
 		falenoPrefixes: Array.isArray(data.falenoPrefixes)
 			? data.falenoPrefixes
@@ -406,30 +388,18 @@ export function saveSettings(
 				settings.webdavEnabled !== undefined
 					? settings.webdavEnabled
 					: current.webdavEnabled,
-			dmmApiUrl:
-				settings.dmmApiUrl !== undefined
-					? settings.dmmApiUrl.trim()
-					: current.dmmApiUrl,
-			dmmApiKey:
-				settings.dmmApiKey !== undefined
-					? settings.dmmApiKey.trim()
-					: current.dmmApiKey,
-			dmmEnabled:
-				settings.dmmEnabled !== undefined
-					? settings.dmmEnabled
-					: current.dmmEnabled,
-			d2passApiUrl:
-				typeof settings.d2passApiUrl === "string"
-					? settings.d2passApiUrl.trim()
-					: current.d2passApiUrl,
-			d2passApiKey:
-				typeof settings.d2passApiKey === "string"
-					? settings.d2passApiKey.trim()
-					: current.d2passApiKey,
-			d2passEnabled:
-				settings.d2passEnabled !== undefined
-					? settings.d2passEnabled
-					: current.d2passEnabled,
+			apiUrl:
+				typeof settings.apiUrl === "string"
+					? settings.apiUrl.trim()
+					: current.apiUrl,
+			apiKey:
+				typeof settings.apiKey === "string"
+					? settings.apiKey.trim()
+					: current.apiKey,
+			lookupEnabled:
+				settings.lookupEnabled !== undefined
+					? settings.lookupEnabled
+					: current.lookupEnabled,
 			// 非法正则不落盘：丢弃本次输入、保留旧值（留空是合法值，= 不排除）
 			codeExcludeRegex:
 				typeof settings.codeExcludeRegex === "string" &&
@@ -604,12 +574,9 @@ export function configSignature(settings: ExtensionSettings): string {
 		trim(settings.translateApiUrl),
 		settings.translateEnabled,
 		settings.fallbackService,
-		trim(settings.dmmApiUrl),
-		trim(settings.dmmApiKey),
-		settings.dmmEnabled,
-		trim(settings.d2passApiUrl),
-		trim(settings.d2passApiKey),
-		settings.d2passEnabled,
+		trim(settings.apiUrl),
+		trim(settings.apiKey),
+		settings.lookupEnabled,
 		trim(settings.codeExcludeRegex),
 		trim(settings.embyUrl),
 		trim(settings.embyApiKey),
