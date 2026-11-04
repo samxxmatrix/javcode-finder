@@ -1,6 +1,8 @@
+import { isDirectMp4Source } from "./preview-source";
 import type {
 	PreviewLookupError,
 	PreviewLookupSource,
+	PreviewMedia,
 	PreviewPlaybackStatus,
 	PreviewResolution,
 } from "./types";
@@ -290,4 +292,100 @@ export function getPreviewPresentation(
 		notices: visibleNotices,
 		retryAction,
 	};
+}
+
+/** 预览源切换控件的一档：主档，或解析期已取到的后备档（切换时 0 额外请求） */
+export interface PreviewChoice {
+	/** "primary" 或 "tier-<index>" */
+	key: string;
+	/** 主档为 null；后备档为 media.fallbackTiers 下标 */
+	tierIndex: number | null;
+	source: PreviewLookupSource;
+	previewUrl: string;
+	/** true = mp4 直链；false = 走 hls.js（由来源谓词判定，后备档没有 previewType 字段） */
+	directMp4: boolean;
+}
+
+/**
+ * 列出可切换的预览档：主档 + 有预告地址的后备档，顺序即控件顺序。
+ *
+ * 主档没有预告地址时也允许只剩后备档 —— 否则解析期取到的 DMM mp4 会因为 JT 缺片而完全播不了。
+ * 少于 2 档时调用方不渲染控件。封面不随档切换，故这里不取 coverUrl。
+ */
+export function buildPreviewChoices(media: PreviewMedia | null): PreviewChoice[] {
+	if (!media) return [];
+	const choices: PreviewChoice[] = [];
+	if (media.previewUrl) {
+		choices.push({
+			key: "primary",
+			tierIndex: null,
+			source: media.source,
+			previewUrl: media.previewUrl,
+			directMp4: isDirectMp4Source(media.source),
+		});
+	}
+	(media.fallbackTiers ?? []).forEach((tier, index) => {
+		if (!tier.previewUrl) return;
+		choices.push({
+			key: `tier-${index}`,
+			tierIndex: index,
+			source: tier.source,
+			previewUrl: tier.previewUrl,
+			directMp4: isDirectMp4Source(tier.source),
+		});
+	});
+	return choices;
+}
+
+/**
+ * 按用户上次选的档位挑默认档：偏好 2 且本次确实有第 2 档才优先，
+ * 否则一律第 1 档 —— 只有一档或偏好值异常时都不会选中不存在的档。
+ */
+export function pickDefaultPreviewChoice(
+	choices: PreviewChoice[],
+	preferredSlot: number,
+): PreviewChoice | null {
+	const second = preferredSlot === 2 ? choices[1] : undefined;
+	return second ?? choices[0] ?? null;
+}
+
+export type PlaybackStage =
+	| { kind: "primary" }
+	| { kind: "detail" }
+	| { kind: "tier"; index: number };
+
+export interface PlaybackFallbackOrderInput {
+	coverSource: PreviewLookupSource | null;
+	/** 有预告地址的后备档下标，保持 fallbackTiers 原序 */
+	playableTierIndexes: number[];
+	/** 本次播放起步的后备档下标；null = 由主档起步 */
+	startTierIndex: number | null;
+}
+
+/**
+ * 生成「起步档播放失败后」依次尝试的候选档。
+ *
+ * 原链是单向的「主档 → 详情页兜底 → 后备档」：手动选中后备档后，游标已到链尾，
+ * 失败会直接判 failed 而回不到 JT。因此手动起步的档失败后重排为
+ * 「回主档 → 详情页兜底 → 其余后备档」，并跳过已试过的那一档，避免原地打转。
+ * 详情页兜底只有 javtrailers 封面方才有（要抓 JT 详情页的 mgstage 资产）。
+ */
+export function buildPlaybackFallbackOrder({
+	coverSource,
+	playableTierIndexes,
+	startTierIndex,
+}: PlaybackFallbackOrderInput): PlaybackStage[] {
+	const detail: PlaybackStage[] =
+		coverSource === "javtrailers" ? [{ kind: "detail" }] : [];
+	const tierStages = (indexes: number[]): PlaybackStage[] =>
+		indexes.map((index) => ({ kind: "tier", index }));
+
+	if (startTierIndex === null) return [...detail, ...tierStages(playableTierIndexes)];
+	return [
+		{ kind: "primary" },
+		...detail,
+		...tierStages(
+			playableTierIndexes.filter((index) => index !== startTierIndex),
+		),
+	];
 }

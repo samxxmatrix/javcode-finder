@@ -653,3 +653,31 @@ export function resolveSearchUrl(template: string, code: string): string {
 
 	return `${trimmedTemplate}/${encoded}`;
 }
+
+/**
+ * 预览源按钮的记忆档位：1 = 第 1 档（通常是 JavTrailers），2 = 第 2 档（DMM / FALENO）。
+ *
+ * 单独存一个 localStorage 键，不进 ExtensionSettings：它是「上次点了哪个按钮」的运行痕迹，
+ * 不该出现在设置页，也不参与云端 settings.json 同步 —— 换设备后本地没有对应档位时
+ * `pickDefaultPreviewChoice` 会静默回落第 1 档。
+ */
+export const PREVIEW_SLOT_STORAGE_KEY = "javranking_preview_slot";
+
+export function getPreferredPreviewSlot(): number {
+	try {
+		return Number(getStorage()?.getItem(PREVIEW_SLOT_STORAGE_KEY)) === 2
+			? 2
+			: 1;
+	} catch {
+		return 1;
+	}
+}
+
+/** 写入失败（隐私模式 / 存储被禁用）静默忽略：记忆失效不影响本次播放 */
+export function savePreferredPreviewSlot(slot: number): void {
+	try {
+		getStorage()?.setItem(PREVIEW_SLOT_STORAGE_KEY, slot === 2 ? "2" : "1");
+	} catch {
+		// 忽略：无存储权限时偏好只在本次会话内临时生效
+	}
+}

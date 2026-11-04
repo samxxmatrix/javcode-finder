@@ -1207,7 +1207,9 @@ button:focus-visible {
 	border: 1px solid var(--border-subtle);
 	border-radius: 10px;
 	margin-bottom: 12px;
-	overflow: hidden;
+	/* 不能用 hidden：标题区展开时要从卡片底部溢出、浮在番号列表之上。
+	   圆角改由各子块自己承担（媒体区顶部、标题区底部）。 */
+	overflow: visible;
 }
 
 .trailer-preview__header {
@@ -1312,6 +1314,9 @@ button:focus-visible {
 	width: 100%;
 	aspect-ratio: 16 / 9;
 	background: #000;
+	/* 卡片改 overflow: visible 后，顶部圆角与黑底裁剪由媒体区自己兜 */
+	border-radius: 10px 10px 0 0;
+	overflow: hidden;
 }
 
 .trailer-preview__video {
@@ -1402,6 +1407,51 @@ button:focus-visible {
 
 .trailer-preview__primary-retry:hover {
 	background: var(--bg-surface-hover);
+}
+
+/* 预览源切换：浮在画面内右上角。播放中 <video> 为顶部 notice 让出的
+   32px 条带正好容纳这一排按钮，不占画面也不与底部 meta / 原生 controls 抢位置。
+   z-index 必须低于 notice(2)：notice 出现时临时盖住按钮，用户关掉 notice 即恢复；
+   若反过来越过 notice，按钮会压住 notice 右端的关闭按钮，反而关不掉。 */
+.trailer-preview__source-switch {
+	position: absolute;
+	z-index: 1;
+	top: 6px;
+	right: 8px;
+	display: flex;
+	gap: 3px;
+}
+
+/* 固定尺寸的圆角正方形：按钮只显示序号 1 / 2，任意数量都等大 */
+.trailer-preview__source-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid var(--border-subtle);
+	border-radius: 4px;
+	background: var(--bg-surface);
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: 10px;
+	line-height: 1;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+	cursor: pointer;
+	transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.trailer-preview__source-btn:hover {
+	border-color: var(--accent-gold);
+	color: var(--accent-gold);
+}
+
+/* 当前在播 / 预选的档 */
+.trailer-preview__source-btn[aria-pressed="true"] {
+	border-color: var(--accent-gold);
+	background: var(--bg-surface-hover);
+	color: var(--accent-gold);
 }
 
 .trailer-preview__notice {
@@ -1513,13 +1563,82 @@ button:focus-visible {
 	text-align: right;
 }
 
-/* 预览下方的影片标题区域 */
+/* 标题区外层占位：展开时标题层绝对定位溢出，靠这个固定高度的槽位让番号列表不跳动 */
+.trailer-preview__title-slot {
+	position: relative;
+	flex: 0 0 auto;
+	height: 90px;
+}
+
+/* 预览下方的影片标题区域。
+   收起：90px 内截断、**不**内部滚动（滚轮交给整页，避免小容器一格到底）；
+   展开：250px，绝对定位浮在番号列表之上，文本仍超出时才出现滚动条。 */
 .trailer-preview__title-area {
+	position: absolute;
+	top: 0;
+	right: 0;
+	left: 0;
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
 	padding: 8px 12px;
 	border-top: 1px solid var(--border-subtle);
-	/* 长文标题可能撑爆面板：限制最大高度，给番号列表释放空间 */
-	max-height: 90px;
+	border-radius: 0 0 10px 10px;
+	background: var(--bg-surface);
+}
+
+/* 收起态：内容占满 90px 减去上下 padding（8+74+8 = 90），超出截断。
+   展开/收起按钮浮在它上面，不占净高度，所以这里能比按钮在流内时多显示一行。 */
+.trailer-preview__title-content {
+	flex: 0 0 auto;
+	height: 74px;
+	overflow: hidden;
+}
+
+.trailer-preview__title-slot--expanded .trailer-preview__title-area {
+	/* 用 max-height 而不是 height：短标题展开后不留空白，只有长文才撑到上限 */
+	max-height: 350px;
+	/* 深色面板下要够重才看得出「浮层」，否则展开区与列表糊成一片 */
+	box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65);
+}
+
+/* 展开态：内容区吃掉剩余高度，只有文本仍超出时才滚动 */
+.trailer-preview__title-slot--expanded .trailer-preview__title-content {
+	flex: 1 1 auto;
+	height: auto;
+	min-height: 0;
 	overflow-y: auto;
+	/* 给浮动按钮留出底部空间：滚到最后一行时不会被圆钮压住 */
+	padding-bottom: 26px;
+}
+
+/* 圆形展开/收起按钮：绝对定位浮在标题内容之上，收起态位置仍是 90px 区域底部居中。
+   它不占流内高度，翻译错误横幅出现时给横幅留 margin-bottom，按钮才会落到横幅下方。 */
+.trailer-preview__title-toggle {
+	position: absolute;
+	z-index: 1;
+	bottom: 8px;
+	left: 50%;
+	transform: translateX(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	/* 浮动在文字之上：底色必须与面板区分，否则圆钮会被正文吞掉 */
+	border: 1px solid rgba(255, 255, 255, 0.28);
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.62);
+	backdrop-filter: blur(2px);
+	color: #e4e4e7;
+	cursor: pointer;
+	transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.trailer-preview__title-toggle:hover {
+	border-color: var(--accent-gold);
+	color: var(--accent-gold);
 }
 
 /* 短标题：金色，先行显示（不等待长文翻译） */
@@ -1727,6 +1846,8 @@ button:focus-visible {
 	justify-content: space-between;
 	gap: 8px;
 	margin-top: 8px;
+	/* 按钮浮动在标题区底部：横幅出现时给它让出位置，按钮才会落在横幅下方 */
+	margin-bottom: 26px;
 	padding: 6px 8px;
 	border: 1px solid var(--accent-red);
 	border-radius: 4px;

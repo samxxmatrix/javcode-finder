@@ -7,14 +7,18 @@ import {
 import {
 	PLAYBACK_LOAD_TIMEOUT_MS,
 	armPlayingOnFirstFrame,
+	buildPlaybackFallbackOrder,
+	buildPreviewChoices,
 	getPreviewPresentation,
 	nextFallbackStage,
+	pickDefaultPreviewChoice,
 	planDirectMp4Start,
 	transitionPreviewNotice,
+	type PlaybackStage,
+	type PreviewChoice,
 } from "../../../src/lib/preview-state";
 import {
 	canUseTitleAsShortTitle,
-	isDirectMp4Source,
 	sourceLabelKey,
 } from "../../../src/lib/preview-source";
 import {
@@ -31,9 +35,11 @@ import type { LocaleMessages } from "../../../src/lib/locales";
 import { toExternalSearchCode } from "../../../src/lib/normalize-code";
 import {
 	configuredPlatforms,
+	getPreferredPreviewSlot,
 	getSettings,
 	platformInitial,
 	resolveSearchUrl,
+	savePreferredPreviewSlot,
 } from "../../../src/lib/settings";
 import type {
 	PreviewLookupError,
@@ -78,6 +84,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [noticeDismissed, setNoticeDismissed] = useState(false);
 	// 实际在播的来源：主媒体起步，每切一档回退就更新 → 「xxx源播放失败」文案取它
 	const [playSource, setPlaySource] = useState<PreviewLookupSource | null>(null);
+	// 本次手动选中的预览档；null = 跟随记忆的档位偏好。只影响视频，封面不随档切换
+	const [selectedKey, setSelectedKey] = useState<string | null>(null);
+	// 记住的档位（1 = 第 1 档，2 = 第 2 档）：只在本次没有手动选择时决定默认档
+	const [preferredSlot, setPreferredSlot] = useState(getPreferredPreviewSlot);
+	// 标题/介绍区展开态：收起 90px 截断，展开 250px 浮在番号列表之上
+	const [titleExpanded, setTitleExpanded] = useState(false);
 	// 标题译文（拼装翻译后拆分还原：标题译文 + 介绍译文；失败或英文界面保持 null）
 	const [translatedShort, setTranslatedShort] = useState<string | null>(null);
 	const [translatedLong, setTranslatedLong] = useState<string | null>(null);
@@ -165,13 +177,15 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const resolutionRequestRef = useRef(0);
 	const playbackRequestRef = useRef(0);
 	const videoPlaybackRequestRef = useRef(0);
-	// 回退链游标。playStageRef：0 = 主媒体、1 = 详情页兜底(mgstage)、2 起 = fallbackTiers[0..]
-	const playStageRef = useRef(0);
+	// 播放失败后的候选档序列与游标：由 buildPlaybackFallbackOrder 按"起步档"重排，
+	// 手动选后备档失败时才能回到主档，而不是停在单向链尾直接判失败
+	const fallbackOrderRef = useRef<PlaybackStage[]>([]);
+	const fallbackIndexRef = useRef(0);
 	// 每次"开始某一档"自增；失败信号带上它，才能把上一档迟到的 error 判成过期
 	const playAttemptRef = useRef(0);
 	// 已处理过失败的 attempt 号：同一档常同时收到 onError 与 play() rejection，只推进一次
 	const failureHandledRef = useRef(0);
-	// 封面回退游标：口径与播放链一致（0 = 主封面、1 = 详情页兜底、N≥2 = fallbackTiers[N-2]）
+	// 封面回退游标：0 = 主封面、1 = 详情页兜底、N≥2 = fallbackTiers[N-2]（与播放链独立）
 	const coverStageRef = useRef(0);
 
 	// 挂载时把预览卡片滚动到可视区域顶部（列表较长时点击番号可能看不见预览）
@@ -182,21 +196,29 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const media: PreviewMedia | null =
 		resolution.status === "resolved" ? resolution.media : null;
 	const coverUrl = media?.coverUrl || "";
-	const trailerUrl = media?.previewUrl || "";
+	// 可切换的预览档全部来自解析期结果（0 额外请求）；少于 2 档时控件不渲染
+	const choices = buildPreviewChoices(media);
+	// 手动选过就用手动的；否则按记忆档位挑默认档（只有一档时自动回落第 1 档）
+	const activeChoice =
+		choices.find((choice) => choice.key === selectedKey) ??
+		pickDefaultPreviewChoice(choices, preferredSlot);
+	const primaryChoice =
+		choices.find((choice) => choice.key === "primary") ?? null;
 
 	// 预取元数据：实测首帧总耗时 ~7 s，其中 6.9 s 花在"连接 + moov"上
 	// （loadedmetadata 6.911 s → rvfc 7.025 s，只差 0.11 s）。
 	// 解析出地址就提前设 src + preload="metadata"，把这 6.9 s 从"点击后"挪到"看封面时"，
-	// 点击后基本只剩解码首帧。只对 mp4 直链源做（HLS 需要 hls.js attach，不适用）。
+	// 点击后基本只剩解码首帧。只预取主档 mp4 直链：后备档等用户切过去再拉，
+	// 避免为了"可能不看"的第二套视频提前打日本源站。
+	const primaryUrl = primaryChoice?.directMp4 ? primaryChoice.previewUrl : null;
 	useEffect(() => {
 		const video = videoRef.current;
-		if (!video || !trailerUrl) return;
-		if (!isDirectMp4Source(media?.source)) return;
+		if (!video || !primaryUrl) return;
 		// 同一地址不重复触发，否则会把已开始的加载白重下一遍
-		if (video.getAttribute("src") === trailerUrl) return;
+		if (video.getAttribute("src") === primaryUrl) return;
 		video.preload = "metadata";
-		video.src = trailerUrl;
-	}, [media?.source, trailerUrl]);
+		video.src = primaryUrl;
+	}, [primaryUrl]);
 
 	const resolveCurrentCode = useCallback(async () => {
 		const requestId = ++resolutionRequestRef.current;
@@ -212,7 +234,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setCoverSrc("");
 		setCoverLoading(false);
 		setPlaySource(null);
-		playStageRef.current = 0;
+		setSelectedKey(null);
+		setTitleExpanded(false);
+		// 重新打开番号时以存储里的最新偏好为准（用户可能在别的面板里改过）
+		setPreferredSlot(getPreferredPreviewSlot());
+		fallbackOrderRef.current = [];
+		fallbackIndexRef.current = 0;
 		playAttemptRef.current = 0;
 		failureHandledRef.current = 0;
 		coverStageRef.current = 0;
@@ -454,42 +481,51 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		})();
 	};
 
-	// 播放链推进：主媒体失败 → 详情页兜底 mp4（mgstage，仅 javtrailers 封面方）→ fallbackTiers 逐档。
-	// 每档必须等到失败信号才推进，任一档成功即停；档位用尽才真正判 failed。
-	// 红线：后备档只能复用解析期已取到的 media 字段，**不得在此处再发起 FALENO/DMM 查询**。
+	// 播放链推进：按 buildPlaybackFallbackOrder 生成的序列逐档尝试。
+	// 每档必须等到失败信号才推进，任一档成功即停；序列用尽才真正判 failed。
+	// 红线：后备档只能复用解析期已取到的 choices 字段，**不得在此处再发起 FALENO/DMM 查询**。
 	// 这几层互相调用（失败推进下一档、下一档再失败又回推进），用 function 声明靠提升打通前向引用
 	async function advancePlayback(requestId: number) {
 		const video = videoRef.current;
 		if (!video || requestId !== playbackRequestRef.current) return;
-		const tiers = media?.fallbackTiers ?? [];
 
 		while (true) {
-			const next = nextFallbackStage(
-				playStageRef.current,
-				media?.source ?? null,
-				tiers.length,
-			);
-			if (!next) {
+			const stage = fallbackOrderRef.current[fallbackIndexRef.current];
+			if (!stage) {
 				setStatus("failed");
 				return;
 			}
-			if (next.kind === "detail") {
-				playStageRef.current = 1;
+			fallbackIndexRef.current++;
+			if (stage.kind === "primary") {
+				if (!primaryChoice) continue;
+				startChoicePlayback(video, primaryChoice, requestId);
+				return;
+			}
+			if (stage.kind === "detail") {
 				const fb = await destroyHlsBefore(hlsRef, () =>
 					requestFallback(media?.contentId ?? null, resolutionRequestRef.current),
 				);
 				if (requestId !== playbackRequestRef.current) return;
 				if (fb.trailerUrl) {
 					// mgstage 仍属 JavTrailers 这条链路，来源标签不换
-					startTierPlayback(video, fb.trailerUrl, requestId, "javtrailers");
+					startChoicePlayback(
+						video,
+						{
+							source: "javtrailers",
+							previewUrl: fb.trailerUrl,
+							directMp4: true,
+						},
+						requestId,
+					);
 					return;
 				}
 				continue;
 			}
-			playStageRef.current = next.index + 2;
-			const tier = tiers[next.index];
-			if (!tier?.previewUrl) continue;
-			startTierPlayback(video, tier.previewUrl, requestId, tier.source);
+			const tierChoice = choices.find(
+				(choice) => choice.tierIndex === stage.index,
+			);
+			if (!tierChoice) continue;
+			startChoicePlayback(video, tierChoice, requestId);
 			return;
 		}
 	}
@@ -538,87 +574,135 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		if (plan.reload) video.load();
 	};
 
-	// 开始播放某一档（详情页兜底 / 后备档）：新 attempt + 记录来源标签，供失败文案使用
-	function startTierPlayback(
+	/** 播放入口只关心地址 / 来源 / 是否直链，主档、后备档、详情页兜底共用 */
+	type PlaybackChoice = Pick<
+		PreviewChoice,
+		"source" | "previewUrl" | "directMp4"
+	>;
+
+	// 开始播放某一档：新 attempt + 记录来源标签，供失败文案使用。
+	// mp4 与 HLS 两条路径都收在这里，切档回到 JT 的 m3u8 才不会退化成 <video src="m3u8">。
+	function startChoicePlayback(
 		video: HTMLVideoElement,
-		url: string,
+		choice: PlaybackChoice,
 		requestId: number,
-		source: PreviewLookupSource,
 	) {
 		const attempt = ++playAttemptRef.current;
-		setPlaySource(source);
-		prepareDirectMp4(video, url, status === "failed");
+		setPlaySource(choice.source);
 		setStatus("loading");
-		startPlayback(video, requestId, attempt);
-		void video.play().catch(() => failPlayback(requestId, attempt));
+		destroyHlsInstance(hlsRef);
+
+		if (choice.directMp4) {
+			// 预取地址可用就沿用不重置（重置会丢掉已缓冲的 moov，白等一遍）；
+			// 但同一地址 + 已失败/错误态必须 load() 复位，否则 play() 不会重新走资源选择，
+			// <video> 卡在错误态里，"重新播放"就永远失败（只有"重新加载预览"能救）。
+			prepareDirectMp4(video, choice.previewUrl, status === "failed");
+			startPlayback(video, requestId, attempt);
+			void video.play().catch(() => failPlayback(requestId, attempt));
+			return;
+		}
+
+		void (async () => {
+			try {
+				// 懒加载 hls.js light 构建，仅首次播 HLS 时加载，不拖慢面板首开
+				const { default: Hls } = await import("hls.js/light");
+				if (requestId !== playbackRequestRef.current) return;
+				if (Hls.isSupported()) {
+					const hls = new Hls();
+					hlsRef.current = hls;
+					hls.loadSource(choice.previewUrl);
+					hls.attachMedia(video);
+					hls.on(Hls.Events.MANIFEST_PARSED, () => {
+						if (requestId !== playbackRequestRef.current) return;
+						startPlayback(video, requestId, attempt);
+						// 处于用户点击手势内，不会被自动播放策略拦截
+						void video.play().catch(() => {
+							if (requestId !== playbackRequestRef.current) return;
+							destroyHlsInstance(hlsRef);
+							failPlayback(requestId, attempt);
+						});
+					});
+					hls.on(Hls.Events.ERROR, (_event, data) => {
+						if (requestId !== playbackRequestRef.current) return;
+						if (!data.fatal) return;
+						// 404 = 该番号无 HLS 预告片；其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）
+						// 同样按加载失败处理 —— 两者都推进回退序列。
+						destroyHlsInstance(hlsRef);
+						failPlayback(requestId, attempt);
+					});
+				} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+					// Safari 原生支持 HLS，无需 hls.js
+					video.src = choice.previewUrl;
+					startPlayback(video, requestId, attempt);
+					void video.play().catch(() => failPlayback(requestId, attempt));
+				} else {
+					setStatus("failed");
+				}
+			} catch {
+				if (requestId === playbackRequestRef.current) setStatus("failed");
+			}
+		})();
 	}
 
-	const handlePlay = async () => {
+	// 一次播放的公共前置：作废旧请求、按起步档重建回退序列、应用音量。
+	const beginPlayback = (choice: PreviewChoice) => {
 		const video = videoRef.current;
-		if (!video || status === "loading" || status === "playing") return;
+		if (!video) return;
 		setNoticeDismissed((dismissed) =>
 			transitionPreviewNotice(dismissed, "playback_retry"),
 		);
 		const requestId = ++playbackRequestRef.current;
 		videoPlaybackRequestRef.current = requestId;
 		destroyHlsInstance(hlsRef);
-		// 新一轮播放：回退链从头开始（主媒体 → 兜底 → 后备档）
-		playStageRef.current = 0;
+		video.pause();
+		fallbackOrderRef.current = buildPlaybackFallbackOrder({
+			coverSource: media?.source ?? null,
+			playableTierIndexes: choices
+				.filter((item) => item.tierIndex !== null)
+				.map((item) => item.tierIndex as number),
+			startTierIndex: choice.tierIndex,
+		});
+		fallbackIndexRef.current = 0;
 		failureHandledRef.current = 0;
-		const attempt = ++playAttemptRef.current;
-		setPlaySource(media?.source ?? null);
-
 		// 播放开始时应用设置中的预览音量（0-100 → 0-1）
 		video.volume = getSettings().previewVolume / 100;
+		startChoicePlayback(video, choice, requestId);
+	};
 
-		setStatus("loading");
-		// mp4 直链直接播放,无需 hls.js 与 CORS 处理(dmm / faleno / fc2 / d2pass 均为 mp4 直链)
-		if (isDirectMp4Source(media?.source) && trailerUrl) {
-			// 预取地址可用就沿用不重置（重置会丢掉已缓冲的 moov，白等一遍）；
-			// 但同一地址 + 已失败/错误态必须 load() 复位，否则 play() 不会重新走资源选择，
-			// <video> 卡在错误态里，"重新播放"就永远失败（只有"重新加载预览"能救）。
-			prepareDirectMp4(video, trailerUrl, status === "failed");
-			startPlayback(video, requestId, attempt);
-			void video.play().catch(() => failPlayback(requestId, attempt));
-			return;
+	const handlePlay = () => {
+		if (!activeChoice || status === "loading" || status === "playing") return;
+		beginPlayback(activeChoice);
+	};
+
+	// 切换预览档：只换视频，封面与标题不动。播放中立即切播；未播放时仅预选。
+	// 清理 <video> 前先作废旧播放请求，否则 load() 触发的 error 会被算到新档头上。
+	const handleSelectChoice = (key: string) => {
+		const index = choices.findIndex((item) => item.key === key);
+		const choice = index >= 0 ? choices[index] : undefined;
+		if (!choice) return;
+		// 记「第几档」而不是具体来源：下次第二路换成 DMM 或 FALENO，仍能对上同一个按钮
+		const slot = index === 1 ? 2 : 1;
+		savePreferredPreviewSlot(slot);
+		setPreferredSlot(slot);
+		if (choice.key === activeChoice?.key) return;
+		const wasPlaying = status === "playing" || status === "loading";
+		setSelectedKey(choice.key);
+		playbackRequestRef.current++;
+		destroyHlsInstance(hlsRef);
+		const video = videoRef.current;
+		if (video) {
+			video.pause();
+			video.removeAttribute("src");
+			video.load();
 		}
-		try {
-			// 懒加载 hls.js light 构建，仅首次点播放时加载，不拖慢面板首开
-			const { default: Hls } = await import("hls.js/light");
-			if (requestId !== playbackRequestRef.current) return;
-			if (Hls.isSupported()) {
-				const hls = new Hls();
-				hlsRef.current = hls;
-				hls.loadSource(trailerUrl);
-				hls.attachMedia(video);
-				hls.on(Hls.Events.MANIFEST_PARSED, () => {
-					if (requestId !== playbackRequestRef.current) return;
-					startPlayback(video, requestId, attempt);
-					// 处于用户点击手势内，不会被自动播放策略拦截
-					void video.play().catch(() => {
-						if (requestId !== playbackRequestRef.current) return;
-						destroyHlsInstance(hlsRef);
-						failPlayback(requestId, attempt);
-					});
-				});
-				hls.on(Hls.Events.ERROR, (_event, data) => {
-					if (requestId !== playbackRequestRef.current) return;
-					if (!data.fatal) return;
-					// 404 = 该番号无 HLS 预告片；其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）
-					// 同样按加载失败处理 —— 两者都推进回退链：先详情页 sample MP4，再后备档。
-					destroyHlsInstance(hlsRef);
-					failPlayback(requestId, attempt);
-				});
-			} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-				// Safari 原生支持 HLS，无需 hls.js
-				video.src = trailerUrl;
-				startPlayback(video, requestId, attempt);
-				void video.play().catch(() => failPlayback(requestId, attempt));
-			} else {
-				setStatus("failed");
-			}
-		} catch {
-			if (requestId === playbackRequestRef.current) setStatus("failed");
+		fallbackOrderRef.current = [];
+		fallbackIndexRef.current = 0;
+		failureHandledRef.current = 0;
+		if (wasPlaying) {
+			beginPlayback(choice);
+		} else {
+			setStatus("idle");
+			setPlaySource(null);
 		}
 	};
 
@@ -647,7 +731,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		resolution,
 		playbackStatus: status,
 		hasCover: Boolean(media?.coverUrl) && !coverError,
-		hasTrailer: Boolean(media?.previewUrl),
+		hasTrailer: Boolean(activeChoice),
 		noticeDismissed,
 	});
 	// 封面底部浮条：左出演者（逐名译文）、右发布日；点播放后随 status 一起消失。
@@ -960,10 +1044,39 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						</button>
 					</div>
 				)}
+				{/* 预览源切换：浮在画面右上角，仅在解析期拿到两套及以上预告地址时出现。
+				    notice 出现时由它盖住（z-index 更高），关掉 notice 即可继续切换。 */}
+				{choices.length > 1 && (
+					<div
+						className="trailer-preview__source-switch"
+						role="group"
+						aria-label={t.switchPreviewSource}
+					>
+					{choices.map((choice, index) => (
+						<button
+							key={choice.key}
+							type="button"
+							className="trailer-preview__source-btn"
+							aria-pressed={choice.key === activeChoice?.key}
+							aria-label={t[sourceLabelKey(choice.source)]}
+							title={t[sourceLabelKey(choice.source)]}
+							onClick={() => handleSelectChoice(choice.key)}
+						>
+							{index + 1}
+						</button>
+					))}
+					</div>
+				)}
 			</div>
 
 			{(displayShortTitle || displayLongTitle) && (
-				<div className="trailer-preview__title-area">
+				<div
+					className={`trailer-preview__title-slot${
+						titleExpanded ? " trailer-preview__title-slot--expanded" : ""
+					}`}
+				>
+					<div className="trailer-preview__title-area">
+						<div className="trailer-preview__title-content">
 					{/* 标题行：金色（dmm 商品名 / javtrailers 卡片标题），解析到即显示；翻译完成后替换为译文 */}
 					{displayShortTitle && (
 						<p className="trailer-preview__title-short">
@@ -1018,6 +1131,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						</div>
 					)}
+						</div>
 					{/* 翻译错误信息区（每行一条：Worker 失败原因 + 备用服务失败原因），右上角单个关闭按钮 */}
 					{translateErrors && translateErrors.length > 0 && (
 						<div className="trailer-preview__translate-error" role="alert">
@@ -1050,6 +1164,36 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						</div>
 					)}
+					<button
+						type="button"
+						className="trailer-preview__title-toggle"
+						aria-expanded={titleExpanded}
+						aria-label={titleExpanded ? t.collapseTitle : t.expandTitle}
+						title={titleExpanded ? t.collapseTitle : t.expandTitle}
+						onClick={() => setTitleExpanded((expanded) => !expanded)}
+					>
+						<svg
+							viewBox="0 0 24 24"
+							width="14"
+							height="14"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2.2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							{/* 带长杆的箭头（不是单折角 chevron）：杆 + 两侧斜线组成箭头头部 */}
+							<path
+								d={
+									titleExpanded
+										? "M12 19V5M5.5 11.5L12 5l6.5 6.5"
+										: "M12 5v14M5.5 12.5L12 19l6.5-6.5"
+								}
+							/>
+						</svg>
+					</button>
+					</div>
 				</div>
 			)}
 

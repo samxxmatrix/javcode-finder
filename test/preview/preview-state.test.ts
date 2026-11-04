@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	armPlayingOnFirstFrame,
+	buildPlaybackFallbackOrder,
+	buildPreviewChoices,
 	getPreviewPresentation,
 	nextFallbackStage,
+	pickDefaultPreviewChoice,
 	planDirectMp4Start,
 	transitionPreviewNotice,
 	type FirstFrameTarget,
@@ -492,5 +495,171 @@ describe("nextFallbackStage（回退链档位规则）", () => {
 	it("javtrailers 封面方但没有任何后备档：仍先试详情页兜底，再终止", () => {
 		expect(nextFallbackStage(0, "javtrailers", 0)).toEqual({ kind: "detail" });
 		expect(nextFallbackStage(1, "javtrailers", 0)).toBeNull();
+	});
+});
+
+describe("buildPreviewChoices（预览源切换候选档）", () => {
+	const jtMedia: PreviewMedia = { ...media, fallbackTiers: undefined };
+	const dmmTier = {
+		source: "dmm" as const,
+		coverUrl: "https://pics.example/pl.jpg",
+		previewUrl: "https://cc.example/sample.mp4",
+	};
+
+	it("没有解析结果时返回空列表", () => {
+		expect(buildPreviewChoices(null)).toEqual([]);
+	});
+
+	it("只有主档时给出单档（控件不显示），JT 为 HLS 短码 JT", () => {
+		expect(buildPreviewChoices(jtMedia)).toEqual([
+			{
+				key: "primary",
+				tierIndex: null,
+				source: "javtrailers",
+				previewUrl: media.previewUrl,
+				directMp4: false,
+			},
+		]);
+	});
+
+	it("JT 主档 + DMM 后备档给出两档，后备档是 mp4 直链", () => {
+		const choices = buildPreviewChoices({
+			...jtMedia,
+			fallbackTiers: [dmmTier],
+		});
+
+		expect(choices).toHaveLength(2);
+		expect(choices[1]).toEqual({
+			key: "tier-0",
+			tierIndex: 0,
+			source: "dmm",
+			previewUrl: dmmTier.previewUrl,
+			directMp4: true,
+		});
+	});
+
+	it("后备档没有预告地址时不列为可切换档", () => {
+		const choices = buildPreviewChoices({
+			...jtMedia,
+			fallbackTiers: [{ ...dmmTier, previewUrl: null }],
+		});
+
+		expect(choices.map((choice) => choice.key)).toEqual(["primary"]);
+	});
+
+	it("主档没有预告地址时仍可用后备档", () => {
+		const choices = buildPreviewChoices({
+			...jtMedia,
+			previewUrl: null,
+			fallbackTiers: [dmmTier],
+		});
+
+		expect(choices.map((choice) => choice.key)).toEqual(["tier-0"]);
+	});
+
+	it("FALENO 后备档保留来源，供按钮的悬停提示使用", () => {
+		const choices = buildPreviewChoices({
+			...jtMedia,
+			fallbackTiers: [{ ...dmmTier, source: "faleno" }],
+		});
+
+		expect(choices.map((choice) => choice.source)).toEqual([
+			"javtrailers",
+			"faleno",
+		]);
+	});
+});
+
+describe("pickDefaultPreviewChoice（记住上次选的档位）", () => {
+	const choices = buildPreviewChoices({
+		...media,
+		fallbackTiers: [
+			{
+				source: "dmm",
+				coverUrl: null,
+				previewUrl: "https://cc.example/sample.mp4",
+			},
+		],
+	});
+
+	it("上次选 2 且本次有两档：默认选第 2 档", () => {
+		expect(pickDefaultPreviewChoice(choices, 2)?.key).toBe("tier-0");
+	});
+
+	it("上次选 1：默认选第 1 档", () => {
+		expect(pickDefaultPreviewChoice(choices, 1)?.key).toBe("primary");
+	});
+
+	it("上次选 2 但本次只有一档：回落到第 1 档", () => {
+		const single = buildPreviewChoices({ ...media, fallbackTiers: undefined });
+		expect(pickDefaultPreviewChoice(single, 2)?.key).toBe("primary");
+	});
+
+	it("没有可播档时返回 null", () => {
+		expect(pickDefaultPreviewChoice([], 2)).toBeNull();
+	});
+
+	it("偏好值异常时按第 1 档处理", () => {
+		expect(pickDefaultPreviewChoice(choices, Number.NaN)?.key).toBe("primary");
+		expect(pickDefaultPreviewChoice(choices, 3)?.key).toBe("primary");
+	});
+});
+
+describe("buildPlaybackFallbackOrder（手动选档后的回退顺序）", () => {
+	it("默认起步 + JT 封面方：先详情页兜底再后备档", () => {
+		expect(
+			buildPlaybackFallbackOrder({
+				coverSource: "javtrailers",
+				playableTierIndexes: [0],
+				startTierIndex: null,
+			}),
+		).toEqual([{ kind: "detail" }, { kind: "tier", index: 0 }]);
+	});
+
+	it("默认起步 + 非 JT 封面方：没有详情页兜底，直接后备档", () => {
+		expect(
+			buildPlaybackFallbackOrder({
+				coverSource: "dmm",
+				playableTierIndexes: [0, 1],
+				startTierIndex: null,
+			}),
+		).toEqual([
+			{ kind: "tier", index: 0 },
+			{ kind: "tier", index: 1 },
+		]);
+	});
+
+	it("手动选后备档失败：先回主档与详情页兜底，跳过已试档", () => {
+		expect(
+			buildPlaybackFallbackOrder({
+				coverSource: "javtrailers",
+				playableTierIndexes: [0],
+				startTierIndex: 0,
+			}),
+		).toEqual([{ kind: "primary" }, { kind: "detail" }]);
+	});
+
+	it("多个后备档：跳过已试档，其余保持原序", () => {
+		expect(
+			buildPlaybackFallbackOrder({
+				coverSource: "javtrailers",
+				playableTierIndexes: [0, 1],
+				startTierIndex: 1,
+			}),
+		).toEqual([
+			{ kind: "primary" },
+			{ kind: "detail" },
+			{ kind: "tier", index: 0 },
+		]);
+	});
+
+	it("没有可播后备档时只留详情页兜底，用尽即终止", () => {
+		expect(
+			buildPlaybackFallbackOrder({
+				coverSource: "javtrailers",
+				playableTierIndexes: [],
+				startTierIndex: null,
+			}),
+		).toEqual([{ kind: "detail" }]);
 	});
 });
