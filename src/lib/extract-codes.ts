@@ -113,19 +113,83 @@ export function extractCandidatesInTab(
 	customRegexPattern: string,
 	uncensored: UncensoredRules | null,
 	excludeRegex?: string,
+	viewport = false,
+	forceFull = false,
 ): ExtractionResult {
 	try {
-		const bodyText = document.body ? document.body.innerText : "";
 		const MAX_SCAN_CHARS = 2 * 1024 * 1024;
 		const MAX_CANDIDATES = 500;
 		const MAX_CANDIDATE_LENGTH = 64;
 
-		let truncated = false;
-		let scanText = bodyText;
+		// 取视口内可见文本（安全模式手动扫描用）。注入自包含实现：递归遍历 DOM，
+		// 剪掉整棵在视口外的子树（含 display:none / visibility:hidden），收集每个元素的
+		// 直接文本节点。逐元素 getBoundingClientRect 只对可见元素发生（视口外子树已被剪枝），开销有界。
+		// 已知限制：跨「父文本 + 元素子节点」的番号（如 `ABP-<b>123</b>`）会被换行拆开、可能漏匹配；
+		// 安全模式本就是「手动 + 视口」的最佳努力扫描，可接受。
+		const getViewportText = (): string => {
+			const vw =
+				window.innerWidth || (document.documentElement?.clientWidth ?? 0);
+			const vh =
+				window.innerHeight || (document.documentElement?.clientHeight ?? 0);
+			const parts: string[] = [];
+			const walk = (el: Element): void => {
+				const rect = el.getBoundingClientRect();
+				// 整棵子树在视口外（任一方向）→ 剪枝，不再递归
+				if (
+					rect.bottom <= 0 ||
+					rect.top >= vh ||
+					rect.right <= 0 ||
+					rect.left >= vw
+				)
+					return;
+				const cs = getComputedStyle(el);
+				if (cs.visibility === "hidden" || cs.display === "none") return;
+				// 收集本元素直接文本节点（带元素子节点的元素里的文字也会被漏掉，故在此补收）
+				let direct = "";
+				const nodes = el.childNodes;
+				for (let i = 0; i < nodes.length; i++) {
+					const node = nodes[i];
+					if (node && node.nodeType === 3 /* TEXT_NODE */)
+						direct += node.textContent || "";
+				}
+				const trimmed = direct.trim();
+				const children = el.children;
+				if (children.length === 0) {
+					if (trimmed) parts.push(trimmed);
+				} else {
+					if (trimmed) parts.push(trimmed);
+					for (let i = 0; i < children.length; i++) {
+						const child = children[i];
+						if (child) walk(child);
+					}
+				}
+			};
+			if (document.body) walk(document.body);
+			return parts.join("\n");
+		};
 
-		if (scanText.length > MAX_SCAN_CHARS) {
-			scanText = scanText.slice(0, MAX_SCAN_CHARS);
-			truncated = true;
+		let truncated = false;
+		let scanText: string;
+
+		if (viewport) {
+			// 安全模式：只扫视口内可见文本（手动触发），避免大页整页全扫
+			scanText = getViewportText();
+		} else {
+			const bodyText = document.body ? document.body.innerText : "";
+			if (bodyText.length > MAX_SCAN_CHARS) {
+				if (forceFull) {
+					// 用户关闭横幅后的显式整页扫描：扫前 2 MiB 给截断结果与候选，
+					// 但仍标记 safeMode（页面仍过大 → 横幅再次弹回）。成本受 2 MiB 上界约束。
+					scanText = bodyText.slice(0, MAX_SCAN_CHARS);
+					truncated = true;
+				} else {
+					// 整页超 2 MiB：进安全模式，跳过昂贵的正则全扫（innerText 重排已发生，
+					// 但免去后续 30 万+ 命中的扫描/去重）。候选由用户手动扫视口获取。
+					return { candidates: [], truncated: false, safeMode: true };
+				}
+			} else {
+				scanText = bodyText;
+			}
 		}
 
 		let codeRegex: RegExp;
@@ -203,6 +267,8 @@ export function extractCandidatesInTab(
 					.filter((c) => !isExcluded(c.text.trim()))
 					.map((c) => c.text),
 				truncated,
+				// full 模式下撞 500 上限即进安全模式；视口模式不置
+				safeMode: !viewport && truncated,
 			};
 		}
 
@@ -357,9 +423,14 @@ export function extractCandidatesInTab(
 		// 上限截断保留；合并结果已按页面位置升序 ⇒ 现在截掉的是**页面靠后的候选**
 		// （旧口径是"无码优先地截"，等于把无码全保住、优先截有修正侧）。
 		if (merged.length > MAX_CANDIDATES) {
-			return { candidates: merged.slice(0, MAX_CANDIDATES), truncated: true };
+			return {
+				candidates: merged.slice(0, MAX_CANDIDATES),
+				truncated: true,
+				// 合并段截断 = 候选超 500，full 模式进安全模式；视口模式不置
+				safeMode: !viewport,
+			};
 		}
-		return { candidates: merged, truncated };
+		return { candidates: merged, truncated, safeMode: !viewport && truncated };
 	} catch {
 		return { candidates: [], truncated: false, unsupported: true };
 	}

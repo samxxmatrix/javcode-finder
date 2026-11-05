@@ -20,6 +20,7 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 
 - 仅在用户主动触发后，通过 `browser.scripting.executeScript` 在 top-level document 注入自包含函数 `extractCandidatesInTab`。
 - 提取规则：默认正则见 `src/lib/settings.ts` 的 `DEFAULT_CODE_REGEX`（含 `FC2-<数字>`、`FC2-PPV-<数字>`、`FC2PPV<数字>` 三种 FC2 变体，可在设置中自定义），2 MiB 扫描上限，最多 500 个去重候选。
+- **安全模式**：整页文本超 2 MiB 或候选撞 500 上限时进入，面板顶部显示横幅「页面内容超过扫描上限，进入安全模式，可手动扫描，关闭恢复。」并抑制自动整页扫描（仅用户点扫描按钮时触发）。安全模式下扫描目标改为**视口内可见文本**（`getViewportText`：递归剪掉视口外子树、跳过隐藏元素），避免大页整页全扫。关闭横幅 = 退出并强制跑一次完整页扫描（仍超大则再次进入、横幅弹回）。
 - 候选过滤：拒绝 URL、协议前缀、常见域名后缀、文件扩展名等。
 - 不支持页面：`chrome://`、`chrome-extension://`、`edge://`、`about:`、浏览器商店页、`addons.mozilla.org`。
 

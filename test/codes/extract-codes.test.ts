@@ -135,6 +135,59 @@ function stubPage(text: string): void {
 	(globalThis as any).document = { body: { innerText: text } };
 }
 
+/** 最小 DOM 树，供视口扫描测试：元素自带 rect / 计算样式 / 文本子节点 */
+class FakeEl {
+	children: FakeEl[] = [];
+	childNodes: Array<FakeEl | { nodeType: number; textContent: string }> = [];
+	_cs: { visibility: string; display: string };
+	_text = "";
+	rect: { top: number; bottom: number; left: number; right: number };
+	constructor(
+		rect: { top: number; bottom: number; left: number; right: number },
+		opts: { hidden?: boolean; text?: string } = {},
+	) {
+		this.rect = rect;
+		this._cs = opts.hidden
+			? { visibility: "hidden", display: "none" }
+			: { visibility: "visible", display: "block" };
+		if (opts.text !== undefined) this._text = opts.text;
+	}
+	get textContent(): string {
+		return this._text;
+	}
+	getBoundingClientRect() {
+		return this.rect;
+	}
+	appendChild(el: FakeEl): FakeEl {
+		this.children.push(el);
+		this.childNodes.push(el);
+		return el;
+	}
+	addText(t: string): void {
+		this.childNodes.push({ nodeType: 3, textContent: t });
+	}
+}
+
+/** 用给定根树装配 document/window/getComputedStyle 全局，返回恢复函数 */
+function stubViewportDom(root: FakeEl): () => void {
+	const saved = {
+		window: (globalThis as any).window,
+		getComputedStyle: (globalThis as any).getComputedStyle,
+		document: (globalThis as any).document,
+	};
+	(globalThis as any).window = { innerWidth: 1024, innerHeight: 768 };
+	(globalThis as any).getComputedStyle = (el: FakeEl) => el._cs;
+	(globalThis as any).document = {
+		body: root,
+		documentElement: { clientWidth: 1024, clientHeight: 768 },
+	};
+	return () => {
+		(globalThis as any).window = saved.window;
+		(globalThis as any).getComputedStyle = saved.getComputedStyle;
+		(globalThis as any).document = saved.document;
+	};
+}
+
 /** 序列化后执行 = 真正被注入页面的那份函数（模块作用域一律不可见） */
 const injectedExtract = new Function(
 	`return (${extractCandidatesInTab.toString()})`,
@@ -336,8 +389,62 @@ describe("extractCandidatesInTab", () => {
 		};
 		// 模块端口径 ⇒ trim 成 `^HEYZO-` ⇒ HEYZO-3953 被排除，只剩有修正侧的 ABC-456；
 		// 副本若不 trim ⇒ `new RegExp("  ^HEYZO-")` 永不命中 ⇒ HEYZO-3953 留在列表里（假绿）。
-		expect(injectedExtract(DEFAULT_CODE_REGEX, rules).candidates).toEqual([
-			"ABC-456",
-		]);
-	});
+	expect(injectedExtract(DEFAULT_CODE_REGEX, rules).candidates).toEqual([
+		"ABC-456",
+	]);
+});
+
+it("整页 > 2 MiB（full 模式）：提前返回 safeMode，跳过昂贵的正则全扫", () => {
+	const huge = "ABP-123 " + "x".repeat(MAX_SCAN_CHARS + 100);
+	stubPage(huge);
+	const result = injectedExtract(DEFAULT_CODE_REGEX, null);
+	expect(result.safeMode).toBe(true);
+	expect(result.candidates).toEqual([]);
+	expect(result.truncated).toBe(false);
+});
+
+it("候选撞 500 上限（full 模式）：truncated 且 safeMode=true", () => {
+	const many: string[] = [];
+	for (let i = 100; i < 605; i++) many.push(`ABC-${i}`);
+	stubPage(many.join(" "));
+	const result = injectedExtract(DEFAULT_CODE_REGEX, null);
+	expect(result.candidates.length).toBe(500);
+	expect(result.truncated).toBe(true);
+	expect(result.safeMode).toBe(true);
+});
+
+it("关闭横幅后的强制整页（forceFull）：扫前 2 MiB 给截断结果且仍 safeMode（横幅弹回）", () => {
+	const huge = "ABP-123 " + "x".repeat(MAX_SCAN_CHARS + 100);
+	stubPage(huge);
+	const result = injectedExtract(DEFAULT_CODE_REGEX, null, undefined, false, true);
+	expect(result.safeMode).toBe(true);
+	expect(result.truncated).toBe(true);
+	expect(result.candidates).toContain("ABP-123");
+});
+
+it("视口模式（viewport）：只返回视口内可见的候选，屏外/隐藏候选被排除", () => {
+	const root = new FakeEl({ top: 0, bottom: 768, left: 0, right: 1024 });
+	const visible = new FakeEl({ top: 10, bottom: 40, left: 10, right: 200 });
+	visible.addText("ABP-123");
+	const offscreen = new FakeEl({ top: 5000, bottom: 5040, left: 10, right: 200 });
+	offscreen.addText("SNIS-456");
+	const hidden = new FakeEl(
+		{ top: 10, bottom: 40, left: 300, right: 400 },
+		{ hidden: true },
+	);
+	hidden.addText("IPX-789");
+	root.appendChild(visible);
+	root.appendChild(offscreen);
+	root.appendChild(hidden);
+
+	const restore = stubViewportDom(root);
+	try {
+		const result = injectedExtract(DEFAULT_CODE_REGEX, null, undefined, true);
+		expect(result.candidates).toEqual(["ABP-123"]);
+		expect(result.safeMode).toBe(false);
+		expect(result.truncated).toBe(false);
+	} finally {
+		restore();
+	}
+});
 });

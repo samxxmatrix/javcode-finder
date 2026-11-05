@@ -245,6 +245,22 @@ button:focus-visible {
 	line-height: 1.4;
 }
 
+.popup-alert__close {
+	margin-left: auto;
+	border: none;
+	background: transparent;
+	color: inherit;
+	font-size: 18px;
+	line-height: 1;
+	cursor: pointer;
+	padding: 0 2px;
+	opacity: 0.8;
+}
+
+.popup-alert__close:hover {
+	opacity: 1;
+}
+
 .icon-warning {
 	width: 16px;
 	height: 16px;

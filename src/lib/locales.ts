@@ -13,6 +13,10 @@ export interface LocaleMessages {
 	errorDesc: string;
 	retry: string;
 	truncatedWarning: string;
+	/** 安全模式横幅：整页过大时进入，提示手动扫视口、可关闭退出 */
+	safeModeWarning: string;
+	/** 安全模式横幅关闭按钮的 aria/title */
+	closeSafeMode: string;
 	codesListTitle: string;
 	/** 收藏夹切换按钮文案 */
 	favoritesToggle: string;
@@ -204,6 +208,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     errorDesc: "扫描页面时发生错误，请重试。",
     retry: "重新尝试",
     truncatedWarning: "页面内容超过扫描上限，部分候选可能未纳入统计。",
+    safeModeWarning: "页面内容超过扫描上限，进入安全模式，可手动扫描，关闭恢复。",
+    closeSafeMode: "退出安全模式",
     codesListTitle: "识别到的番号",
     favoritesToggle: "收藏夹",
     favoritesListTitle: "收藏夹的番号",
@@ -396,6 +402,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     errorDesc: "掃描頁面時發生錯誤，請重試。",
     retry: "重新嘗試",
     truncatedWarning: "頁面內容超過掃描上限，部分候選可能未納入統計。",
+    safeModeWarning: "頁面內容超過掃描上限，進入安全模式，可手動掃描，關閉恢復。",
+    closeSafeMode: "退出安全模式",
     codesListTitle: "識別到的番號",
     favoritesToggle: "收藏夾",
     favoritesListTitle: "收藏夾的番號",
@@ -590,6 +598,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     errorDesc: "Something went wrong while scanning this page. Please retry.",
     retry: "Retry",
     truncatedWarning: "Page text exceeded limit; scan was partially truncated.",
+    safeModeWarning:
+      "Page text exceeded limit; safe mode on. Scan manually, or close to restore.",
+    closeSafeMode: "Exit safe mode",
     codesListTitle: "Detected Codes",
     favoritesToggle: "Favorites",
     favoritesListTitle: "Favorite Codes",

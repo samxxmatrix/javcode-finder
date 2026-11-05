@@ -74,6 +74,14 @@ export const App: React.FC = () => {
 	const [showSettings, setShowSettings] = useState(false);
 	const [candidates, setCandidates] = useState<string[]>([]);
 	const [truncated, setTruncated] = useState(false);
+	// 安全模式：整页过大（>2 MiB 或候选撞 500 上限）进入，提示用户改扫视口、可关闭退出
+	const [safeMode, setSafeMode] = useState(false);
+	// 同步 ref：在异步/事件回调里同步判断安全模式与「已退出」标志，避免闭包读到陈旧 state
+	const safeModeRef = useRef(false);
+	// 关闭横幅时置位：本次扫描强制跑完整页（扫前 2 MiB 给截断结果），随后重置
+	const forceFullRef = useRef(false);
+	// 最近一次扫描的目标 URL：用于判断「新页面」以重置安全模式状态
+	const scannedUrlRef = useRef<string | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	// 点击番号后在列表上方展开的预告片预览
 	const [previewCode, setPreviewCode] = useState<string | null>(null);
@@ -202,6 +210,10 @@ export const App: React.FC = () => {
 						: null,
 					// 全局黑名单与总开关无关：无论开关都传入，关闭时仍压有码误报
 					settings.codeExcludeRegex,
+					// 安全模式且非强制整页时，手动扫描只扫视口内可见文本
+					safeModeRef.current && !forceFullRef.current,
+					// 关闭横幅后的显式整页扫描：扫前 2 MiB，仍标记 safeMode（横幅再次弹回）
+					forceFullRef.current,
 				],
 			});
 
@@ -447,7 +459,17 @@ export const App: React.FC = () => {
 		try {
 			// 发起扫描前记录目标 tab 的 URL，扫描完成后若已变化（导航竞态），结果作废重扫
 			const tabBefore = await getTargetTab();
+			// 新页面：重置安全模式状态，重新评估（避免停留在上一页的安全模式）
+			if (tabBefore?.url && tabBefore.url !== scannedUrlRef.current) {
+				safeModeRef.current = false;
+				setSafeMode(false);
+			}
+			scannedUrlRef.current = tabBefore?.url ?? null;
+			// 本次是否为视口扫描（安全模式下手动触发）：视口扫描不退出安全模式，横幅保持
+			const wasViewport = safeModeRef.current && !forceFullRef.current;
 			const extraction = await extractFromActiveTab(settings);
+			// 强制整页扫描只生效一次（关闭横幅那次）
+			forceFullRef.current = false;
 			const tabAfter = await getTargetTab();
 			if (
 				tabBefore?.url &&
@@ -487,16 +509,28 @@ export const App: React.FC = () => {
 
 			setTruncated(extraction.truncated);
 			setCandidates(extraction.candidates);
+			// 安全模式：整页过大进入；页面仍过大时关闭横幅重扫会再次进入（横幅弹回）。
+			// 视口扫描（手动）不退出安全模式，横幅保持。
+			const enterSafeMode = wasViewport
+				? safeModeRef.current
+				: !!extraction.safeMode;
+			safeModeRef.current = enterSafeMode;
+			setSafeMode(enterSafeMode);
 			// 在库判定不阻塞列表渲染：先出结果，命中后补图标
 			void refreshEmbyIndex(extraction.candidates);
 
 			setStatus(
-				extraction.candidates.length === 0 ? "no_candidates" : "results",
+				enterSafeMode
+					? "results"
+					: extraction.candidates.length === 0
+						? "no_candidates"
+						: "results",
 			);
 
 			// 空结果补扫：客户端渲染/懒加载的页面 DOM 可能未就绪，
-			// 主扫描（非补扫）为空时 1.5s 后补扫一次；补扫后仍空则停止，避免无限循环
-			if (!isRescan && extraction.candidates.length === 0) {
+			// 主扫描（非补扫）为空时 1.5s 后补扫一次；补扫后仍空则停止，避免无限循环。
+			// 安全模式下不自动补扫（只由用户手动扫视口），故跳过。
+			if (!isRescan && extraction.candidates.length === 0 && !enterSafeMode) {
 				rescanTimerRef.current = setTimeout(() => {
 					void runScan(true);
 				}, 1500);
@@ -510,6 +544,15 @@ export const App: React.FC = () => {
 
 	const handleRefresh = async () => {
 		await runScan();
+	};
+
+	// 关闭安全模式横幅：退出安全模式并强制跑一次完整页扫描；页面仍过大则再次进入、
+	// 横幅弹回（严格语义，不做防重入抑制）。
+	const exitSafeMode = (): void => {
+		safeModeRef.current = false;
+		setSafeMode(false);
+		forceFullRef.current = true;
+		void runScan();
 	};
 
 	// 顶部输入框查询：与点击列表项/网页圆点同一流程，直接展开对应番号的预览。
@@ -778,7 +821,8 @@ export const App: React.FC = () => {
 		const handleTabActivated = () => {
 			// If bound to a specific tab, do not re-scan when switching to other tabs
 			if (!boundTabId) {
-				runScan();
+				// 安全模式下不自动整页重扫（只由用户手动扫视口），切回标签时跳过
+				if (!safeModeRef.current) runScan();
 			}
 		};
 
@@ -918,7 +962,34 @@ export const App: React.FC = () => {
 				</div>
 			</header>
 
-			{truncated && !showSettings && !favoritesMode && (
+			{safeMode && !showSettings && !favoritesMode && (
+				<div className="popup-alert popup-alert--warning" role="alert">
+					<svg
+						className="icon-warning"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						aria-hidden="true"
+					>
+						<path
+							fillRule="evenodd"
+							d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z"
+							clipRule="evenodd"
+						/>
+					</svg>
+					<span>{t.safeModeWarning}</span>
+					<button
+						type="button"
+						className="popup-alert__close"
+						onClick={exitSafeMode}
+						title={t.closeSafeMode}
+						aria-label={t.closeSafeMode}
+					>
+						×
+					</button>
+				</div>
+			)}
+
+			{!safeMode && truncated && !showSettings && !favoritesMode && (
 				<div className="popup-alert popup-alert--warning" role="alert">
 					<svg
 						className="icon-warning"

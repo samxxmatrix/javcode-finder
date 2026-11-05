@@ -4,6 +4,8 @@ export interface ExtractionResult {
 	candidates: string[];
 	truncated: boolean;
 	unsupported?: boolean;
+	/** 安全模式：整页 > 2 MiB 或候选撞 500 上限时进入，提示用户改扫视口内文本 */
+	safeMode?: boolean;
 }
 
 export type PopupStatus =
