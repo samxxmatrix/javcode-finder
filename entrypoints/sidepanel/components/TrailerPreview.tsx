@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
 import {
 	destroyHlsBefore,
@@ -90,6 +96,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [preferredSlot, setPreferredSlot] = useState(getPreferredPreviewSlot);
 	// 标题/介绍区展开态：收起 90px 截断，展开 250px 浮在番号列表之上
 	const [titleExpanded, setTitleExpanded] = useState(false);
+	// 收起态下标题是否真的被截断：为 false 时连展开按钮都不渲染（短标题能完整显示）
+	const [titleTruncated, setTitleTruncated] = useState(false);
+	// 展开瞬间冻结的槽位高度：展开态标题层脱离文档流，靠它让番号列表不跳动
+	const [frozenSlotHeight, setFrozenSlotHeight] = useState<number | null>(null);
+	const titleContentRef = useRef<HTMLDivElement | null>(null);
+	const titleSlotRef = useRef<HTMLDivElement | null>(null);
 	// 标题译文（拼装翻译后拆分还原：标题译文 + 介绍译文；失败或英文界面保持 null）
 	const [translatedShort, setTranslatedShort] = useState<string | null>(null);
 	const [translatedLong, setTranslatedLong] = useState<string | null>(null);
@@ -236,6 +248,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setPlaySource(null);
 		setSelectedKey(null);
 		setTitleExpanded(false);
+		// 换番号后旧槽位高度不再适用，清掉避免下次展开误用
+		setFrozenSlotHeight(null);
 		// 重新打开番号时以存储里的最新偏好为准（用户可能在别的面板里改过）
 		setPreferredSlot(getPreferredPreviewSlot());
 		fallbackOrderRef.current = [];
@@ -724,6 +738,45 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		media?.shortTitle ||
 		(media && canUseTitleAsShortTitle(media.source) ? media.title : null);
 	const displayLongTitle = media?.shortTitle ? media.title : null;
+
+	/**
+	 * 展开/收起。外层槽位是自适应高度，展开后标题层改绝对定位会脱离文档流，
+	 * 槽位若跟着塌掉、番号列表会往上窜 —— 所以展开那一刻先量收起态高度并冻结。
+	 */
+	const handleToggleTitle = useCallback(() => {
+		if (!titleExpanded) {
+			setFrozenSlotHeight(titleSlotRef.current?.offsetHeight ?? null);
+		}
+		setTitleExpanded(!titleExpanded);
+	}, [titleExpanded]);
+
+	/**
+	 * 展开按钮的可见性只看一件事：收起态下标题内容是否真的溢出 74px。
+	 * - 用 useLayoutEffect 而不是 useEffect：收起时先量再画，避免按钮闪一下才消失；
+	 * - 展开态不测量（内容自适应高度，量出来必然"不溢出"），按钮靠 titleExpanded 保住，
+	 *   否则展开后按钮消失、用户没法收起；
+	 * - 文本变化（原文/译文/翻译就绪）与容器宽度变化（ResizeObserver，折行会变）都要重量。
+	 */
+	useLayoutEffect(() => {
+		const element = titleContentRef.current;
+		if (!element || titleExpanded) return;
+		const measure = () => {
+			// +1 容差：亚像素行高会把「刚好放得下」算成溢出，按钮就白留了
+			setTitleTruncated(element.scrollHeight > element.clientHeight + 1);
+		};
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(element);
+		return () => observer.disconnect();
+	}, [
+		titleExpanded,
+		displayShortTitle,
+		displayLongTitle,
+		translatedShort,
+		translatedLong,
+		titleReady,
+		locale,
+	]);
 	const presentation = getPreviewPresentation({
 		resolution,
 		playbackStatus: status,
@@ -1068,12 +1121,19 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 
 			{(displayShortTitle || displayLongTitle) && (
 				<div
+					ref={titleSlotRef}
 					className={`trailer-preview__title-slot${
 						titleExpanded ? " trailer-preview__title-slot--expanded" : ""
 					}`}
+					// 展开时用行内高度钉住收起态高度；收起时不设，让 CSS 自适应
+					style={
+						titleExpanded && frozenSlotHeight !== null
+							? { height: `${frozenSlotHeight}px` }
+							: undefined
+					}
 				>
 					<div className="trailer-preview__title-area">
-						<div className="trailer-preview__title-content">
+						<div className="trailer-preview__title-content" ref={titleContentRef}>
 					{/* 标题行：金色（dmm 商品名 / javtrailers 卡片标题），解析到即显示；翻译完成后替换为译文 */}
 					{displayShortTitle && (
 						<p className="trailer-preview__title-short">
@@ -1161,35 +1221,39 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						</div>
 					)}
-					<button
-						type="button"
-						className="trailer-preview__title-toggle"
-						aria-expanded={titleExpanded}
-						aria-label={titleExpanded ? t.collapseTitle : t.expandTitle}
-						title={titleExpanded ? t.collapseTitle : t.expandTitle}
-						onClick={() => setTitleExpanded((expanded) => !expanded)}
-					>
-						<svg
-							viewBox="0 0 24 24"
-							width="14"
-							height="14"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2.2"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							aria-hidden="true"
+					{/* 展开按钮只在「收起态确有截断」或「当前就是展开态」时出现：
+					    短标题能完整显示时，一个点不动的按钮只会误导用户。 */}
+					{(titleExpanded || titleTruncated) && (
+						<button
+							type="button"
+							className="trailer-preview__title-toggle"
+							aria-expanded={titleExpanded}
+							aria-label={titleExpanded ? t.collapseTitle : t.expandTitle}
+							title={titleExpanded ? t.collapseTitle : t.expandTitle}
+							onClick={handleToggleTitle}
 						>
-							{/* 带长杆的箭头（不是单折角 chevron）：杆 + 两侧斜线组成箭头头部 */}
-							<path
-								d={
-									titleExpanded
-										? "M12 19V5M5.5 11.5L12 5l6.5 6.5"
-										: "M12 5v14M5.5 12.5L12 19l6.5-6.5"
-								}
-							/>
-						</svg>
-					</button>
+							<svg
+								viewBox="0 0 24 24"
+								width="14"
+								height="14"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2.2"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								aria-hidden="true"
+							>
+								{/* 带长杆的箭头（不是单折角 chevron）：杆 + 两侧斜线组成箭头头部 */}
+								<path
+									d={
+										titleExpanded
+											? "M12 19V5M5.5 11.5L12 5l6.5 6.5"
+											: "M12 5v14M5.5 12.5L12 19l6.5-6.5"
+									}
+								/>
+							</svg>
+						</button>
+					)}
 					</div>
 				</div>
 			)}

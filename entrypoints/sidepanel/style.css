@@ -1570,18 +1570,29 @@ button:focus-visible {
 	text-align: right;
 }
 
-/* 标题区外层占位：展开时标题层绝对定位溢出，靠这个固定高度的槽位让番号列表不跳动 */
+/* 标题区外层：收起态高度随内容自适应（短标题不留空槽），上限 90px。
+   为什么展开时还要 heights：标题层展开后改绝对定位（浮在番号列表之上），
+   绝对定位不占空间，槽位会塌成 0、列表往上窜。因此展开那一刻由组件把
+   收起态实测高度写成行内 style 冻结住，列表位置保持不动。 */
 .trailer-preview__title-slot {
 	position: relative;
 	flex: 0 0 auto;
+	height: auto;
+	max-height: 90px;
+}
+
+/* 兜底：万一没拿到冻结高度（例如状态异常），仍按原设计的 90px 占位 */
+.trailer-preview__title-slot--expanded {
 	height: 90px;
 }
 
 /* 预览下方的影片标题区域。
-   收起：90px 内截断、**不**内部滚动（滚轮交给整页，避免小容器一格到底）；
-   展开：250px，绝对定位浮在番号列表之上，文本仍超出时才出现滚动条。 */
+   收起：在流内（撑起外层槽位高度），内容最多 74px（8+74+8 = 90），超出截断、**不**内部滚动
+        （滚轮交给整页，避免小容器一格到底）；
+   展开：绝对定位浮在番号列表之上，最高 350px，文本仍超出时才出现滚动条。 */
 .trailer-preview__title-area {
-	position: absolute;
+	/* 收起态必须是流内定位：绝对定位会让自适应高度的外层槽位塌成 0 */
+	position: relative;
 	top: 0;
 	right: 0;
 	left: 0;
@@ -1594,15 +1605,17 @@ button:focus-visible {
 	background: var(--bg-surface);
 }
 
-/* 收起态：内容占满 90px 减去上下 padding（8+74+8 = 90），超出截断。
+/* 收起态：内容最多占满 90px 减去上下 padding 与 1px 上边框（1+8+73+8 = 90），超出截断。
    展开/收起按钮浮在它上面，不占净高度，所以这里能比按钮在流内时多显示一行。 */
 .trailer-preview__title-content {
 	flex: 0 0 auto;
-	height: 74px;
+	max-height: 73px;
 	overflow: hidden;
 }
 
 .trailer-preview__title-slot--expanded .trailer-preview__title-area {
+	/* 展开后脱离文档流，浮在番号列表上；外层槽位的高度由组件冻结成收起态实测值 */
+	position: absolute;
 	/* 用 max-height 而不是 height：短标题展开后不留空白，只有长文才撑到上限 */
 	max-height: 350px;
 	/* 深色面板下要够重才看得出「浮层」，否则展开区与列表糊成一片 */
@@ -1613,6 +1626,8 @@ button:focus-visible {
 .trailer-preview__title-slot--expanded .trailer-preview__title-content {
 	flex: 1 1 auto;
 	height: auto;
+	/* 收起态的 74px 上限必须解除，否则展开后仍被裁 */
+	max-height: none;
 	min-height: 0;
 	overflow-y: auto;
 	/* 给浮动按钮留出底部空间：滚到最后一行时不会被圆钮压住 */
