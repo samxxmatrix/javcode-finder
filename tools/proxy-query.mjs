@@ -4,59 +4,37 @@
  * 用法：
  *   node tools/proxy-query.mjs <code> [--refresh] [--debug] [--cid] [--base=<url>]
  *
- * Key 取值：PROXY_API_KEY 环境变量 → advanced/SECRETS.local.md 的 PROXY_API_KEY= / API_KEY=
- * base 取值：--base= 参数 → PROXY_BASE 环境变量 → 私有文件里的 PROXY_BASE（都没有就报错退出）
+ * 凭据只从环境变量取：PROXY_API_KEY（或 API_KEY）、PROXY_BASE。
+ * 缺失就报错退出，不读任何文件、不猜默认地址。
  * （打印的 URL 里 Key 一律替换为 ***，不泄露）
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-/** 从 advanced/SECRETS.local.md / advanced/SECRETS.local.md 里读第一个匹配的行；找不到返回空串 */
-function readLocalEnv(pattern) {
-	for (const relative of ["../advanced/SECRETS.local.md"]) {
-		const path = fileURLToPath(new URL(relative, import.meta.url));
-		if (!existsSync(path)) continue;
-		for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-			const matched = line.match(pattern);
-			if (matched) return matched[1].replace(/^["']|["']$/g, "");
-			// 兼容 Markdown 表格：| `KEY` | `VALUE` | 用途 |
-			const cell = line.match(/^\|\s*`([A-Z0-9_]+)`\s*\|\s*`([^`]+)`\s*\|/);
-			if (cell) {
-				const pseudo = `${cell[1]}=${cell[2]}`;
-				const m2 = pseudo.match(pattern);
-				if (m2) return m2[1].trim();
-			}
-		}
-	}
-	return "";
-}
-
 function resolveKey() {
-	if (process.env.PROXY_API_KEY?.trim()) return process.env.PROXY_API_KEY.trim();
-	return readLocalEnv(/^\s*(?:PROXY_API_KEY|API_KEY)\s*=\s*(.+?)\s*$/);
+	return process.env.PROXY_API_KEY?.trim() || process.env.API_KEY?.trim() || "";
 }
 
 const args = process.argv.slice(2);
 const code = args.find((a) => !a.startsWith("--"));
 const key = resolveKey();
 if (!code || !key) {
-	console.error("用法: node tools/proxy-query.mjs <code> [--refresh] [--debug] [--cid]");
+	console.error(
+		"用法: node tools/proxy-query.mjs <code> [--refresh] [--debug] [--cid]\n" +
+			"需要环境变量 PROXY_API_KEY（或 API_KEY）；缺失时请先在当前 shell 里设置。",
+	);
 	process.exit(2);
 }
 
-// base 取值：--base= 参数 > PROXY_BASE 环境变量 > 私有文件里的 PROXY_BASE。都没有就报错，不带硬编码兜底。
+// base 取值：--base= 参数 > PROXY_BASE 环境变量。都没有就报错，不带硬编码兜底。
 const rawBase =
 	args.find((a) => a.startsWith("--base="))?.slice("--base=".length) ||
 	process.env.PROXY_BASE ||
-	readLocalEnv(/^\s*PROXY_BASE\s*=\s*(.+?)\s*$/);
+	"";
 if (!rawBase) {
 	console.error(
 		[
-			"缺少 base 地址。三选一：",
+			"缺少 base 地址。二选一：",
 			"  1) node tools/proxy-query.mjs <code> --base=https://<你的域名>",
 			'  2) $env:PROXY_BASE="https://<你的域名>"    （bash: export PROXY_BASE=https://<你的域名>）',
-			"  3) 在不入库的私有文件 advanced/SECRETS.local.md 里写一行：PROXY_BASE=https://<你的域名>",
 		].join("\n"),
 	);
 	process.exit(2);

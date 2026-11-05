@@ -17,7 +17,6 @@ node_modules/
 wrangler.toml
 **/wrangler.toml
 *.secrets.md
-secrets.local.*
 
 # advanced/ 下各子项目的 node_modules 由上面的 node_modules/ 规则统一忽略
 .workbuddy/

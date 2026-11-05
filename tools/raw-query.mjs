@@ -4,7 +4,7 @@
  * 用途：排查"某个源到底给了什么"（如 D2PASS 的 `actress` / `release_date` 与 DMM 的
  * `actresses` / `delivery_date` 字段名不同，check-prod-meta.mjs 只认后者）。
  *
- * key 取值：环境变量 API_KEY > advanced/SECRETS.local.md 的 API_KEY（自动剥掉 `vercel env pull` 的引号）。
+ * key 取值：环境变量 API_KEY（唯一来源；缺失时打印告警并在请求里带上空 key，便于看服务端报错）。
  *
  * 用法（仓库根目录）：
  *   node tools/raw-query.mjs <base> <path> [更多 path...]
@@ -12,30 +12,13 @@
  *   node tools/raw-query.mjs https://<你的域名> /HEYZO-3405
  *   node tools/raw-query.mjs https://<你的域名> /HEYZO-3405 /faleno/FNS-263
  */
-import { readFileSync } from "node:fs";
-
-function readEnv(file, name) {
-	try {
-		for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-			const match = new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`).exec(line);
-			if (match) return match[1].replace(/^["']|["']$/g, "");
-			// 兼容 Markdown 表格：| `KEY` | `VALUE` | 用途 |
-			const cell = line.match(/^\|\s*`([A-Z0-9_]+)`\s*\|\s*`([^`]+)`\s*\|/);
-			if (cell && cell[1] === name) return cell[2].trim();
-		}
-	} catch {
-		// 忽略
-	}
-	return "";
-}
 
 const [base, ...paths] = process.argv.slice(2);
 if (!base || paths.length === 0) {
 	console.error("用法: node tools/raw-query.mjs <base> <path> [更多 path...]");
 	process.exit(2);
 }
-const key =
-	process.env.API_KEY || readEnv(new URL("../advanced/SECRETS.local.md", import.meta.url), "API_KEY");
+const key = process.env.API_KEY?.trim() || "";
 
 console.log(`base = ${base}`);
 console.log(`key  = ${key ? `长度 ${key.length}` : "⚠️ 未找到"}\n`);
