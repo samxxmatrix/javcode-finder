@@ -791,6 +791,22 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		locale,
 	]);
 
+	/**
+	 * 收起时把标题内容强制滚回顶端。
+	 *
+	 * 展开态内容区是可滚动的（`overflow-y: auto`），长文读到一半点收起后，容器被压回收起态
+	 * 高度，但 scrollTop 不会自动归零 —— `overflow: hidden` 依旧是滚动容器，浏览器只按上限
+	 * 钳制、不重置。结果就是收起后从半截开始显示，前几行被顶出视野。必须显式复位。
+	 *
+	 * 放在 useLayoutEffect 里：折叠类刚移除、绘制之前归零，看不到中间态；
+	 * 也覆盖非点击触发的收起（重新加载预览时 setTitleExpanded(false)）。
+	 */
+	useLayoutEffect(() => {
+		if (titleExpanded) return;
+		const element = titleContentRef.current;
+		if (element) element.scrollTop = 0;
+	}, [titleExpanded]);
+
 	const presentation = getPreviewPresentation({
 		resolution,
 		playbackStatus: status,
