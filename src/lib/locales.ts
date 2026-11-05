@@ -51,6 +51,10 @@ export interface LocaleMessages {
 	reloadPreview: string;
 	languageLabel: string;
 	languageAuto: string;
+	appearanceLabel: string;
+	themeSystem: string;
+	themeLight: string;
+	themeDark: string;
 	excludedSitesLabel: string;
 	excludedSitesDesc: string;
 	addSite: string;
@@ -238,6 +242,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     reloadPreview: "重新加载预览",
     languageLabel: "界面语言",
     languageAuto: "跟随系统",
+    appearanceLabel: "界面外观",
+    themeSystem: "跟随系统",
+    themeLight: "浅色",
+    themeDark: "深色",
     excludedSitesLabel: "排除站点黑名单",
     excludedSitesDesc:
       "在以下站点中插件自动停用，不执行扫描。支持子域名泛匹配。",
@@ -432,6 +440,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     reloadPreview: "重新載入預覽",
     languageLabel: "介面語言",
     languageAuto: "跟隨系統",
+    appearanceLabel: "介面外觀",
+    themeSystem: "跟隨系統",
+    themeLight: "淺色",
+    themeDark: "深色",
     excludedSitesLabel: "排除站點黑名單",
     excludedSitesDesc:
       "在以下站點中擴充功能自動停用，不執行掃描。支援子網域泛匹配。",
@@ -629,6 +641,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     reloadPreview: "Reload preview",
     languageLabel: "Language",
     languageAuto: "Follow Browser",
+    appearanceLabel: "Appearance",
+    themeSystem: "System",
+    themeLight: "Light",
+    themeDark: "Dark",
     excludedSitesLabel: "Excluded Sites",
     excludedSitesDesc:
       "The extension is disabled and will not scan pages on these sites. Matches subdomains automatically.",

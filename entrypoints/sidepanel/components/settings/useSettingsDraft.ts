@@ -14,6 +14,7 @@ import {
 	saveSettings,
 	type ExtensionSettings,
 	type LocaleOption,
+	type ThemeOption,
 } from "../../../../src/lib/settings";
 import type { SupportedLocale } from "../../../../src/lib/types";
 import {
@@ -121,6 +122,8 @@ export function useSettingsDraft({
 	// 库条目超过上限：background 走逐个番号查询且不落盘索引
 	const [embyTooLarge, setEmbyTooLarge] = useState(false);
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
+	// 界面外观主题：默认跟随系统；选择即即时落盘，无需「保存设置」按钮
+	const [themeOption, setThemeOption] = useState<ThemeOption>("system");
 	const [excludedHosts, setExcludedHosts] = useState<string[]>([]);
 	const [newHostInput, setNewHostInput] = useState("");
 	const [falenoPrefixes, setFalenoPrefixes] = useState<string[]>([]);
@@ -402,6 +405,7 @@ export function useSettingsDraft({
 		setEmbyApiKey(current.embyApiKey);
 		setEmbyEnabled(current.embyEnabled);
 		setLocaleOption(localeOpt);
+		setThemeOption(current.theme);
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
 		setFalenoPrefixes(current.falenoPrefixes);
 		setCustomRegex(current.customRegex || DEFAULT_CODE_REGEX);
@@ -438,6 +442,7 @@ export function useSettingsDraft({
 		falenoPrefixes,
 		customRegex: customRegex.trim() || DEFAULT_CODE_REGEX,
 		codeExcludeRegex,
+		theme: themeOption,
 	});
 
 	// 推送当前配置到云端（整体覆盖）。返回结果而不是布尔值：
@@ -635,6 +640,12 @@ export function useSettingsDraft({
 		onLocaleChange?.(getEffectiveLocale(val));
 	};
 
+	// 界面外观：选择即即时落盘（与语言一致，无需「保存设置」按钮）
+	const handleThemeSelect = (val: ThemeOption) => {
+		setThemeOption(val);
+		saveSettings({ theme: val });
+	};
+
 	const handleAddHost = () => {
 		const norm = normalizeDomain(newHostInput);
 		if (!norm) return;
@@ -716,10 +727,31 @@ export function useSettingsDraft({
 		setNewHostInput("");
 		saveLocale("auto");
 		setLocaleOption("auto");
+		setThemeOption("system");
 		onLocaleChange?.(getEffectiveLocale("auto"));
 		setCloudConflict(null);
 		setCloudStatus(null);
 	};
+
+	// 应用主题到文档根：data-theme=light 时切浅色变量套；跟随系统时按系统明暗并监听变化
+	useEffect(() => {
+		const root = document.documentElement;
+		const mql = window.matchMedia("(prefers-color-scheme: dark)");
+		const applyTheme = () => {
+			const actual: "light" | "dark" =
+				themeOption === "system"
+					? mql.matches
+						? "dark"
+						: "light"
+					: themeOption;
+			root.setAttribute("data-theme", actual);
+		};
+		applyTheme();
+		if (themeOption === "system") {
+			mql.addEventListener("change", applyTheme);
+			return () => mql.removeEventListener("change", applyTheme);
+		}
+	}, [themeOption]);
 
 	// 每次渲染算一次签名：只有签名变化才触发落盘，避免开关验证等异步 setState 反复写盘
 	const formConfig: ExtensionSettings = collectFormSettings();
@@ -906,6 +938,7 @@ export function useSettingsDraft({
 		embyIndexInfo,
 		embyTooLarge,
 		localeOption,
+		themeOption,
 		excludedHosts,
 		newHostInput,
 		falenoPrefixes,
@@ -952,6 +985,7 @@ export function useSettingsDraft({
 		handleRegexChange,
 		handleResetRegex,
 		handleLocaleSelect,
+		handleThemeSelect,
 		handleAddHost,
 		handleRemoveHost,
 		handleAddPrefix,

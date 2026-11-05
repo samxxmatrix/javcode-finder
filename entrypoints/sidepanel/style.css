@@ -13,6 +13,26 @@
 	--accent-red: #ef4444;
 	--font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	/* 原生控件（滚动条、select 弹层、range）跟随深色外观 */
+	color-scheme: dark;
+}
+
+/* 浅色皮肤：覆盖 CSS 变量即可整体换肤；实际主题由 useSettingsDraft 写入 data-theme */
+:root[data-theme="light"] {
+	color-scheme: light;
+	--bg-base: #f8fafc;
+	--bg-surface: #ffffff;
+	--bg-surface-hover: #f1f5f9;
+	--border-subtle: #e2e8f0;
+	--border-strong: #cbd5e1;
+	--text-primary: #0f172a;
+	--text-secondary: #334155;
+	--text-muted: #64748b;
+	/* 金色强调在浅底上加深以保证对比度 */
+	--accent-gold: #b45309;
+	--accent-gold-hover: #92400e;
+	--accent-gold-text: #b45309;
+	--accent-red: #dc2626;
 }
 
 * {
@@ -501,7 +521,8 @@ button:focus-visible {
 	justify-content: center;
 	gap: 7px;
 	padding: 6px 12px 10px;
-	flex-wrap: wrap;
+	/* 固定骨架：不换行，保证箭头与分页点整体始终水平居中、连续翻页不抖动 */
+	flex-wrap: nowrap;
 }
 
 .favorites-pager__dot {
@@ -536,6 +557,8 @@ button:focus-visible {
 	color: var(--text-muted);
 	font-size: 12px;
 	line-height: 1;
+	min-width: 10px;
+	text-align: center;
 	padding: 0 1px;
 	user-select: none;
 }
@@ -544,25 +567,33 @@ button:focus-visible {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	min-width: 16px;
-	height: 16px;
-	padding: 0 2px;
+	/* 放大点击热区：固定 26×26 方形 + 内边距，便于点击 */
+	min-width: 26px;
+	height: 26px;
+	padding: 4px;
 	border: none;
+	border-radius: 6px;
 	background: transparent;
 	color: var(--text-secondary);
-	font-size: 16px;
+	font-size: 18px;
 	line-height: 1;
 	cursor: pointer;
-	transition: color 0.12s ease;
+	transition: color 0.12s ease, background-color 0.12s ease;
 }
 
 .favorites-pager__arrow:hover:not(:disabled) {
 	color: var(--accent-gold);
+	background-color: var(--bg-hover, rgba(245, 158, 11, 0.12));
 }
 
 .favorites-pager__arrow:disabled {
 	color: var(--border-subtle);
 	cursor: default;
+}
+
+/* 当前页在最前/最后：隐藏对应箭头；用 visibility 保留占位，保证分页条宽度与按钮位置不变 */
+.favorites-pager__arrow--hidden {
+	visibility: hidden;
 }
 
 .unmatched-section__list {

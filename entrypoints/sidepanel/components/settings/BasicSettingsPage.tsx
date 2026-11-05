@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ThemeOption } from "../../../../src/lib/settings";
 import { PROJECT_HOME_URL } from "../../../../src/lib/release";
 import { ClearButton } from "../ClearButton";
 import { SettingsSection } from "./SettingsSection";
@@ -24,6 +25,24 @@ export function BasicSettingsPage({
 
 
 			<SettingsSection title={t.settingsGroupInterface}>
+				<div className="settings-field">
+					<label className="settings-field__label" htmlFor="theme-select">
+						{t.appearanceLabel}
+					</label>
+					<select
+						id="theme-select"
+						className="settings-field__select"
+						value={d.themeOption}
+						onChange={(e) =>
+							d.handleThemeSelect(e.target.value as ThemeOption)
+						}
+					>
+						<option value="system">{t.themeSystem}</option>
+						<option value="light">{t.themeLight}</option>
+						<option value="dark">{t.themeDark}</option>
+					</select>
+				</div>
+
 				<div className="settings-field">
 					<label className="settings-field__label" htmlFor="locale-select">
 						{t.languageLabel}

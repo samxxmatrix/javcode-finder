@@ -7,6 +7,7 @@ import {
 	getEffectiveLocale,
 	getSavedLocale,
 	getSettings,
+	normalizeSettings,
 	isHostExcluded,
 	isPlatformConfigured,
 	isValidRegex,
@@ -525,8 +526,9 @@ describe("settings", () => {
 				{ excludedHosts: ["example.com"] },
 				{ falenoPrefixes: [] },
 				{ customRegex: "\\bFC2-\\d+\\b" },
-				{ codeExcludeRegex: "^HEYZO-" },
-			];
+			{ codeExcludeRegex: "^HEYZO-" },
+			{ theme: "dark" },
+		];
 			for (const patch of patches) {
 				expect(configSignature({ ...base, ...patch })).not.toBe(
 					baseSignature,
@@ -733,5 +735,53 @@ describe("settings", () => {
 			falenoPrefixes: [123, null, "fns "],
 		});
 		expect(getSettings().falenoPrefixes).toEqual(["FNS"]);
+	});
+});
+
+describe("theme option", () => {
+	let storageMock: Record<string, string> = {};
+
+	beforeEach(() => {
+		storageMock = {};
+		vi.stubGlobal("localStorage", {
+			getItem: vi.fn((key: string) => storageMock[key] ?? null),
+			setItem: vi.fn((key: string, val: string) => {
+				storageMock[key] = val;
+			}),
+			removeItem: vi.fn((key: string) => {
+				delete storageMock[key];
+			}),
+			clear: vi.fn(() => {
+				storageMock = {};
+			}),
+		});
+	});
+
+	it("DEFAULT_SETTINGS 默认 theme 为 system", () => {
+		expect(DEFAULT_SETTINGS.theme).toBe("system");
+	});
+
+	it("normalizeSettings 缺 theme 回落 system", () => {
+		expect(normalizeSettings({}).theme).toBe("system");
+	});
+
+	it("normalizeSettings 透传合法 light / dark", () => {
+		expect(normalizeSettings({ theme: "light" }).theme).toBe("light");
+		expect(normalizeSettings({ theme: "dark" }).theme).toBe("dark");
+	});
+
+	it("normalizeSettings 非法 theme 回落 system", () => {
+		expect(normalizeSettings({ theme: "neon" }).theme).toBe("system");
+		expect(normalizeSettings({ theme: 123 }).theme).toBe("system");
+	});
+
+	it("saveSettings 透传 theme 并落盘", () => {
+		saveSettings({ theme: "light" });
+		expect(getSettings().theme).toBe("light");
+	});
+
+	it("saveSettings 非法 theme 保留原值（默认 system）", () => {
+		saveSettings({ theme: "neon" as never });
+		expect(getSettings().theme).toBe("system");
 	});
 });

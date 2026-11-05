@@ -137,74 +137,114 @@ export const CodeList: React.FC<CodeListProps> = ({
 		);
 	}
 
-	// 分页小点：当前页金色实心，其余灰色；过多时两侧加 ‹ › 箭头平移窗口
+	// 分页条：固定骨架，保证连续翻页时按钮位置不动。
+	// - 左右箭头为最外侧固定槽位；当前页在最前/最后时隐藏对应箭头（visibility 占位不移除，避免抖动）。
+	// - 非截断（≤ MAX_DOTS 页）：平铺所有页码点，无省略号。
+	// - 截断（> MAX_DOTS 页）：固定槽位骨架 = 首页点 + 左省略号槽 + 7 个窗口点 + 右省略号槽 + 末页点；
+	//   省略号槽始终占位（需要才显示「…」），因此宽度恒定，窗口点按槽位 key 复用不重挂载。
 	const renderPager = () => {
 		if (totalPages <= 1) return null;
-		const MAX_DOTS = 7;
-		const items: (number | "…")[] = [];
+		// 扫描上限 MAX_CANDIDATES=500、每页 PAGE_SIZE=50 ⇒ 主列表最多 10 页。
+		// 阈值设为该上限：扫描结果分页永远不进入截断分支、所有点平铺。
+		const MAX_DOTS = 10;
+		const WINDOW = 7; // 截断态中间窗口固定 7 个页码点
+
+		const atFirst = safePage === 0;
+		const atLast = safePage === totalPages - 1;
+
+		const prevArrow = (
+			<button
+				type="button"
+				className={`favorites-pager__arrow${
+					atFirst ? " favorites-pager__arrow--hidden" : ""
+				}`}
+				onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+				disabled={atFirst}
+				aria-label={t.prevPage}
+			>
+				‹
+			</button>
+		);
+		const nextArrow = (
+			<button
+				type="button"
+				className={`favorites-pager__arrow${
+					atLast ? " favorites-pager__arrow--hidden" : ""
+				}`}
+				onClick={() =>
+					setCurrentPage((p) => Math.min(totalPages - 1, p + 1))
+				}
+				disabled={atLast}
+				aria-label={t.nextPage}
+			>
+				›
+			</button>
+		);
+
+		// 单个页码点：key 固定为页码，按钮位置在翻页间保持稳定
+		const dot = (page: number) => (
+			<button
+				key={page}
+				type="button"
+				className={`favorites-pager__dot ${
+					page === safePage ? "favorites-pager__dot--active" : ""
+				}`}
+				onClick={() => setCurrentPage(page)}
+				aria-label={t.pageLabel(page + 1)}
+				title={t.pageLabel(page + 1)}
+			/>
+		);
+
+		let body: React.ReactNode;
 		if (totalPages <= MAX_DOTS) {
-			for (let i = 0; i < totalPages; i++) items.push(i);
+			// 非截断：平铺全部页码点
+			body = Array.from({ length: totalPages }, (_, i) => dot(i));
 		} else {
-			const side = Math.floor((MAX_DOTS - 2) / 2);
-			let left = Math.max(1, safePage - side);
-			let right = Math.min(totalPages - 2, safePage + side);
-			if (left > 1) items.push(0, "…");
-			else items.push(0);
-			for (let i = left; i <= right; i++) items.push(i);
-			if (right < totalPages - 2) items.push("…");
-			items.push(totalPages - 1);
-		}
-		const dots = items.map((it, idx) => {
-			if (it === "…") {
-				return (
-					<span key={`gap-${idx}`} className="favorites-pager__gap">
-						…
-					</span>
-				);
-			}
-			const page = it;
-			const active = page === safePage;
-			return (
-				<button
-					key={page}
-					type="button"
-					className={`favorites-pager__dot ${
-						active ? "favorites-pager__dot--active" : ""
-					}`}
-					onClick={() => setCurrentPage(page)}
-					aria-label={t.pageLabel(page + 1)}
-					title={t.pageLabel(page + 1)}
-				/>
+			// 截断：固定槽位窗口骨架（窗口点按槽位 key 复用，翻页只换页码与激活态）
+			const last = totalPages - 1;
+			const start = Math.max(
+				1,
+				Math.min(safePage - Math.floor(WINDOW / 2), last - WINDOW),
 			);
-		});
-		if (totalPages > MAX_DOTS) {
-			return (
-				<div className="favorites-pager">
-					<button
-						type="button"
-						className="favorites-pager__arrow"
-						onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
-						disabled={safePage === 0}
-						aria-label={t.prevPage}
-					>
-						‹
-					</button>
-					{dots}
-					<button
-						type="button"
-						className="favorites-pager__arrow"
-						onClick={() =>
-							setCurrentPage((p) => Math.min(totalPages - 1, p + 1))
-						}
-						disabled={safePage === totalPages - 1}
-						aria-label={t.nextPage}
-					>
-						›
-					</button>
-				</div>
+			const showLeftGap = start > 1;
+			const showRightGap = start + WINDOW - 1 < last - 1;
+			const gap = (key: string, filled: boolean) => (
+				<span key={key} className="favorites-pager__gap" aria-hidden="true">
+					{filled ? "…" : ""}
+				</span>
+			);
+			body = (
+				<>
+					{dot(0)}
+					{gap("gL", showLeftGap)}
+					{Array.from({ length: WINDOW }, (_, k) => {
+						const page = start + k;
+						return (
+							<button
+								key={`w${k}`}
+								type="button"
+								className={`favorites-pager__dot ${
+									page === safePage ? "favorites-pager__dot--active" : ""
+								}`}
+								onClick={() => setCurrentPage(page)}
+								aria-label={t.pageLabel(page + 1)}
+								title={t.pageLabel(page + 1)}
+							/>
+						);
+					})}
+					{gap("gR", showRightGap)}
+					{dot(last)}
+				</>
 			);
 		}
-		return <div className="favorites-pager">{dots}</div>;
+
+		return (
+			<div className="favorites-pager">
+				{prevArrow}
+				{body}
+				{nextArrow}
+			</div>
+		);
 	};
 
 	return (

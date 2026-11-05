@@ -174,7 +174,7 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 ## 3. Settings
 
 - 存储于 `localStorage`（`javranking_search_settings`、`javranking_user_locale`），永不过期，读取失败降级默认值。
-- 可配置项：JavTrailers 跳转模板（默认 `https://javtrailers.com/search/{code}`）、JavDB 跳转模板（默认 `https://javdb.com/search?q={code}`）、DMM 查询 API（地址 + Key + 开关，打开时仅校验地址与 Key 非空，不调接口验证）、排除站点黑名单、番号识别正则、界面语言（简中/繁中/英）。
+- 可配置项：JavTrailers 跳转模板（默认 `https://javtrailers.com/search/{code}`）、JavDB 跳转模板（默认 `https://javdb.com/search?q={code}`）、DMM 查询 API（地址 + Key + 开关，打开时仅校验地址与 Key 非空，不调接口验证）、排除站点黑名单、番号识别正则、界面语言（简中/繁中/英）、界面外观（跟随系统 / 浅色 / 深色，默认跟随系统）。
 - 模板占位符：`{code}`、`{番号}`、`{ID}`；无占位符时按 URL 形态智能追加。
 - 旧版本 `missavTemplate` 字段迁移：自定义值保留，等于旧默认值时改用 JavTrailers 默认。
 

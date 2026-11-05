@@ -50,9 +50,14 @@ export interface ExtensionSettings {
 	embyUrl: string;
 	embyApiKey: string;
 	embyEnabled: boolean;
+	// 界面外观主题：跟随系统 / 浅色 / 深色（默认跟随系统）
+	theme: ThemeOption;
 }
 
 export type LocaleOption = "auto" | SupportedLocale;
+
+/** 界面外观主题：跟随系统 = 按 prefers-color-scheme 决定实际明暗 */
+export type ThemeOption = "system" | "light" | "dark";
 
 export const SETTINGS_STORAGE_KEY = "javranking_search_settings";
 export const LOCALE_STORAGE_KEY = "javranking_user_locale";
@@ -89,6 +94,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	embyUrl: "",
 	embyApiKey: "",
 	embyEnabled: false,
+	theme: "system",
 };
 
 export function normalizeDomain(input: string): string {
@@ -286,6 +292,13 @@ export function normalizeSettings(parsed: unknown): ExtensionSettings {
 			typeof data.embyEnabled === "boolean"
 				? data.embyEnabled
 				: DEFAULT_SETTINGS.embyEnabled,
+		// 写坏的非法主题读回时回落默认（"system"），不让整份配置读取失败
+		theme:
+			data.theme === "light" ||
+			data.theme === "dark" ||
+			data.theme === "system"
+				? data.theme
+				: DEFAULT_SETTINGS.theme,
 		excludedHosts:
 			excludedHosts.length > 0 ? excludedHosts : [...DEFAULT_SETTINGS.excludedHosts],
 		customRegex:
@@ -420,6 +433,13 @@ export function saveSettings(
 				settings.embyEnabled !== undefined
 					? settings.embyEnabled
 					: current.embyEnabled,
+			theme:
+				settings.theme !== undefined &&
+				(settings.theme === "light" ||
+					settings.theme === "dark" ||
+					settings.theme === "system")
+					? settings.theme
+					: current.theme,
 			falenoPrefixes:
 				settings.falenoPrefixes !== undefined
 					? Array.from(
@@ -589,6 +609,7 @@ export function configSignature(settings: ExtensionSettings): string {
 		settings.excludedHosts,
 		settings.falenoPrefixes,
 		trim(settings.customRegex) || DEFAULT_CODE_REGEX,
+		settings.theme,
 	]);
 }
 
