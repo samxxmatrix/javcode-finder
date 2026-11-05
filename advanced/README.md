@@ -12,7 +12,7 @@ advanced/
 
 | 目录 | 作用 | 平台 | 文档 |
 |---|---|---|---|
-| [`javcode-api/`](./javcode-api/) | 传入番号，返回标题、封面、预告片直链与元数据 | Vercel | [`README`](./javcode-api/README.md) · [`接口文档`](./javcode-api/接口文档.md) |
+| [`javcode-api/`](./javcode-api/) | 传入番号，返回标题、封面、预告片直链与元数据 | Vercel | [`README`](./javcode-api/README.md) · [`接口文档`](./javcode-api/接口文档.md) · [`部署指南`](./javcode-api/部署指南.md) |
 | [`adaptive-proxy.js`](./adaptive-proxy.js) | 把请求原样转发到某个上游域名，上游由 `DOMAIN` 指定；与具体服务无关 | Cloudflare Workers | 见文件头注释 |
 
 `adaptive-proxy.js` 是可选的入口层：当 `*.vercel.app` 直连不理想时，用它套一层自有域名。
