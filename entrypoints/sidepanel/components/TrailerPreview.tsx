@@ -2,6 +2,7 @@ import React, {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -16,11 +17,11 @@ import {
 	buildPlaybackFallbackOrder,
 	buildPreviewChoices,
 	getPreviewPresentation,
-	nextFallbackStage,
 	pickDefaultPreviewChoice,
+	planCover,
 	planDirectMp4Start,
 	transitionPreviewNotice,
-	type PlaybackStage,
+	type FallbackStage,
 	type PreviewChoice,
 } from "../../../src/lib/preview-state";
 import {
@@ -41,10 +42,12 @@ import type { LocaleMessages } from "../../../src/lib/locales";
 import { toExternalSearchCode } from "../../../src/lib/normalize-code";
 import {
 	configuredPlatforms,
+	getPreferredCoverSlot,
 	getPreferredPreviewSlot,
 	getSettings,
 	platformInitial,
 	resolveSearchUrl,
+	savePreferredCoverSlot,
 	savePreferredPreviewSlot,
 } from "../../../src/lib/settings";
 import type {
@@ -82,8 +85,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [coverError, setCoverError] = useState(false);
 	// 主媒体 404 时从详情页兜底的备用媒体（null = 未拉取；对象 = 已拉取，字段可为 null）
 	const [fallbackMedia, setFallbackMedia] = useState<DetailPageFallback | null>(null);
-	// 当前封面 src：空 = 用主封面；加载失败后切换为备用封面
-	const [coverSrc, setCoverSrc] = useState("");
+	// 替换首屏封面的地址：null = 用首屏封面（planCover 挑的那张）；失败回退后切换为兜底封面
+	const [coverSrc, setCoverSrc] = useState<string | null>(null);
 	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
 	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
@@ -191,14 +194,14 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const videoPlaybackRequestRef = useRef(0);
 	// 播放失败后的候选档序列与游标：由 buildPlaybackFallbackOrder 按"起步档"重排，
 	// 手动选后备档失败时才能回到主档，而不是停在单向链尾直接判失败
-	const fallbackOrderRef = useRef<PlaybackStage[]>([]);
+	const fallbackOrderRef = useRef<FallbackStage[]>([]);
 	const fallbackIndexRef = useRef(0);
 	// 每次"开始某一档"自增；失败信号带上它，才能把上一档迟到的 error 判成过期
 	const playAttemptRef = useRef(0);
 	// 已处理过失败的 attempt 号：同一档常同时收到 onError 与 play() rejection，只推进一次
 	const failureHandledRef = useRef(0);
-	// 封面回退游标：0 = 主封面、1 = 详情页兜底、N≥2 = fallbackTiers[N-2]（与播放链独立）
-	const coverStageRef = useRef(0);
+	// 封面回退游标：planCover 给出的顺序里的下标（与播放链独立）
+	const coverIndexRef = useRef(0);
 
 	// 挂载时把预览卡片滚动到可视区域顶部（列表较长时点击番号可能看不见预览）
 	useEffect(() => {
@@ -207,7 +210,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 
 	const media: PreviewMedia | null =
 		resolution.status === "resolved" ? resolution.media : null;
-	const coverUrl = media?.coverUrl || "";
+	// 首屏封面只在「解析结果变化」时算一次（planCover 内部读记住的封面来源）：
+	// 点源切换只写记忆、不重算 —— 否则封面会随着点击当场换图，正是用户要求避免的重载。
+	const coverPlan = useMemo(
+		() => planCover(media, getPreferredCoverSlot()),
+		[media],
+	);
+	const initialCoverUrl = coverPlan.url;
 	// 可切换的预览档全部来自解析期结果（0 额外请求）；少于 2 档时控件不渲染
 	const choices = buildPreviewChoices(media);
 	// 手动选过就用手动的；否则按记忆档位挑默认档（只有一档时自动回落第 1 档）
@@ -243,7 +252,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setStatus("idle");
 		setFallbackMedia(null);
 		setCoverError(false);
-		setCoverSrc("");
+		setCoverSrc(null);
 		setCoverLoading(false);
 		setPlaySource(null);
 		setSelectedKey(null);
@@ -256,7 +265,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		fallbackIndexRef.current = 0;
 		playAttemptRef.current = 0;
 		failureHandledRef.current = 0;
-		coverStageRef.current = 0;
+		coverIndexRef.current = 0;
 		setNoticeDismissed((dismissed) =>
 			transitionPreviewNotice(dismissed, "lookup_retry"),
 		);
@@ -305,13 +314,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	}, [resolveCurrentCode]);
 
-	// 解析到 Content ID 后封面 URL 变化，重置失败状态与封面 src 以重新尝试
+	// 解析结果变化（含首屏封面来源变化）后重置失败状态与封面 src，重新尝试
 	useEffect(() => {
 		setCoverError(false);
-		setCoverSrc("");
+		setCoverSrc(null);
 		setCoverLoading(false);
-		coverStageRef.current = 0;
-	}, [coverUrl]);
+		coverIndexRef.current = 0;
+	}, [initialCoverUrl]);
 
 	// 中文/繁中界面下翻译标题；英文界面不翻译。失败保持 null（回退原文）
 	// 标题与介绍拼装一次发送（标题 <code> 标签保护标记），返回后还原拆分
@@ -448,29 +457,31 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		return result;
 	};
 
-	// 封面加载失败：按「详情页兜底（mgstage）→ media.fallbackTiers 逐档」推进。
-	// 档位顺序与"哪些源有详情页兜底"由 nextFallbackStage（preview-state.ts）决定 —— 那里有一处
+	// 封面加载失败：按 planCover 给出的顺序推进（其余封面档 → 详情页兜底 → 后备档逐档）。
+	// 顺序由 preview-state.ts 的 buildFallbackOrder 决定 —— 那里有一处
 	// `coverSource === "javtrailers"` 的来源硬编码，理由见该函数注释：详情页兜底抓的是
 	// javtrailers 详情页里的 mgstage 资产，封面方不是 javtrailers 时根本没有 JT contentId 可抓。
 	const handleCoverError = () => {
 		const requestId = resolutionRequestRef.current;
-		const tiers = media?.fallbackTiers ?? [];
 		void (async () => {
-			// 与播放共用同一套档位规则（nextFallbackStage）：详情页兜底 → 后备档逐档
 			while (true) {
-				const next = nextFallbackStage(
-					coverStageRef.current,
-					media?.source ?? null,
-					tiers.length,
-				);
-				if (!next) {
+				const stage = coverPlan.fallback[coverIndexRef.current];
+				if (!stage) {
 					// 档位用尽：进入失败态，不无限重试
 					setCoverLoading(false);
 					setCoverError(true);
 					return;
 				}
-				if (next.kind === "detail") {
-					coverStageRef.current = 1;
+				coverIndexRef.current++;
+				if (stage.kind === "primary") {
+					// 首屏用了第二路封面，这一档才回到封面方本身
+					const url = media?.coverUrl;
+					if (!url) continue;
+					setCoverLoading(true);
+					setCoverSrc(url);
+					return;
+				}
+				if (stage.kind === "detail") {
 					setCoverLoading(true);
 					const fb = await requestFallback(media?.contentId ?? null, requestId);
 					if (requestId !== resolutionRequestRef.current) return;
@@ -481,8 +492,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					}
 					continue;
 				}
-				coverStageRef.current = next.index + 2;
-				const tier = tiers[next.index];
+				const tier = media?.fallbackTiers?.[stage.index];
 				// 后备档：解析期已取到的第二路，这里只换 src，不再发查询
 				if (!tier?.coverUrl) continue;
 				setCoverLoading(true);
@@ -691,9 +701,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		const index = choices.findIndex((item) => item.key === key);
 		const choice = index >= 0 ? choices[index] : undefined;
 		if (!choice) return;
-		// 记「第几档」而不是具体来源：下次第二路换成 DMM 或 FALENO，仍能对上同一个按钮
+		// 记「第几档」而不是具体来源：下次第二路换成 DMM 或 FALENO，仍能对上同一个按钮。
+		// 封面也记同一档，但**只写记忆不换图** —— 本次已显示的封面保持不动，
+		// 下次解析（换番号 / 重开 / 重新加载）才从这一档取封面。
 		const slot = index === 1 ? 2 : 1;
 		savePreferredPreviewSlot(slot);
+		savePreferredCoverSlot(slot);
 		setPreferredSlot(slot);
 		if (choice.key === activeChoice?.key) return;
 		const wasPlaying = status === "playing" || status === "loading";
@@ -777,10 +790,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		titleReady,
 		locale,
 	]);
+
 	const presentation = getPreviewPresentation({
 		resolution,
 		playbackStatus: status,
-		hasCover: Boolean(media?.coverUrl) && !coverError,
+		hasCover: Boolean(initialCoverUrl) && !coverError,
 		hasTrailer: Boolean(activeChoice),
 		noticeDismissed,
 	});
@@ -1004,7 +1018,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 										</span>
 									)}
 									<img
-										src={coverSrc || coverUrl}
+										src={coverSrc ?? initialCoverUrl ?? ""}
 										alt={`${code} cover`}
 										className="trailer-preview__cover"
 										referrerPolicy="no-referrer"

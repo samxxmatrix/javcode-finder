@@ -85,10 +85,14 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 - FALENO 源：封面与预告片都在 `cdn.faleno.net`（CloudFront，全球可达、支持 Range），预告片为 `*_PR.mp4`，走 mp4 直链分支。
 - 查询结果使用 `resolved`、`not_found`、`error` 状态，并保留解析媒体及来源错误。只有完成查询且无匹配时才显示“暂无此番号信息”；查询错误显示于媒体区底部，不伪装成无资料。
 - 错误展示口径：DMM 错误即使其他源命中也会保留并显示，同时标注已使用备用来源；**FALENO 错误在整体 resolved 时被丢弃**（大陆宽带直连作品页必 403，否则 JT 正常时也会常驻一条查询失败）。接口错误展示来源、错误码及服务端消息；网络、超时和异常响应使用本地化错误详情。
-- **运行时回退链**（封面与播放共用同一套档位规则，`preview-state.ts` 的 `nextFallbackStage`）：主媒体 → **JavTrailers 详情页兜底（mgstage，仅封面方是 javtrailers 时）** → `media.fallbackTiers` 逐档 → 失败。
+- **运行时回退链**（封面与播放共用同一套档位规则，`preview-state.ts` 的 `buildFallbackOrder`）：主媒体 → **JavTrailers 详情页兜底（mgstage，仅封面方是 javtrailers 时）** → `media.fallbackTiers` 逐档 → 失败。
   - `fallbackTiers` 在**解析期**就已按可达性排好（`[faleno]` 或 `[dmm]`），回退时只换 `src`、**不再发任何查询**；封面方自身不入后备档，所以"JT 查无、封面来自第二路"时没有后备档。
   - 因为 `image.mgstage.com` / `sample.mgstage.com` 全球可达，第二档对大陆用户也可用；DMM 那一档是唯一可能整层失效的（需日本 IP），作为最后兜底。
   - 每档都要等到失败信号才推进下一档，同一档的 `onError` 与 `play()` rejection 会去重（否则一次失败会跳两档）。
+- **封面来源记忆**（`planCover`）：面板右上角的源切换按钮除了切视频，还把「第几档」记进 `localStorage`（`javranking_preview_slot` 供视频、`javranking_cover_slot` 供封面，值 1 / 2）。
+  - 点第 2 档时**封面不换图**：本次显示的封面保持不动，只写记忆 —— 下次换番号、重开预览或重新加载时，首屏封面改为取第二路的图（`fallbackTiers[0].coverUrl`）。
+  - 首屏用了第二路封面时，回退链变成「回封面方主封面 → 详情页兜底 → 其余后备档」，已试过的那一档不重复入链。
+  - 偏好 2 但本次没有第二路封面（JT 独占、第二路缺图、或只有一档）时静默回落主封面，不为此多发请求。
 - javtrailers 播放：hls.js 按需动态 import；Chromium 上由 background 注册 DNR 动态规则（id 9001）给 `media.javtrailers.com` 响应注入 `Access-Control-Allow-Origin: *`（该 CDN 无 CORS 头）。Firefox 的 DNR 不支持修改响应头，可能遇到播放失败；HLS 致命错误（404 / CORS）一律进入上面的回退链。
 - 有封面但无预告片地址时保留封面、不显示播放按钮，并在媒体底部显示“暂无预告片”。已解析到预告片但**播放失败**时，媒体主体显示「**xxx 源播放失败**」（`playbackFailedBySource`，简繁英三语），来源标签**只在这一条件下出现**（常态不显示来源），底部通知提供仅重试播放的操作；查询错误可独立重试完整解析。底部通知为单行、省略号截断且可关闭，关闭后可通过番号标题重新解析。来源取"实际在播的那一档"（主媒体 → 详情页兜底仍记 JavTrailers → 后备档记该档的来源）。
 
@@ -194,7 +198,7 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 
 ## 6. Testing & delivery
 
-- 单元测试覆盖全部 lib 模块（vitest）：番号提取/规范化、javtrailers URL 构造与搜索页解析、多源字段级合并与串行补查（`resolve-preview`）、回退档位规则（`nextFallbackStage`）、FALENO 负缓存（`faleno-miss`）、设置与迁移、版本比较。
+- 单元测试覆盖全部 lib 模块（vitest）：番号提取/规范化、javtrailers URL 构造与搜索页解析、多源字段级合并与串行补查（`resolve-preview`）、回退档位规则与首屏封面方案（`buildPlaybackFallbackOrder` / `planCover`）、FALENO 负缓存（`faleno-miss`）、设置与迁移、版本比较。
 - 构建与打包：`npm run build` + `npm run zip`，产物输出 `.output/`。
 - Chrome/Edge 为 primary targets；Firefox feature-compatible（预告片播放降级为跳转）。
 

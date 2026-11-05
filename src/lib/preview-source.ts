@@ -6,7 +6,7 @@ import type { PreviewLookupSource } from "./types";
  * 面板里凡是要按"来源"分支的地方都必须走这里的谓词：新增数据源时只改一处，
  * 漏登记会立刻在 `test/preview-source.test.ts` 的真值表上暴露，而不是变成线上静默故障
  * （历史上硬编码比较一共漏过三处：mp4 直链分支、标题兜底，以及封面兜底判断——
- * 第三处 2026-11 已挪进 `preview-state.ts` 的 `nextFallbackStage`，仍是硬编码，行为恰好正确故未改）。
+ * 第三处 2026-11 已挪进 `preview-state.ts` 的 `buildFallbackOrder`，仍是硬编码，行为恰好正确故未改）。
  *
  * ⚠️ 这张真值表**本身是手工清单，机制上不保证穷尽**：`sourceLabelKey` 的 `default`
  * 会让漏登记的新源静默伪装成 JavTrailers，两个谓词则会静默落 `false`。

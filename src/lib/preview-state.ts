@@ -65,33 +65,41 @@ export function planDirectMp4Start({
 	return { assignSrc: false, reload: false };
 }
 
-/** 回退链的一个候选档 */
-export type FallbackStageCandidate =
+/** 回退链的一档（封面与播放共用同一套结构） */
+export type FallbackStage =
+	| { kind: "primary" }
 	/** JavTrailers 详情页兜底（mgstage），只有封面方是 javtrailers 时才有这一层 */
 	| { kind: "detail" }
 	/** `media.fallbackTiers[index]`（解析期已取到，0 请求） */
 	| { kind: "tier"; index: number };
 
 /**
- * 计算播放/封面回退链的**下一个**候选档（纯函数，便于单测钉住顺序与终止条件）。
+ * 生成「首档失败后」依次尝试的档位序列（纯函数，便于单测钉住顺序与终止条件）。
  *
- * 游标口径：`0` = 主媒体已试；`1` = 详情页兜底已试；`N≥2` = `fallbackTiers[N-2]` 已试。
- * 顺序固定为「主媒体 → 详情页兜底 → fallbackTiers 逐档」，返回 `null` 表示档位用尽（判失败）。
+ * - 默认起步（`startTierIndex === null`，首档就是主档）：详情页兜底 → `fallbackTiers` 逐档；
+ * - 手动起步（`startTierIndex` 有值）：回主档 → 详情页兜底 → 其余后备档，并跳过已试过的那一档，
+ *   避免原地打转。
  *
  * 为什么详情页兜底只对 javtrailers 封面方开：那一层抓的是 `javtrailers.com/ja/video/{contentId}`
  * 详情页里的 mgstage 资产，封面方不是 javtrailers 时根本没有 JT contentId 可抓（faleno / dmm
  * 的号在 javtrailers 上没有对应页），硬试只会白等一次请求。
  */
-export function nextFallbackStage(
-	stage: number,
+function buildFallbackOrder(
 	coverSource: PreviewLookupSource | null,
-	tierCount: number,
-): FallbackStageCandidate | null {
-	if (stage === 0 && coverSource === "javtrailers") return { kind: "detail" };
-	// 游标 0 与 1 之后都从第一档开始；2 之后接续
-	const index = stage <= 1 ? 0 : stage - 1;
-	if (index < tierCount) return { kind: "tier", index };
-	return null;
+	tierIndexes: number[],
+	startTierIndex: number | null,
+): FallbackStage[] {
+	const detail: FallbackStage[] =
+		coverSource === "javtrailers" ? [{ kind: "detail" }] : [];
+	const tierStages = (indexes: number[]): FallbackStage[] =>
+		indexes.map((index) => ({ kind: "tier", index }));
+
+	if (startTierIndex === null) return [...detail, ...tierStages(tierIndexes)];
+	return [
+		{ kind: "primary" },
+		...detail,
+		...tierStages(tierIndexes.filter((index) => index !== startTierIndex)),
+	];
 }
 
 export interface PreviewPresentationInput {
@@ -349,10 +357,42 @@ export function pickDefaultPreviewChoice(
 	return second ?? choices[0] ?? null;
 }
 
-export type PlaybackStage =
-	| { kind: "primary" }
-	| { kind: "detail" }
-	| { kind: "tier"; index: number };
+/** 首屏封面方案：用哪张图开场，以及它失败后按什么顺序退 */
+export interface CoverPlan {
+	/** 首屏封面地址；null = 本次没有封面可显示 */
+	url: string | null;
+	/** 首屏封面失败后依次尝试的档位（不含首屏那一档） */
+	fallback: FallbackStage[];
+}
+
+/**
+ * 按「记住的封面来源」决定首屏封面。
+ *
+ * 偏好值是按钮序号（1 = 封面方本身，2 = 第二路），与视频档位分开存：点源切换时两者一起写入，
+ * 但封面只在**下一次解析**（换番号 / 重新打开 / 重新加载预览）时生效 —— 用户要求点击当下
+ * 不重载封面，所以调用方只能把本函数挂在「解析结果变化」上，不能在切换回调里重算。
+ *
+ * 偏好 2 但本次没有第二路封面（JT 查无、第二路缺封面、只有一档）时回落主封面：
+ * 记住的偏好不能变成"无图"，也不该为此多发一次请求。
+ */
+export function planCover(
+	media: PreviewMedia | null,
+	preferredSlot: number,
+): CoverPlan {
+	if (!media) return { url: null, fallback: [] };
+	const tiers = media.fallbackTiers ?? [];
+	// 解析期最多生成一档后备（buildFallbackTier 只放第二路），故只看 tiers[0]
+	const tierCover = preferredSlot === 2 ? (tiers[0]?.coverUrl ?? null) : null;
+	return {
+		url: tierCover ?? media.coverUrl,
+		fallback: buildFallbackOrder(
+			media.source,
+			// 只把真有封面的后备档放进链里：没有地址的档试了也只会白等一次 onError
+			tiers.flatMap((tier, index) => (tier.coverUrl ? [index] : [])),
+			tierCover ? 0 : null,
+		),
+	};
+}
 
 export interface PlaybackFallbackOrderInput {
 	coverSource: PreviewLookupSource | null;
@@ -368,24 +408,12 @@ export interface PlaybackFallbackOrderInput {
  * 原链是单向的「主档 → 详情页兜底 → 后备档」：手动选中后备档后，游标已到链尾，
  * 失败会直接判 failed 而回不到 JT。因此手动起步的档失败后重排为
  * 「回主档 → 详情页兜底 → 其余后备档」，并跳过已试过的那一档，避免原地打转。
- * 详情页兜底只有 javtrailers 封面方才有（要抓 JT 详情页的 mgstage 资产）。
+ * 详见 `buildFallbackOrder`。
  */
 export function buildPlaybackFallbackOrder({
 	coverSource,
 	playableTierIndexes,
 	startTierIndex,
-}: PlaybackFallbackOrderInput): PlaybackStage[] {
-	const detail: PlaybackStage[] =
-		coverSource === "javtrailers" ? [{ kind: "detail" }] : [];
-	const tierStages = (indexes: number[]): PlaybackStage[] =>
-		indexes.map((index) => ({ kind: "tier", index }));
-
-	if (startTierIndex === null) return [...detail, ...tierStages(playableTierIndexes)];
-	return [
-		{ kind: "primary" },
-		...detail,
-		...tierStages(
-			playableTierIndexes.filter((index) => index !== startTierIndex),
-		),
-	];
+}: PlaybackFallbackOrderInput): FallbackStage[] {
+	return buildFallbackOrder(coverSource, playableTierIndexes, startTierIndex);
 }

@@ -651,21 +651,45 @@ export function resolveSearchUrl(template: string, code: string): string {
  */
 export const PREVIEW_SLOT_STORAGE_KEY = "javranking_preview_slot";
 
-export function getPreferredPreviewSlot(): number {
+/**
+ * 封面来源的记忆档位：口径与 `PREVIEW_SLOT_STORAGE_KEY` 相同，但**独立存储**。
+ *
+ * 两者由同一次点击一起写入（用户点第 2 档 = 视频与封面都偏好第 2 档），读取却各走各的：
+ * 视频档位决定默认播哪一档，封面档位决定首屏用哪一家的图。分开存是为了让「封面记忆」
+ * 不随视频档位的语义变化被连带改动 —— 封面只在下次解析时生效，视频是当场生效。
+ */
+export const COVER_SLOT_STORAGE_KEY = "javranking_cover_slot";
+
+/** 读记忆档位：只认 2，其余（缺失 / 写坏 / 隐私模式读不到）一律按第 1 档 */
+function readSlot(key: string): number {
 	try {
-		return Number(getStorage()?.getItem(PREVIEW_SLOT_STORAGE_KEY)) === 2
-			? 2
-			: 1;
+		return Number(getStorage()?.getItem(key)) === 2 ? 2 : 1;
 	} catch {
 		return 1;
 	}
 }
 
-/** 写入失败（隐私模式 / 存储被禁用）静默忽略：记忆失效不影响本次播放 */
-export function savePreferredPreviewSlot(slot: number): void {
+/** 写入失败（隐私模式 / 存储被禁用）静默忽略：记忆失效不影响本次预览 */
+function writeSlot(key: string, slot: number): void {
 	try {
-		getStorage()?.setItem(PREVIEW_SLOT_STORAGE_KEY, slot === 2 ? "2" : "1");
+		getStorage()?.setItem(key, slot === 2 ? "2" : "1");
 	} catch {
 		// 忽略：无存储权限时偏好只在本次会话内临时生效
 	}
+}
+
+export function getPreferredPreviewSlot(): number {
+	return readSlot(PREVIEW_SLOT_STORAGE_KEY);
+}
+
+export function savePreferredPreviewSlot(slot: number): void {
+	writeSlot(PREVIEW_SLOT_STORAGE_KEY, slot);
+}
+
+export function getPreferredCoverSlot(): number {
+	return readSlot(COVER_SLOT_STORAGE_KEY);
+}
+
+export function savePreferredCoverSlot(slot: number): void {
+	writeSlot(COVER_SLOT_STORAGE_KEY, slot);
 }

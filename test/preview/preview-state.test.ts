@@ -4,8 +4,8 @@ import {
 	buildPlaybackFallbackOrder,
 	buildPreviewChoices,
 	getPreviewPresentation,
-	nextFallbackStage,
 	pickDefaultPreviewChoice,
+	planCover,
 	planDirectMp4Start,
 	transitionPreviewNotice,
 	type FirstFrameTarget,
@@ -461,40 +461,71 @@ describe("getPreviewPresentation", () => {
 	});
 });
 
-describe("nextFallbackStage（回退链档位规则）", () => {
-	it("javtrailers 封面方：主媒体失败先给详情页兜底", () => {
-		expect(nextFallbackStage(0, "javtrailers", 1)).toEqual({ kind: "detail" });
-	});
+describe("planCover（按记住的封面来源挑首屏封面）", () => {
+	const dmmTier = {
+		source: "dmm" as const,
+		coverUrl: "https://pics.dmm.co.jp/pl.jpg",
+		previewUrl: "https://cc.example/sample.mp4",
+	};
+	const jtWithTier: PreviewMedia = { ...media, fallbackTiers: [dmmTier] };
 
-	it("详情页兜底之后接 fallbackTiers 第一档", () => {
-		expect(nextFallbackStage(1, "javtrailers", 1)).toEqual({
-			kind: "tier",
-			index: 0,
+	it("偏好 1：用封面方自己的图，失败后退详情页兜底 → 后备档", () => {
+		expect(planCover(jtWithTier, 1)).toEqual({
+			url: media.coverUrl,
+			fallback: [{ kind: "detail" }, { kind: "tier", index: 0 }],
 		});
 	});
 
-	it("非 javtrailers 封面方：没有详情页兜底这一层，直接从第一档开始", () => {
-		expect(nextFallbackStage(0, "faleno", 1)).toEqual({ kind: "tier", index: 0 });
-		expect(nextFallbackStage(0, "dmm", 1)).toEqual({ kind: "tier", index: 0 });
-	});
-
-	it("档位按下标严格递增，用尽后返回 null（终止条件）", () => {
-		expect(nextFallbackStage(2, "javtrailers", 2)).toEqual({
-			kind: "tier",
-			index: 1,
+	it("偏好 2 且本次有第二路封面：首屏直接用第二路，失败先回封面方再进兜底", () => {
+		expect(planCover(jtWithTier, 2)).toEqual({
+			url: dmmTier.coverUrl,
+			// 首屏已经是后备档，回退先回封面方（JT 主封面）再走详情页兜底；
+			// 已试过的后备档不再重复入链，避免原地打转
+			fallback: [{ kind: "primary" }, { kind: "detail" }],
 		});
-		expect(nextFallbackStage(3, "javtrailers", 2)).toBeNull();
 	});
 
-	it("没有任何后备档且封面方非 javtrailers：主媒体失败即终止", () => {
-		expect(nextFallbackStage(0, "dmm", 0)).toBeNull();
-		expect(nextFallbackStage(0, "faleno", 0)).toBeNull();
-		expect(nextFallbackStage(0, null, 0)).toBeNull();
+	it("偏好 2 但第二路没有封面：回落主封面，链里也不留空档", () => {
+		expect(
+			planCover(
+				{ ...media, fallbackTiers: [{ ...dmmTier, coverUrl: null }] },
+				2,
+			),
+		).toEqual({ url: media.coverUrl, fallback: [{ kind: "detail" }] });
 	});
 
-	it("javtrailers 封面方但没有任何后备档：仍先试详情页兜底，再终止", () => {
-		expect(nextFallbackStage(0, "javtrailers", 0)).toEqual({ kind: "detail" });
-		expect(nextFallbackStage(1, "javtrailers", 0)).toBeNull();
+	it("偏好 2 但本次没有后备档（JT 独占该号）：回落主封面", () => {
+		expect(planCover({ ...media, fallbackTiers: undefined }, 2)).toEqual({
+			url: media.coverUrl,
+			fallback: [{ kind: "detail" }],
+		});
+	});
+
+	it("封面方不是 javtrailers：没有详情页兜底这一层，主档失败即终止", () => {
+		expect(planCover({ ...media, source: "dmm" }, 1)).toEqual({
+			url: media.coverUrl,
+			fallback: [],
+		});
+	});
+
+	it("非 javtrailers 封面方 + 第二路封面：首屏第二路，失败回主封面", () => {
+		expect(
+			planCover(
+				{ ...media, source: "faleno", fallbackTiers: [dmmTier] },
+				2,
+			),
+		).toEqual({
+			url: dmmTier.coverUrl,
+			fallback: [{ kind: "primary" }],
+		});
+	});
+
+	it("没有解析结果时无封面、无回退档", () => {
+		expect(planCover(null, 2)).toEqual({ url: null, fallback: [] });
+	});
+
+	it("偏好值异常时按第 1 档处理", () => {
+		expect(planCover(jtWithTier, Number.NaN).url).toBe(media.coverUrl);
 	});
 });
 
