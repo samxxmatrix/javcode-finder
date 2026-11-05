@@ -187,12 +187,25 @@ export function codeKeyB(code: string): string {
 }
 
 /**
+ * 纯数字日期型番号：`MMDDYY` + `-`/`_` + 2–4 位序号（无码站的标准形态）。
+ * 这类写法不走 keyA/keyB：分隔符与零填充必须保持原样（见 keysForCode 的说明）。
+ */
+const DATE_TYPE_CODE = /^\d{6}[-_]\d{2,4}$/;
+
+/**
  * 一个写法的全部键（keyB 与 keyA 相同则只返回一个）；超长/空值返回空数组。
  * 归一后为空串（如 "-"）返回 []；键只用于比较，不得把键再喂回本函数。
+ *
+ * ⚠️ **纯数字日期型例外**（2026-11-05 实测回归）：`MMDDYY` + 分隔符 + 2–4 位序号的写法，
+ * 分隔符与零填充本身就是片商身份 —— `100826_001` 是一本道、`100826-001` 是カリビアンコム，
+ * `103126_01` 与 `103126_001` 也不是同一部。旧口径下两者会分别经 keyB 去零塌成
+ * `1031261`、经 keyA 抹掉 `_`/`-` 差异，导致面板给 `103126_01` 误亮「已在库」徽标
+ * （实测：库里只有 `103126-001`）。因此这类写法只返回一个**精确键**。
  */
 export function keysForCode(code: string): string[] {
 	const normalized = normalizeCode(code);
 	if (!normalized || normalized.length > EMBY_MAX_CODE_LENGTH) return [];
+	if (DATE_TYPE_CODE.test(normalized)) return [normalized];
 	const a = codeKeyA(normalized);
 	if (!a) return [];
 	const b = codeKeyB(normalized);
@@ -206,9 +219,16 @@ export function keysForCode(code: string): string[] {
  * 除有码正则外还要跑无码规则：数字型（`091326-001`）、`3dw-315`、`hitozuma1579`
  * 这类只有无码规则能识别，漏掉它们会让「已在库的无码片」永远匹配不到、徽标不亮。
  * 无码侧不套排除正则（排除是候选列表降噪，不应影响「是否在库」的判定）。
- * 抽取前把 "_" 归一为 "-"：面板正则的分隔符类不含下划线。
- * 注意该改写发生在跑正则之前，因此自定义正则里含 "_" 的写法永远匹配不到
- * （例如 `[A-Z]{3}_\d{3}` 对 "ABC_123" 返回 []）。
+ *
+ * ⚠️ **两遍抽取（2026-11-05 修正）**：原文先跑一遍，再把 "_" 归一为 "-" 跑第二遍。
+ * 前者的意义是**保住下划线**：日期型的 `_`/`-` 是片商身份（见 keysForCode），
+ * 若像旧版那样只手上有归一文本，`103126_001` 会变成 `103126-001`，精确键就永远对不上自己。
+ * 后者的意义只剩补「默认正则的分隔符类不含下划线」（`ABC_123`）——
+ * 因此**只收含字母的候选**，纯数字候选一律丢弃（无码规则自己认 `_`，原文那遍已经覆盖）。
+ * 已知代价：`12345_678` 这类「5 位以上数字 + `_` + 3 位」的形态，旧版靠归一后走
+ * `\d{3,5}[-/]\d{2,4}` 才命中，现在不再生成键。这类写法不属任何无码站编号规则，
+ * 比「日期型跨片商误判」的代价低得多，故接受。
+ *
  * 非字符串/空字段直接跳过、null 条目返回空数组，
  * 避免响应里的异常类型把同步整个打断。
  */
@@ -221,20 +241,39 @@ export function extractKeysFromItem(
 	for (const field of [item.Name, item.FileName, item.Path]) {
 		if (typeof field !== "string" || !field) continue;
 		// regex 原样透传：抽取层已负责 trim，空白与非法模式都回退默认正则
+		collectFieldKeys(field, regex, false, keys);
 		const normalizedField = field.replace(/_/g, "-");
-		const { candidates } = extractCandidatesFromText(normalizedField, regex);
-		for (const candidate of candidates) {
-			for (const key of keysForCode(candidate)) keys.add(key);
-		}
-		// 无码形态与页面扫描同口径：索引里没有这些键，无码片即使已在库也匹配不到
-		for (const candidate of findUncensoredCandidates(
-			normalizedField,
-			UNCENSORED_RULES,
-		)) {
-			for (const key of keysForCode(candidate)) keys.add(key);
+		if (normalizedField !== field) {
+			collectFieldKeys(normalizedField, regex, true, keys);
 		}
 	}
 	return [...keys];
+}
+
+/** 候选必须含字母：用于「归一文本那遍只补字母前缀形态」的过滤 */
+const HAS_LETTER = /[A-Z]/i;
+
+/**
+ * 单字段抽取并写入 keys。
+ * `lettersOnly` 为 true 时只收含字母的候选，且不重复跑无码规则
+ * （无码规则自己认 `_`，重复跑只会把 `_` 抹成 `-`）。
+ */
+function collectFieldKeys(
+	text: string,
+	regex: string | undefined,
+	lettersOnly: boolean,
+	keys: Set<string>,
+): void {
+	const { candidates } = extractCandidatesFromText(text, regex);
+	for (const candidate of candidates) {
+		if (lettersOnly && !HAS_LETTER.test(candidate)) continue;
+		for (const key of keysForCode(candidate)) keys.add(key);
+	}
+	if (lettersOnly) return;
+	// 无码形态与页面扫描同口径：索引里没有这些键，无码片即使已在库也匹配不到
+	for (const candidate of findUncensoredCandidates(text, UNCENSORED_RULES)) {
+		for (const key of keysForCode(candidate)) keys.add(key);
+	}
 }
 
 /** 把条目数组汇总成去重后的键集合 */
@@ -295,8 +334,12 @@ export function embyServerKey(baseUrl: string, apiKey: string): string {
  * 索引键口径版本：口径变化时递增（本版：加入无码形态）。
  * 参与 regexKey，旧索引会因指纹不符触发全量重建，
  * 不会带着缺键的旧索引继续用（增量同步只合并新条目，补不回历史键）。
+ *
+ * v3（2026-11-05）：纯数字日期型改为精确键（不再去前导零、不再抹 `_`/`-` 差异）。
+ * 旧索引里 `103126_01` 的键是 `10312601` + `1031261`，若不递增版本，
+ * 增量同步会永远把它们留在索引里，误判不会消失。
  */
-const EMBY_INDEX_KEY_FORMAT = "v2-uncensored";
+const EMBY_INDEX_KEY_FORMAT = "v3-exact-date";
 
 /**
  * 生效正则指纹：与抽取层保持同一回退口径，

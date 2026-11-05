@@ -255,6 +255,15 @@ describe("番号键", () => {
 		expect(keysForCode("HEYZO-0406").sort()).toEqual(["HEYZO0406", "HEYZO406"]);
 	});
 
+	it("纯数字日期型只给精确键：分隔符与零填充都是片商身份，不得折叠", () => {
+		// 一本道 `_001` 与 カリビアンコム `-001` 是两部作品；`_01` 与 `_001` 也不是同一部
+		expect(keysForCode("103126_01")).toEqual(["103126_01"]);
+		expect(keysForCode("103126_001")).toEqual(["103126_001"]);
+		expect(keysForCode("103126-001")).toEqual(["103126-001"]);
+		// 空白/破折号变体仍归一，但不会再被去零或剥分隔符压成同一个键
+		expect(keysForCode("103126 — 001")).toEqual(["103126-001"]);
+	});
+
 	it("超过 64 字符或空值的候选不生成键", () => {
 		expect(keysForCode("A".repeat(70))).toEqual([]);
 		expect(keysForCode("   ")).toEqual([]);
@@ -341,9 +350,9 @@ describe("extractKeysFromItem", () => {
 		// 真实条目形态：Folder 的 Name 与 FileName 同为 "091326-001-CARIB"
 		const folder = { Name: "091326-001-CARIB", FileName: "091326-001-CARIB" };
 
-		// 逐字段：无码数字型能取到真实键，且不会把 CARIB 与数字拼成伪键
+		// 逐字段：无码数字型能取到真实键（日期型保留 `-` 与零填充），且不会把 CARIB 与数字拼成伪键
 		const keys = extractKeysFromItem(folder);
-		expect(keys).toContain("091326001");
+		expect(keys).toContain("091326-001");
 		expect(keys).not.toContain("CARIB091326");
 
 		// 反向对照：把同一批字段拼成一个大串，边界处会造出并不存在的番号
@@ -357,8 +366,10 @@ describe("extractKeysFromItem", () => {
 	it("无码数字型可抽取；数字段不足 3 位 / 不完整形态仍抽不到", () => {
 		// 数字型无码（caribbean 日期型）由无码规则识别，不再漏键
 		expect(extractKeysFromItem({ Name: "091926-001-CARIB" })).toContain(
-			"091926001",
+			"091926-001",
 		);
+		// 下划线写法保留原分隔符：`_` 是一本道/10musume 的身份，不能被抹成 `-`
+		expect(extractKeysFromItem({ Name: "103126_001" })).toEqual(["103126_001"]);
 		expect(extractKeysFromItem({ Name: "SHD-13 小峰由衣" })).toEqual([]);
 		expect(extractKeysFromItem({ Name: "MK-S89 KIRARI 89" })).toEqual([]);
 	});
@@ -411,9 +422,21 @@ describe("matchEmbyCodes", () => {
 		expect(matchEmbyCodes(uncensoredKeys, ["091926-001"])).toEqual(
 			new Set(["091926-001"]),
 		);
-		// 下划线写法：索引与候选都按剥离分隔符的比较键对齐
+		// 下划线写法：日期型的键保留原分隔符，同一写法仍然对齐
 		expect(matchEmbyCodes(uncensoredKeys, ["012325_001"])).toEqual(
 			new Set(["012325_001"]),
+		);
+	});
+
+	it("日期型不跨写法误命中：103126_01 不得点亮库里的 103126-001", () => {
+		// 实测回归（2026-11-05）：面板显示 `103126_01`（一本道写法），
+		// Emby 里只有 `103126-001`（カリビアンコム）—— 旧口径靠 keyB 去零把两者压成 `1031261`，误亮徽标。
+		const keys = buildEmbyIndexKeys([{ Name: "103126-001 沉迷于肛门口交的巨乳美臀家政服务员" }]);
+		expect(matchEmbyCodes(keys, ["103126_01"])).toEqual(new Set());
+		expect(matchEmbyCodes(keys, ["103126_001"])).toEqual(new Set());
+		// 同写法仍命中，避免过度收紧导致漏判
+		expect(matchEmbyCodes(keys, ["103126-001"])).toEqual(
+			new Set(["103126-001"]),
 		);
 	});
 
