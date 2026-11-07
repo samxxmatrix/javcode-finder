@@ -17,6 +17,7 @@ import {
 	parseStoredFavorites,
 	saveFavorites,
 	serializeFavorites,
+	splitFavoritesByLibrary,
 	toggleFavorite,
 } from "../../src/lib/favorites";
 import { messages } from "../../src/lib/locales";
@@ -396,6 +397,8 @@ export const App: React.FC = () => {
 			? matchEmbyCodes(res.index.keys, codes)
 			: new Set<string>();
 		setInLibrary(next);
+		// 索引就绪即对齐一次收藏：先收藏、之后才入库的番号在这一步被清掉
+		if (res.index) purgeInLibraryFavorites(res.index.keys);
 		// 只升不降：集合为空时页面标记保持首次注入的黄点/书签
 		if (next.size > 0) void recolorEmbyMarks(next);
 	};
@@ -605,10 +608,38 @@ export const App: React.FC = () => {
 		}
 	};
 
+	/**
+	 * 索引更新后按「删除收藏」规则再对齐一次。
+	 * 只靠打开开关那一刀抓不到「先收藏、后入库」的番号：那条番号当时不在库里，
+	 * 是后来才进的 Emby。开关一旦打开，这条规则就是持续的，所以每次拿到最新索引
+	 * （已过 serverKey / regexKey 校验，不会拿旧库的键误删）都全量比一次收藏。
+	 * 静默执行：与打开开关时的确认是同一规则的延续，不再逐次打扰用户。
+	 */
+	const purgeInLibraryFavorites = (keys: Iterable<string>): void => {
+		if (!getSettings().embyDropFavoritesInLibrary) return;
+		const current = loadFavorites(getStorage());
+		if (current.length === 0) return;
+		const { kept } = splitFavoritesByLibrary(current, keys);
+		if (kept.length === current.length) return;
+		saveFavorites(getStorage(), kept);
+		setFavorites(kept);
+		void pushToCloud(kept);
+	};
+
 	// 切换收藏：更新本地并防抖 2s 推送云端。
 	// 云端 PUT 只由用户操作发起的这个面板执行，其他面板仅通过 onChanged 同步 UI。
 	const handleToggleFavorite = (code: string) => {
 		const wasFavorite = favorites.includes(code);
+		// 「删除收藏」打开后，已在 Emby 库中的番号不再允许收藏：
+		// 库里已有整份资源，再收藏只会制造重复。这里必须再挡一次 ——
+		// 列表与预览的按钮只是禁用态，键盘/脚本仍可能触发到这里。
+		if (
+			!wasFavorite &&
+			getSettings().embyDropFavoritesInLibrary &&
+			inLibrary.has(normalizeCode(code))
+		) {
+			return;
+		}
 		const next = toggleFavorite(favorites, code);
 		setFavorites(next);
 		// 本地写入失败仅保留内存状态；云端推送照常执行
@@ -649,6 +680,37 @@ export const App: React.FC = () => {
 		return () => {
 			window.removeEventListener("storage", handleStorageEvent);
 		};
+	}, []);
+
+	// 面板打开时对齐一次收藏：先收藏、之后才入库 Emby 的番号在这里被清掉。
+	// 只在「删除收藏」开着时做，且强制同步一次索引 —— 收藏以 Emby 库为准，
+	// 不能让新入库的片子干等 10 分钟 TTL；开关关闭时这条规则不生效，直接跳过。
+	useEffect(() => {
+		void (async () => {
+			const s = getSettings();
+			if (!s.embyDropFavoritesInLibrary) return;
+			if (!s.embyEnabled || !s.embyUrl.trim() || !s.embyApiKey.trim()) return;
+			let synced = false;
+			try {
+				const res = (await browser.runtime.sendMessage({
+					type: "jt:emby-sync",
+					embyUrl: s.embyUrl,
+					embyApiKey: s.embyApiKey,
+					regex: s.customRegex || DEFAULT_CODE_REGEX,
+				})) as { ok?: boolean; mode?: string } | undefined;
+				synced = res?.ok === true && res.mode !== "too-large";
+			} catch (err) {
+				console.warn("[JavCode Finder] Emby 同步失败:", err);
+			}
+			// 同步没成功就不动收藏：旧索引可能还留着已从库里删掉的片子，拿它删会误伤
+			if (!synced) return;
+			// background 已把最新索引写进 storage.local，这里重读即可
+			const index = await loadEmbyIndex(browserEmbyStore());
+			if (!index || index.keys.length === 0) return;
+			// 指纹不符（换地址 / 换 Key）时不动收藏：旧库的键与新库无关
+			if (index.serverKey !== embyServerKey(s.embyUrl, s.embyApiKey)) return;
+			purgeInLibraryFavorites(index.keys);
+		})();
 	}, []);
 
 	// 进入收藏夹：按完整收藏集重算 Emby 在库（与渲染多少条无关）。
@@ -856,6 +918,16 @@ export const App: React.FC = () => {
 		};
 	}, [locale, boundTabId]);
 
+	// 预览番号是否被「删除收藏」挡住**新增**收藏：开关打开、该番号已在库、
+	// 且当前还没收藏。已收藏的项必须还能点（否则星标是实心却点不动，取消不掉）。
+	// 与下面的 `isFavorite={favorites.includes(previewCode)}` 同一口径：收藏里存的就是显示码。
+	const previewFavoriteBlocked = Boolean(
+		previewCode &&
+			!favorites.includes(previewCode) &&
+			getSettings().embyDropFavoritesInLibrary &&
+			inLibrary.has(normalizeCode(previewCode)),
+	);
+
 	return (
 		<div className="popup-container">
 			<header className="popup-header">
@@ -1048,6 +1120,7 @@ export const App: React.FC = () => {
 						isFavorite={favorites.includes(previewCode)}
 						onToggleFavorite={() => handleToggleFavorite(previewCode)}
 						inLibrary={inLibrary.has(normalizeCode(previewCode))}
+						favoriteBlocked={previewFavoriteBlocked}
 					/>
 				)}
 				{showSettings ? (
@@ -1059,6 +1132,8 @@ export const App: React.FC = () => {
 							runScan();
 						}}
 						onLocaleChange={(newLocale) => setLocale(newLocale)}
+						// 「删除收藏」清理完收藏后同步主面板状态（同页面写 localStorage 不触发 storage 事件）
+						onFavoritesPurged={(codes) => setFavorites(codes)}
 						// 版本检查：展示 App 持有的缓存结果，按钮触发 force 检查
 						updateCheck={{
 							status: updateCheck.status,

@@ -142,9 +142,17 @@ export function AdvancedSettingsPage() {
 					}
 				>
 					<div className="settings-field">
-						<label className="settings-field__label" htmlFor="emby-url">
-							{t.embyUrlLabel}
-						</label>
+						{/* 索引条数跟在地址这行：它是「这台服务器索引了多少」的归属信息 */}
+						<div className="settings-field__header-row">
+							<label className="settings-field__label" htmlFor="emby-url">
+								{t.embyUrlLabel}
+							</label>
+							{d.embyIndexInfo.syncedAt !== null && (
+								<span className="settings-field__hint settings-field__hint--end">
+									{t.embyItemCountLabel(d.embyIndexInfo.total)}
+								</span>
+							)}
+						</div>
 						<div className="settings-field__input-wrap">
 							<input
 								id="emby-url"
@@ -168,16 +176,9 @@ export function AdvancedSettingsPage() {
 						</div>
 					</div>
 					<div className="settings-field">
-						<div className="settings-field__header-row">
-							<label className="settings-field__label" htmlFor="emby-api-key">
-								{t.embyApiKeyLabel}
-							</label>
-							{d.embyIndexInfo.syncedAt !== null && (
-								<span className="settings-field__hint settings-field__hint--end">
-									{t.embyItemCountLabel(d.embyIndexInfo.total)}
-								</span>
-							)}
-						</div>
+						<label className="settings-field__label" htmlFor="emby-api-key">
+							{t.embyApiKeyLabel}
+						</label>
 						<div className="settings-field__input-wrap">
 							<input
 								id="emby-api-key"
@@ -199,6 +200,60 @@ export function AdvancedSettingsPage() {
 								title={t.clearInput}
 							/>
 						</div>
+					</div>
+					{/*
+						删除收藏：不是隐藏图标，而是真实删掉「已在 Emby 库中」的收藏。
+						因此开关只是入口 —— 有可删项时先展开展示确认区，确认后才落盘并打开。
+					*/}
+					<div className="settings-field">
+						<div className="settings-field__header-row">
+							<span className="settings-field__label-group">
+								<span className="settings-field__label">
+									{t.embyDropFavoritesLabel}
+								</span>
+								<InfoTip text={t.embyDropFavoritesTip} />
+							</span>
+							<SettingsSwitch
+								checked={d.embyDropFavorites}
+								onChange={(checked) => void d.handleToggleEmbyDropFavorites(checked)}
+								label={t.embyDropFavoritesLabel}
+								disabled={d.dropFavoritesSyncing}
+							/>
+						</div>
+						{d.dropFavoritesConfirm !== null && (
+							<div className="cloud-conflict" role="group">
+								<p className="cloud-conflict__text">
+									{t.embyDropFavoritesConfirm(d.dropFavoritesConfirm)}
+								</p>
+								<div className="cloud-conflict__actions">
+									<button
+										type="button"
+										className="popup-btn popup-btn--danger"
+										onClick={() => void d.handleConfirmDropFavorites()}
+									>
+										{t.embyDropFavoritesConfirmOk}
+									</button>
+									<button
+										type="button"
+										className="popup-btn popup-btn--secondary"
+										onClick={d.handleCancelDropFavorites}
+									>
+										{t.embyDropFavoritesCancel}
+									</button>
+								</div>
+							</div>
+						)}
+						{/* 打开前强制同步一次索引：期间开关置灰，避免重复点击叠出并发同步 */}
+						{d.dropFavoritesSyncing && (
+							<p className="settings-field__hint" role="status" aria-live="polite">
+								{t.embyDropFavoritesSyncing}
+							</p>
+						)}
+						{d.dropFavoritesNotice && (
+							<p className="settings-field__hint" role="status" aria-live="polite">
+								{d.dropFavoritesNotice}
+							</p>
+						)}
 					</div>
 					<div className="settings-field">
 						<div className="settings-field__header-row">

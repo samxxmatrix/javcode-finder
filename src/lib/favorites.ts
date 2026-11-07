@@ -3,6 +3,9 @@
  * 全部为纯函数，便于测试；网络请求在 background 执行。
  */
 
+import { matchEmbyCodes } from "./emby";
+import { normalizeCode } from "./normalize-code";
+
 /** localStorage 中收藏列表的 key（与设置同源存储，保证所有扩展页面可读） */
 export const FAVORITES_STORAGE_KEY = "favorites";
 
@@ -60,6 +63,47 @@ export function toggleFavorite(codes: string[], code: string): string[] {
 /** 是否已收藏 */
 export function isFavorite(codes: string[], code: string): boolean {
 	return codes.includes(code);
+}
+
+/**
+ * 按「是否已在 Emby 库中」把收藏拆成两份：保留 / 删除。
+ *
+ * 命中判定完全交给 `matchEmbyCodes`（与徽标同一套键口径），绝不在这里另写一套比较，
+ * 否则日期型番号的精确键容易再次漂移（`103126_01` vs `103126-001`，见 CHANGELOG 2.4.1）。
+ *
+ * ⚠️ 安全闸：`libraryKeys` 为空集合时一律视为「没有可用索引」，全部保留。
+ * 空索引可能来自未同步 / 同步失败 / 换服务器后的失效索引，若照常匹配，
+ * 调用方会把整份收藏删光且不可恢复 —— 宁可什么都不删。
+ *
+ * @param favorites 本地收藏（原样顺序，未归一化，可能含大写/分隔符差异）
+ * @param libraryKeys Emby 索引键集合（`EmbyIndex.keys`）
+ * @returns kept 保持入参顺序；removed 为命中的归一化番号（去重、按首次命中顺序）
+ */
+export function splitFavoritesByLibrary(
+	favorites: string[],
+	libraryKeys: Iterable<string>,
+): { kept: string[]; removed: string[] } {
+	const keys = libraryKeys instanceof Set ? libraryKeys : new Set(libraryKeys);
+	if (keys.size === 0) {
+		return { kept: [...favorites], removed: [] };
+	}
+	const matched = matchEmbyCodes(keys, favorites);
+	const kept: string[] = [];
+	const removed: string[] = [];
+	const removedSeen = new Set<string>();
+	for (const code of favorites) {
+		const normalized = normalizeCode(code);
+		if (normalized && matched.has(normalized)) {
+			// 同一番号可能以不同写法重复收藏，删除清单只报一次
+			if (!removedSeen.has(normalized)) {
+				removedSeen.add(normalized);
+				removed.push(normalized);
+			}
+			continue;
+		}
+		kept.push(code);
+	}
+	return { kept, removed };
 }
 
 /**

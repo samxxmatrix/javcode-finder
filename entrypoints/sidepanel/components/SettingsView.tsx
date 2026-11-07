@@ -17,6 +17,8 @@ interface SettingsViewProps {
 	onLocaleChange?: (locale: SupportedLocale) => void;
 	// 云端验证通过（即"开通云端同步"）后回调，由 App 执行首次同步
 	onWebdavConnected?: () => void;
+	// 「删除收藏」清理完成后回传清理后的收藏列表，由 App 同步主面板状态
+	onFavoritesPurged?: (codes: string[]) => void;
 	// 版本检查状态：App 是唯一请求方，这里只展示 + 回调手动检查
 	updateCheck?: UpdateCheckInfo;
 }
@@ -34,6 +36,7 @@ export function SettingsView({
 	onBack,
 	onLocaleChange,
 	onWebdavConnected,
+	onFavoritesPurged,
 	updateCheck,
 }: SettingsViewProps) {
 	const draft = useSettingsDraft({
@@ -41,6 +44,7 @@ export function SettingsView({
 		t,
 		onLocaleChange,
 		onWebdavConnected,
+		onFavoritesPurged,
 	});
 	const [tab, setTab] = useState<SettingsTab>("basic");
 

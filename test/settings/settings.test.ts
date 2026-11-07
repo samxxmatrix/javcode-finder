@@ -519,6 +519,7 @@ describe("settings", () => {
 				{ embyUrl: "http://127.0.0.1:8096" },
 				{ embyApiKey: "key" },
 				{ embyEnabled: true },
+				{ embyDropFavoritesInLibrary: true },
 				{ webdavUrl: "https://dav.example/" },
 				{ webdavUser: "user" },
 				{ webdavPass: "pass" },
@@ -783,5 +784,106 @@ describe("theme option", () => {
 	it("saveSettings 非法 theme 保留原值（默认 system）", () => {
 		saveSettings({ theme: "neon" as never });
 		expect(getSettings().theme).toBe("system");
+	});
+});
+
+describe("embyDropFavoritesInLibrary（删除收藏）", () => {
+	let storageMock: Record<string, string> = {};
+
+	beforeEach(() => {
+		storageMock = {};
+		vi.stubGlobal("localStorage", {
+			getItem: vi.fn((key: string) => storageMock[key] ?? null),
+			setItem: vi.fn((key: string, val: string) => {
+				storageMock[key] = val;
+			}),
+			removeItem: vi.fn((key: string) => {
+				delete storageMock[key];
+			}),
+			clear: vi.fn(() => {
+				storageMock = {};
+			}),
+		});
+	});
+
+	it("默认关闭", () => {
+		expect(DEFAULT_SETTINGS.embyDropFavoritesInLibrary).toBe(false);
+		expect(getSettings().embyDropFavoritesInLibrary).toBe(false);
+	});
+
+	it("旧配置缺该字段时读回 false", () => {
+		// 升级用户的存储里没有这个键：默认关闭是唯一安全的取值（打开等于删数据）
+		storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+			embyUrl: "http://127.0.0.1:8096",
+			embyApiKey: "key",
+			embyEnabled: true,
+		});
+		expect(getSettings().embyDropFavoritesInLibrary).toBe(false);
+		expect(normalizeSettings({}).embyDropFavoritesInLibrary).toBe(false);
+	});
+
+	it("脏值（\"yes\" / 1 / null / 对象 / 数组）回落 false，且不影响整份配置读取", () => {
+		for (const dirty of ["yes", 1, 0, null, {}, []] as unknown[]) {
+			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
+				embyDropFavoritesInLibrary: dirty,
+				supjavName: "Z",
+			});
+			const settings = getSettings();
+			expect(settings.embyDropFavoritesInLibrary).toBe(false);
+			expect(settings.supjavName).toBe("Z");
+		}
+	});
+
+	it("saveSettings 写入该字段且不误伤其它字段", () => {
+		saveSettings({ fallbackService: "bing", embyUrl: "http://emby.local:8096" });
+		saveSettings({ embyDropFavoritesInLibrary: true });
+
+		const saved = getSettings();
+		expect(saved.embyDropFavoritesInLibrary).toBe(true);
+		expect(saved.fallbackService).toBe("bing");
+		expect(saved.embyUrl).toBe("http://emby.local:8096");
+
+		// false 是显式值：不能被当成「未传」而保留旧值（否则开关关不掉）
+		saveSettings({ embyDropFavoritesInLibrary: false });
+		const closed = getSettings();
+		expect(closed.embyDropFavoritesInLibrary).toBe(false);
+		expect(closed.fallbackService).toBe("bing");
+	});
+
+	it("saveSettings 收到非布尔值时保留原值", () => {
+		saveSettings({ embyDropFavoritesInLibrary: true });
+		saveSettings({ embyDropFavoritesInLibrary: "yes" as unknown as boolean });
+		expect(getSettings().embyDropFavoritesInLibrary).toBe(true);
+	});
+
+	it("configSignature 对该字段敏感（否则改开关不会自动保存）", () => {
+		const base: ExtensionSettings = { ...DEFAULT_SETTINGS };
+		expect(
+			configSignature({ ...base, embyDropFavoritesInLibrary: true }),
+		).not.toBe(configSignature(base));
+		expect(
+			configSignature({ ...base, embyDropFavoritesInLibrary: false }),
+		).toBe(configSignature(base));
+	});
+
+	// ---- 以下为 QA 补充：合并语义与重置语义 ----
+
+	it("保存无关字段后，已打开的开关仍为 true（不被默认值冲掉）", () => {
+		saveSettings({ embyDropFavoritesInLibrary: true });
+		saveSettings({ previewVolume: 40 });
+		expect(getSettings().embyDropFavoritesInLibrary).toBe(true);
+	});
+
+	it("resetSettings 把开关恢复为关闭（默认值必须含该字段）", () => {
+		saveSettings({ embyDropFavoritesInLibrary: true });
+		resetSettings();
+		expect(getSettings().embyDropFavoritesInLibrary).toBe(false);
+	});
+
+	it("normalizeSettings 对显式 true 原样保留", () => {
+		expect(
+			normalizeSettings({ embyDropFavoritesInLibrary: true })
+				.embyDropFavoritesInLibrary,
+		).toBe(true);
 	});
 });

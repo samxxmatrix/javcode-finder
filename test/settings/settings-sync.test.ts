@@ -174,3 +174,39 @@ describe("mergeCloudSettings", () => {
 		expect(merged.webdavEnabled).toBe(true);
 	});
 });
+
+// QA 补充：新增的「删除收藏」开关必须随配置备份往返（云端恢复后不能丢）
+describe("embyDropFavoritesInLibrary cloud round-trip", () => {
+	it("serializes the flag and restores it on parse", () => {
+		const body = serializeCloudSettings(
+			{ ...customSettings, embyDropFavoritesInLibrary: true },
+			"en",
+			1700000000000,
+		);
+		const cloud = parseCloudSettings(JSON.parse(body));
+		expect(cloud?.settings.embyDropFavoritesInLibrary).toBe(true);
+	});
+
+	it("falls back to false for older cloud files without the field", () => {
+		const cloud = parseCloudSettings({
+			version: 1,
+			locale: "en",
+			settings: { supjavName: "Supjav" },
+		});
+		expect(cloud?.settings.embyDropFavoritesInLibrary).toBe(false);
+	});
+
+	it("mergeCloudSettings keeps the cloud value", () => {
+		const cloud = parseCloudSettings({
+			version: 1,
+			locale: "en",
+			settings: { embyDropFavoritesInLibrary: true },
+		});
+		const merged = mergeCloudSettings(cloud!, {
+			url: "https://dav.example.com/dav/app/",
+			user: "user@example.com",
+			pass: "pass",
+		});
+		expect(merged.embyDropFavoritesInLibrary).toBe(true);
+	});
+});

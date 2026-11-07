@@ -156,6 +156,19 @@ export interface LocaleMessages {
 	embyNotSynced: string;
 	embySyncFailed: string;
 	embyTooLarge: string;
+	// ---- 删除收藏（真实删除在库收藏，不是隐藏图标）----
+	embyDropFavoritesLabel: string;
+	embyDropFavoritesTip: string;
+	embyDropFavoritesConfirm: (count: number) => string;
+	embyDropFavoritesConfirmOk: string;
+	embyDropFavoritesCancel: string;
+	embyDropFavoritesNeedIndex: string;
+	/** Emby 总开关未启用时的提示：此时根本不存在「在库」概念 */
+	embyDropFavoritesNeedEnable: string;
+	/** 打开开关前强制同步索引期间的提示 */
+	embyDropFavoritesSyncing: string;
+	embyDropFavoritesDone: (count: number) => string;
+	embyFavoriteBlocked: string;
 	lookupIncomplete: string;
 	lookupUnauthorized: string;
 	lookupConfigError: string;
@@ -356,6 +369,18 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embyNotSynced: "尚未同步",
     embySyncFailed: "同步失败（索引未更新）",
     embyTooLarge: "库条目超过 3 万，已改为逐个番号查询（不缓存索引）",
+    embyDropFavoritesLabel: "删除收藏",
+    embyDropFavoritesTip:
+      "如果番号在 Emby 和收藏同时在库的，只保留 Emby 徽标并删除收藏（不可恢复），之后在库的番号不可收藏。",
+    embyDropFavoritesConfirm: (count) =>
+      `将删除 ${count} 条已在 Emby 库中的收藏，不可恢复，并同步到云端。`,
+    embyDropFavoritesConfirmOk: "删除并开启",
+    embyDropFavoritesCancel: "取消",
+    embyDropFavoritesNeedIndex: "请先同步 Emby 媒体库索引",
+    embyDropFavoritesNeedEnable: "请先启用 Emby",
+    embyDropFavoritesSyncing: "正在同步 Emby 索引…",
+    embyDropFavoritesDone: (count) => `已删除 ${count} 条收藏`,
+    embyFavoriteBlocked: "已在 Emby 库中，不再收藏",
     lookupIncomplete: "请先填写 API 地址与 Key",
     lookupUnauthorized: "密钥无效，请核对 API Key",
     lookupConfigError: "服务端未配置密钥，请检查反代部署",
@@ -555,6 +580,18 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embyNotSynced: "尚未同步",
     embySyncFailed: "同步失敗（索引未更新）",
     embyTooLarge: "庫條目超過 3 萬，已改為逐個番號查詢（不建立索引）",
+    embyDropFavoritesLabel: "刪除收藏",
+    embyDropFavoritesTip:
+      "如果番號在 Emby 和收藏同時在庫的，只保留 Emby 徽標並刪除收藏（不可恢復），之後在庫的番號不可收藏。",
+    embyDropFavoritesConfirm: (count) =>
+      `將刪除 ${count} 條已在 Emby 媒體庫中的收藏，不可復原，並同步到雲端。`,
+    embyDropFavoritesConfirmOk: "刪除並開啟",
+    embyDropFavoritesCancel: "取消",
+    embyDropFavoritesNeedIndex: "請先同步 Emby 媒體庫索引",
+    embyDropFavoritesNeedEnable: "請先啟用 Emby",
+    embyDropFavoritesSyncing: "正在同步 Emby 索引…",
+    embyDropFavoritesDone: (count) => `已刪除 ${count} 條收藏`,
+    embyFavoriteBlocked: "已在 Emby 媒體庫中，不再收藏",
     lookupIncomplete: "請先填寫 API 位址與 Key",
     lookupUnauthorized: "金鑰無效，請核對 API Key",
     lookupConfigError: "服務端未設定金鑰，請檢查反向代理部署",
@@ -759,6 +796,18 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     embySyncFailed: "Sync failed (index not updated)",
     embyTooLarge:
       "Library has over 30,000 items; using per-code lookup instead of a cached index",
+    embyDropFavoritesLabel: "Remove favorites",
+    embyDropFavoritesTip:
+      "If a code is in both Emby and your favorites, keep only the Emby badge and delete the favorite (irreversible). Codes already in the library can no longer be favorited.",
+    embyDropFavoritesConfirm: (count) =>
+      `${count} favorites already in the Emby library will be deleted — this cannot be undone — and the result is synced to the cloud.`,
+    embyDropFavoritesConfirmOk: "Delete and enable",
+    embyDropFavoritesCancel: "Cancel",
+    embyDropFavoritesNeedIndex: "Sync the Emby library index first",
+    embyDropFavoritesNeedEnable: "Enable Emby first",
+    embyDropFavoritesSyncing: "Syncing the Emby index…",
+    embyDropFavoritesDone: (count) => `${count} favorites deleted`,
+    embyFavoriteBlocked: "Already in your Emby library, no longer favoritable",
     lookupIncomplete: "Fill in the API URL and Key first",
     lookupUnauthorized: "Invalid API Key, please check it",
     lookupConfigError: "Server has no API Key configured, check the deployment",

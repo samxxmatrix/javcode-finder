@@ -50,6 +50,9 @@ export interface ExtensionSettings {
 	embyUrl: string;
 	embyApiKey: string;
 	embyEnabled: boolean;
+	// 删除收藏：打开时清空「已在 Emby 库中」的本地收藏（不可恢复），
+	// 且此后在库番号不再允许收藏 —— 库里已有整份资源，重复收藏只是噪音
+	embyDropFavoritesInLibrary: boolean;
 	// 界面外观主题：跟随系统 / 浅色 / 深色（默认跟随系统）
 	theme: ThemeOption;
 }
@@ -94,6 +97,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	embyUrl: "",
 	embyApiKey: "",
 	embyEnabled: false,
+	embyDropFavoritesInLibrary: false,
 	theme: "system",
 };
 
@@ -292,6 +296,12 @@ export function normalizeSettings(parsed: unknown): ExtensionSettings {
 			typeof data.embyEnabled === "boolean"
 				? data.embyEnabled
 				: DEFAULT_SETTINGS.embyEnabled,
+		// 旧配置没有这个字段（或缺字段/写坏）：一律回落默认 false，
+		// 默认关闭是唯一安全的取值 —— 打开它意味着删数据
+		embyDropFavoritesInLibrary:
+			typeof data.embyDropFavoritesInLibrary === "boolean"
+				? data.embyDropFavoritesInLibrary
+				: DEFAULT_SETTINGS.embyDropFavoritesInLibrary,
 		// 写坏的非法主题读回时回落默认（"system"），不让整份配置读取失败
 		theme:
 			data.theme === "light" ||
@@ -433,6 +443,12 @@ export function saveSettings(
 				settings.embyEnabled !== undefined
 					? settings.embyEnabled
 					: current.embyEnabled,
+			// 与其它布尔开关同口径：只认显式布尔值，其余（undefined/null/脏值）保留当前值
+			embyDropFavoritesInLibrary:
+				settings.embyDropFavoritesInLibrary !== undefined &&
+				typeof settings.embyDropFavoritesInLibrary === "boolean"
+					? settings.embyDropFavoritesInLibrary
+					: current.embyDropFavoritesInLibrary,
 			theme:
 				settings.theme !== undefined &&
 				(settings.theme === "light" ||
@@ -601,6 +617,8 @@ export function configSignature(settings: ExtensionSettings): string {
 		trim(settings.embyUrl),
 		trim(settings.embyApiKey),
 		settings.embyEnabled,
+		// 参与签名：否则改了这个开关不会触发自动保存，也不会提示未保存
+		settings.embyDropFavoritesInLibrary,
 		trim(settings.webdavUrl),
 		trim(settings.webdavUser),
 		// 密码按原样比较：保存时不做 trim

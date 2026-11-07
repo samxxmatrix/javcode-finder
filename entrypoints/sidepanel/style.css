@@ -390,6 +390,18 @@ button:focus-visible {
 	background-color: rgba(245, 158, 11, 0.08);
 }
 
+/* 危险动作（删除数据）：红色实心，与金色主按钮明确区分 */
+.popup-btn--danger {
+	background-color: var(--accent-red);
+	border-color: var(--accent-red);
+	color: #ffffff;
+}
+
+.popup-btn--danger:hover {
+	background-color: #b91c1c;
+	border-color: #b91c1c;
+}
+
 .popup-empty-container {
 	display: flex;
 	flex-direction: column;
@@ -922,6 +934,13 @@ button:focus-visible {
 	font-size: 13px;
 	font-weight: 600;
 	color: var(--text-secondary);
+}
+
+/* 标签 + 问号图标编组：两者紧邻，右侧开关仍靠右 */
+.settings-field__label-group {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 }
 
 .settings-field__hint {
@@ -1785,6 +1804,14 @@ button:focus-visible {
 
 .trailer-preview__fav:hover {
 	background: var(--bg-surface-hover);
+}
+
+/* 禁用态（已在 Emby 库中不再收藏）：降透明度并去掉悬停反馈，避免看成可点 */
+.trailer-preview__fav--blocked,
+.trailer-preview__fav:disabled {
+	cursor: not-allowed;
+	opacity: 0.45;
+	background: none;
 }
 
 /* 番号列表内的收藏按钮（紧跟番号） */

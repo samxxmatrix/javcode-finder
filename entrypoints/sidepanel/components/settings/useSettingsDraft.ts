@@ -7,6 +7,7 @@ import {
 	getEffectiveLocale,
 	getSavedLocale,
 	getSettings,
+	getStorage,
 	isValidRegex,
 	normalizeDomain,
 	resetSettings,
@@ -19,6 +20,10 @@ import {
 import type { SupportedLocale } from "../../../../src/lib/types";
 import {
 	classifyWebdavVerify,
+	loadFavorites,
+	saveFavorites,
+	serializeFavorites,
+	splitFavoritesByLibrary,
 	type WebdavVerifyResult,
 } from "../../../../src/lib/favorites";
 import {
@@ -31,6 +36,7 @@ import {
 import type { FallbackService } from "../../../../src/lib/translate";
 import { normalizePrefix } from "../../../../src/lib/faleno";
 import { browserEmbyStore, loadEmbyIndex } from "../../../../src/lib/emby-index";
+import { embyServerKey } from "../../../../src/lib/emby";
 
 /** 本地落盘的防抖时长：连续输入时只在停顿后写一次存储 */
 const SAVE_DEBOUNCE_MS = 400;
@@ -42,6 +48,12 @@ interface UseSettingsDraftOptions {
 	t: LocaleMessages;
 	onLocaleChange?: (locale: SupportedLocale) => void;
 	onWebdavConnected?: () => void;
+	/**
+	 * 清理完「已在库」收藏后回传**清理后的完整收藏列表**。
+	 * 设置页与主面板是同一个页面：本页写 localStorage 不会触发 storage 事件，
+	 * 不同步回主面板就会留下一份已经删掉的收藏状态。
+	 */
+	onFavoritesPurged?: (codes: string[]) => void;
 }
 
 /** 从 background 返回的错误串（形如 "HTTP 403"）里取状态码；取不到返回 0 */
@@ -59,6 +71,7 @@ export function useSettingsDraft({
 	t,
 	onLocaleChange,
 	onWebdavConnected,
+	onFavoritesPurged,
 }: UseSettingsDraftOptions) {
 	const [supjav, setSupjav] = useState("");
 	const [javbus, setJavbus] = useState("");
@@ -121,6 +134,21 @@ export function useSettingsDraft({
 	}>({ syncedAt: null, total: 0 });
 	// 库条目超过上限：background 走逐个番号查询且不落盘索引
 	const [embyTooLarge, setEmbyTooLarge] = useState(false);
+	// 删除收藏：打开即真实删除「已在 Emby 库中」的收藏（不可恢复）
+	const [embyDropFavorites, setEmbyDropFavorites] = useState(
+		DEFAULT_SETTINGS.embyDropFavoritesInLibrary,
+	);
+	// 待确认的删除条数：> 0 时在开关下方展示确认区，null = 无待确认动作。
+	// 开关此期间保持关闭 —— 只有点「删除并开启」才真正落盘并打开
+	const [dropFavoritesConfirm, setDropFavoritesConfirm] = useState<number | null>(
+		null,
+	);
+	// 该区域的一次性提示（未启用 / 缺配置 / 缺索引 / 已删除 N 条）
+	const [dropFavoritesNotice, setDropFavoritesNotice] = useState<string | null>(
+		null,
+	);
+	// 打开开关前强制同步索引：期间开关禁用，避免重复触发并发同步
+	const [dropFavoritesSyncing, setDropFavoritesSyncing] = useState(false);
 	const [localeOption, setLocaleOption] = useState<LocaleOption>("auto");
 	// 界面外观主题：默认跟随系统；选择即即时落盘，无需「保存设置」按钮
 	const [themeOption, setThemeOption] = useState<ThemeOption>("system");
@@ -302,9 +330,16 @@ export function useSettingsDraft({
 		}
 	};
 
-	// 立即同步：强制走一次 background 同步并刷新索引信息
-	const handleEmbySyncNow = async () => {
-		setEmbyVerifyError(null);
+	/**
+	 * 强制走一次 background 同步，只返回结果、不碰任何 UI 状态。
+	 * 抽出来是因为两个调用方要各自决定怎么提示：「立即同步」写在 Emby 行的
+	 * 错误位上，删除收藏开关写在它自己的提示位，混在一起会互相覆盖。
+	 */
+	const syncEmbyIndex = async (): Promise<
+		| { ok: true; syncedAt: number; total: number }
+		| { ok: false; kind: "too-large" }
+		| { ok: false; kind: "failed" | "network"; message: string }
+	> => {
 		try {
 			const res = (await browser.runtime.sendMessage({
 				type: "jt:emby-sync",
@@ -321,25 +356,42 @@ export function useSettingsDraft({
 				  }
 				| undefined;
 			if (!res?.ok) {
-				setEmbyVerifyError(
-					`${t.embySyncFailed}：${res?.error || t.unknownError}`,
-				);
-				return;
+				return {
+					ok: false,
+					kind: "failed",
+					message: res?.error || t.unknownError,
+				};
 			}
 			// 超额降级：background 不落盘索引（只有逐个番号查询），
-			// 所以只提示改用逐个查询，保留原有 syncedAt/total，不伪造一次刚同步的状态
-			if (res.mode === "too-large") {
+			// 调用方据此提示改用逐个查询，且不要伪造一次「刚同步」的状态
+			if (res.mode === "too-large") return { ok: false, kind: "too-large" };
+			return {
+				ok: true,
+				syncedAt: res.syncedAt ?? Date.now(),
+				total: res.total ?? 0,
+			};
+		} catch {
+			return { ok: false, kind: "network", message: t.networkError };
+		}
+	};
+
+	// 立即同步：强制同步一次并刷新索引信息
+	const handleEmbySyncNow = async () => {
+		setEmbyVerifyError(null);
+		const res = await syncEmbyIndex();
+		if (!res.ok) {
+			// 保留原有 syncedAt/total：一次降级同步不该被显示成「刚同步过」
+			if (res.kind === "too-large") {
 				setEmbyTooLarge(true);
 				return;
 			}
-			setEmbyTooLarge(false);
-			setEmbyIndexInfo({
-				syncedAt: res.syncedAt ?? Date.now(),
-				total: res.total ?? 0,
-			});
-		} catch {
-			setEmbyVerifyError(`${t.embySyncFailed}：${t.networkError}`);
+			setEmbyVerifyError(`${t.embySyncFailed}：${res.message}`);
+			return;
 		}
+		setEmbyTooLarge(false);
+		setEmbyIndexInfo({ syncedAt: res.syncedAt, total: res.total });
+		// 同步意味着库里可能有新增条目：开关开着就顺手把「先收藏、后入库」的收藏清掉
+		await purgeLibraryFavorites();
 	};
 
 	// Emby 开关：打开时先验证地址与 Key（拉 1 条确认权限），失败回弹关闭。
@@ -381,6 +433,182 @@ export function useSettingsDraft({
 		}
 	};
 
+	/**
+	 * 云端收藏整体覆盖：只有「已配置且已启用」云同步时才发请求。
+	 * 失败静默 + console.warn —— 与 App.tsx 的 pushToCloud 同口径：
+	 * 一次上传失败不该把已经完成的本地清理变成半途状态，下次收藏操作会再整体覆盖。
+	 */
+	const purgeCloudFavorites = async (kept: string[]): Promise<void> => {
+		const url = webdavUrl.trim();
+		const user = webdavUser.trim();
+		if (!webdavEnabled || !url || !user) return;
+		try {
+			await browser.runtime.sendMessage({
+				type: "jt:webdav-put",
+				webdavUrl: url,
+				webdavUser: user,
+				webdavPass,
+				body: serializeFavorites(kept),
+			});
+		} catch (error) {
+			console.warn("[JavCode Finder] 云端收藏清理失败:", error);
+		}
+	};
+
+	/**
+	 * 索引更新后按「删除收藏」规则再对齐一次收藏。
+	 * 打开开关那一刀只处理当时已在库的番号；「先收藏、之后才入库」的番号是之后
+	 * 才进 Emby 的，只能在索引更新后重新比对才抓得到。规则持续生效，故静默执行。
+	 * 三道前提与删除动作一致：开关开着、Emby 启用且配置齐全、索引指纹对得上。
+	 */
+	const purgeLibraryFavorites = async (): Promise<void> => {
+		if (!embyDropFavorites) return;
+		const url = embyUrl.trim();
+		const key = embyApiKey.trim();
+		if (!embyEnabled || !url || !key) return;
+		const index = await loadEmbyIndex(browserEmbyStore());
+		if (!index || index.keys.length === 0) return;
+		if (index.serverKey !== embyServerKey(url, key)) return;
+		const current = loadFavorites(getStorage());
+		const { kept } = splitFavoritesByLibrary(current, index.keys);
+		const removedCount = current.length - kept.length;
+		if (removedCount === 0) return;
+		saveFavorites(getStorage(), kept);
+		// 主面板与云端都要跟着走：否则列表还留着已删的项，换设备又会被拉回来
+		onFavoritesPurged?.(kept);
+		void purgeCloudFavorites(kept);
+		setDropFavoritesNotice(t.embyDropFavoritesDone(removedCount));
+	};
+
+	/**
+	 * 读索引并算出「在库收藏」。
+	 * 四种情况一律当作「没有索引」，但各自返回原因 —— 提示文案要分流：
+	 * 未启用说「请先启用 Emby」，而不是笼统地让人去同步。
+	 * 1. Emby 总开关关闭 —— 关开关不会清索引，残留索引不能成为删除依据；
+	 * 2. Emby 未配置（无地址/Key）—— 此时不存在「在库」这个概念；
+	 * 3. 索引缺失或 keys 为空 —— 空键集既算不出 N，也可能来自未同步 / 同步失败，
+	 *    若放行会让空集合去匹配整份收藏（不可恢复）；
+	 * 4. 索引的服务器指纹与当前配置不符 —— 换地址/换 Key 后旧索引的键与新库无关。
+	 * 前面有这道闸，后面任何删除动作都不可能作用在无效索引上。
+	 */
+	const collectLibraryFavorites = async (): Promise<
+		| { ok: true; kept: string[]; removedCount: number }
+		| { ok: false; reason: "disabled" | "incomplete" | "noindex" | "stale" }
+	> => {
+		const url = embyUrl.trim();
+		const key = embyApiKey.trim();
+		if (!embyEnabled) return { ok: false, reason: "disabled" };
+		if (!url || !key) return { ok: false, reason: "incomplete" };
+		const index = await loadEmbyIndex(browserEmbyStore());
+		if (!index || index.keys.length === 0) {
+			return { ok: false, reason: "noindex" };
+		}
+		if (index.serverKey !== embyServerKey(url, key)) {
+			return { ok: false, reason: "stale" };
+		}
+		const current = loadFavorites(getStorage());
+		const { kept } = splitFavoritesByLibrary(current, index.keys);
+		// 计数用「原始条数 − 保留条数」：removed 是归一化去重后的集合，
+		// 收藏里同时有 ABC-123 与 abc-123 时会少报，而实际删掉的是两条
+		return { ok: true, kept, removedCount: current.length - kept.length };
+	};
+
+	/** 按拦截原因选提示文案：未启用 / 缺地址 Key / 缺索引或索引过期 */
+	const dropFavoritesBlockedNotice = (
+		reason: "disabled" | "incomplete" | "noindex" | "stale",
+	): string =>
+		reason === "disabled"
+			? t.embyDropFavoritesNeedEnable
+			: reason === "incomplete"
+				? t.embyIncomplete
+				: t.embyDropFavoritesNeedIndex;
+
+	// 删除收藏开关：这是真删数据，所以先强制同步最新索引、再算量，
+	// 最后决定「直接开」还是「先确认」
+	const handleToggleEmbyDropFavorites = async (checked: boolean) => {
+		setDropFavoritesNotice(null);
+		setDropFavoritesConfirm(null);
+		if (!checked) {
+			setEmbyDropFavorites(false);
+			return;
+		}
+		if (!embyEnabled) {
+			setDropFavoritesNotice(t.embyDropFavoritesNeedEnable);
+			setEmbyDropFavorites(false);
+			return;
+		}
+		if (!embyUrl.trim() || !embyApiKey.trim()) {
+			setDropFavoritesNotice(t.embyIncomplete);
+			setEmbyDropFavorites(false);
+			return;
+		}
+		// 强制同步一次：索引只是上次同步的快照，库里刚删过的片子仍会留在旧索引里，
+		// 拿它算「在库」会把用户的收藏误删。这一步保证 N 算在最新库状态上。
+		setDropFavoritesSyncing(true);
+		try {
+			const sync = await syncEmbyIndex();
+			if (!sync.ok) {
+				// 同步失败就不该继续算量：宁可让用户点「立即同步」重试，也不拿旧数据删收藏
+				if (sync.kind === "too-large") {
+					setEmbyTooLarge(true);
+					setDropFavoritesNotice(t.embyTooLarge);
+				} else {
+					setDropFavoritesNotice(`${t.embySyncFailed}：${sync.message}`);
+				}
+				setEmbyDropFavorites(false);
+				return;
+			}
+			setEmbyTooLarge(false);
+			setEmbyIndexInfo({ syncedAt: sync.syncedAt, total: sync.total });
+
+			const result = await collectLibraryFavorites();
+			if (!result.ok) {
+				// 同步成功却仍拿不到索引：就地提示原因，而不是静默什么都删不到
+				setDropFavoritesNotice(dropFavoritesBlockedNotice(result.reason));
+				setEmbyDropFavorites(false);
+				return;
+			}
+			if (result.removedCount === 0) {
+				// 没有可删项：直接打开，不打扰用户
+				setEmbyDropFavorites(true);
+				return;
+			}
+			// 有东西要删：开关保持关闭，先让用户看清条数与「不可恢复」的后果
+			setDropFavoritesConfirm(result.removedCount);
+		} finally {
+			setDropFavoritesSyncing(false);
+		}
+	};
+
+	// 确认删除：重新读一次索引（确认期间可能又同步过库），删本地并整体覆盖云端
+	const handleConfirmDropFavorites = async () => {
+		const result = await collectLibraryFavorites();
+		setDropFavoritesConfirm(null);
+		if (!result.ok) {
+			setDropFavoritesNotice(dropFavoritesBlockedNotice(result.reason));
+			setEmbyDropFavorites(false);
+			return;
+		}
+		if (result.removedCount === 0) {
+			// 二次计算已无可删项（索引变化 / 已清理）：直接打开，不写盘
+			setEmbyDropFavorites(true);
+			return;
+		}
+		saveFavorites(getStorage(), result.kept);
+		// 主面板收藏状态靠回调同步：同页面写 localStorage 不触发 storage 事件
+		onFavoritesPurged?.(result.kept);
+		void purgeCloudFavorites(result.kept);
+		setEmbyDropFavorites(true);
+		setDropFavoritesNotice(t.embyDropFavoritesDone(result.removedCount));
+	};
+
+	// 取消：开关保持关闭，清空待确认
+	const handleCancelDropFavorites = () => {
+		setDropFavoritesConfirm(null);
+		setDropFavoritesNotice(null);
+		setEmbyDropFavorites(false);
+	};
+
 	// 把一份完整配置灌进表单：挂载时与“从云端恢复”后共用同一套字段映射，
 	// 避免新增配置项时两处漏改导致恢复后表单与已落盘配置不一致
 	const hydrateForm = (current: ExtensionSettings, localeOpt: LocaleOption) => {
@@ -404,6 +632,10 @@ export function useSettingsDraft({
 		setEmbyUrl(current.embyUrl);
 		setEmbyApiKey(current.embyApiKey);
 		setEmbyEnabled(current.embyEnabled);
+		setEmbyDropFavorites(current.embyDropFavoritesInLibrary);
+		// 待确认动作是会话内的临时状态：重新灌值后旧确认区必须失效
+		setDropFavoritesConfirm(null);
+		setDropFavoritesNotice(null);
 		setLocaleOption(localeOpt);
 		setThemeOption(current.theme);
 		setExcludedHosts(current.excludedHosts || DEFAULT_SETTINGS.excludedHosts);
@@ -434,6 +666,7 @@ export function useSettingsDraft({
 		embyUrl,
 		embyApiKey,
 		embyEnabled,
+		embyDropFavoritesInLibrary: embyDropFavorites,
 		webdavUrl,
 		webdavUser,
 		webdavPass,
@@ -714,6 +947,9 @@ export function useSettingsDraft({
 		setEmbyApiKey(DEFAULT_SETTINGS.embyApiKey);
 		setEmbyEnabled(DEFAULT_SETTINGS.embyEnabled);
 		setEmbyVerifyError(null);
+		setEmbyDropFavorites(DEFAULT_SETTINGS.embyDropFavoritesInLibrary);
+		setDropFavoritesConfirm(null);
+		setDropFavoritesNotice(null);
 		setEmbyIndexInfo({ syncedAt: null, total: 0 });
 		setEmbyTooLarge(false);
 		setExcludedHosts([...DEFAULT_SETTINGS.excludedHosts]);
@@ -937,6 +1173,10 @@ export function useSettingsDraft({
 		embyVerifyError,
 		embyIndexInfo,
 		embyTooLarge,
+		embyDropFavorites,
+		dropFavoritesConfirm,
+		dropFavoritesNotice,
+		dropFavoritesSyncing,
 		localeOption,
 		themeOption,
 		excludedHosts,
@@ -979,6 +1219,9 @@ export function useSettingsDraft({
 		handleToggleTranslate,
 		handleToggleLookup,
 		handleToggleEmby,
+		handleToggleEmbyDropFavorites,
+		handleConfirmDropFavorites,
+		handleCancelDropFavorites,
 		handleToggleWebdav,
 		handleEmbySyncNow,
 		handleCodeExcludeRegexChange,

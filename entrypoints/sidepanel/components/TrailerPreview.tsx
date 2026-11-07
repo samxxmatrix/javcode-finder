@@ -68,6 +68,8 @@ interface TrailerPreviewProps {
 	isFavorite: boolean;
 	onToggleFavorite: () => void;
 	inLibrary: boolean;
+	/** 「删除收藏」打开且在库：收藏按钮降级为禁用态（已在库的番号不再收藏） */
+	favoriteBlocked?: boolean;
 }
 
 type PlayerStatus = "idle" | "loading" | "playing" | "failed";
@@ -81,6 +83,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	isFavorite,
 	onToggleFavorite,
 	inLibrary,
+	favoriteBlocked = false,
 }) => {
 	const [coverError, setCoverError] = useState(false);
 	// 主媒体 404 时从详情页兜底的备用媒体（null = 未拉取；对象 = 已拉取，字段可为 null）
@@ -914,12 +917,28 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							{code}
 						</span>
 					</span>
+					{/* 在库番号被「删除收藏」挡住时降级为禁用态：点击不写收藏，文案说明原因 */}
 					<button
 						type="button"
-						className="trailer-preview__fav"
+						className={`trailer-preview__fav${
+							favoriteBlocked ? " trailer-preview__fav--blocked" : ""
+						}`}
 						onClick={onToggleFavorite}
-						title={isFavorite ? t.removeFavorite : t.addFavorite}
-						aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
+						disabled={favoriteBlocked}
+						title={
+							favoriteBlocked
+								? t.embyFavoriteBlocked
+								: isFavorite
+									? t.removeFavorite
+									: t.addFavorite
+						}
+						aria-label={
+							favoriteBlocked
+								? t.embyFavoriteBlocked
+								: isFavorite
+									? t.removeFavorite
+									: t.addFavorite
+						}
 					>
 						<FavoriteIcon active={isFavorite} />
 					</button>
