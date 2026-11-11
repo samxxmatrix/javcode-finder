@@ -107,7 +107,7 @@ export interface LocaleMessages {
 	usedFallback: string;
 	lookupRetry: string;
 	playbackRetry: string;
-	/** 播放中缓冲持续较久时，缓冲指示器的悬停说明（只作 title，不占画面文字） */
+	/** 播放中缓冲超过 8s 时顶部横幅的单行提示 */
 	bufferingSlow: string;
 	closePreview: string;
 	retryTranslate: string;

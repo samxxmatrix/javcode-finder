@@ -69,11 +69,10 @@ const TITLE_DRAG_TOLERANCE_PX = 6;
  */
 const TITLE_SCROLLBAR_ZONE_PX = 10;
 /**
- * 缓冲指示器的显示延迟：waiting/playing 在弱网下会高频翻转，
- * 立刻显示会让转圈频闪，300ms 足够滤掉瞬时抖动，又不会让人觉得"卡了还没提示"。
+ * 缓冲持续超过这个时长才在顶部提示"网络较慢"。
+ * 不画自绘转圈：播放中 <video controls> 的浏览器原生控件本来就有自己的缓冲指示器，
+ * 再叠一个就是同屏两个圈。所以这里的反馈只有文字，且出现得足够晚 —— 短暂停顿不报。
  */
-const BUFFERING_SHOW_DELAY_MS = 300;
-/** 缓冲持续超过这个时长才在 title 上提示"可切换预览源"，避免短暂停顿就报慢 */
 const BUFFERING_HINT_DELAY_MS = 8000;
 
 interface TrailerPreviewProps {
@@ -108,12 +107,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
 	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
-	// 播放中缓冲中：与 status 正交（status 仍是 playing，画面只是暂时没数据）
-	const [buffering, setBuffering] = useState(false);
-	// 缓冲已持续到让人怀疑网络：只用来改指示器的 title 文案，不影响外观与状态
+	// 播放中缓冲已持续到让人怀疑网络：只在顶部出一行文字提示，不改外观与状态
 	const [bufferingSlow, setBufferingSlow] = useState(false);
 	const bufferingTimerRef = useRef<number | null>(null);
-	const bufferingHintTimerRef = useRef<number | null>(null);
 	const [noticeDismissed, setNoticeDismissed] = useState(false);
 	// 实际在播的来源：主媒体起步，每切一档回退就更新 → 「xxx源播放失败」文案取它
 	const [playSource, setPlaySource] = useState<PreviewLookupSource | null>(null);
@@ -235,17 +231,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		rootRef.current?.scrollIntoView({ block: "start" });
 	}, []);
 
-	// 清缓冲提示：显示延迟与慢速提示两个计时器一起收掉（移除是即时的，不等延迟）
+	// 清缓冲提示：计时器收掉 + 文案立即撤（不等延迟）
 	const clearBuffering = useCallback(() => {
 		if (bufferingTimerRef.current !== null) {
 			window.clearTimeout(bufferingTimerRef.current);
 			bufferingTimerRef.current = null;
 		}
-		if (bufferingHintTimerRef.current !== null) {
-			window.clearTimeout(bufferingHintTimerRef.current);
-			bufferingHintTimerRef.current = null;
-		}
-		setBuffering(false);
 		setBufferingSlow(false);
 	}, []);
 
@@ -1104,17 +1095,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						}
 					}}
 					onWaiting={() => {
-						// 起播阶段的 waiting 交给封面上的居中转圈，这里只管"已经在看却卡住"
+						// 起播阶段的等待交给封面上的居中转圈，这里只管"已经在看却卡住"
 						if (status !== "playing") return;
 						if (bufferingTimerRef.current !== null) return;
 						bufferingTimerRef.current = window.setTimeout(() => {
 							bufferingTimerRef.current = null;
-							setBuffering(true);
-							bufferingHintTimerRef.current = window.setTimeout(() => {
-								bufferingHintTimerRef.current = null;
-								setBufferingSlow(true);
-							}, BUFFERING_HINT_DELAY_MS);
-						}, BUFFERING_SHOW_DELAY_MS);
+							setBufferingSlow(true);
+						}, BUFFERING_HINT_DELAY_MS);
 					}}
 					onPlaying={clearBuffering}
 					onCanPlay={clearBuffering}
@@ -1128,18 +1115,6 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						setStatus("idle");
 					}}
 				/>
-				{/* 播放中缓冲提示：左上角、不压暗、不占布局。
-				    必须挂在 cover-layer 之外 —— 播放时那一层整层卸载，放进去会跟着消失。 */}
-				{status === "playing" && buffering && (
-					<span
-						className="trailer-preview__buffering"
-						role="status"
-						aria-hidden="true"
-						title={bufferingSlow ? t.bufferingSlow : undefined}
-					>
-						<span className="spinner" />
-					</span>
-				)}
 				{status !== "playing" && presentation.showSpinner && (
 					<div className="trailer-preview__media-message" role="status">
 						<span className="spinner" aria-hidden="true" />
@@ -1235,6 +1210,24 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							)}
 						</div>
 					) : null)}
+				{/* 弱网提示：播放中缓冲超过 8s 才出现，复用顶部横幅位置但只作信息。
+				    ① 不画圈 —— 原生 <video controls> 播放中本来就有自己的缓冲指示器；
+				    ② 宽度跟内容走、max-width 让开右上角源切换按钮，再叠 pointer-events:none
+				       —— 文案在引导切源，绝不能挡住那个按钮；
+				    ③ 错误 notice 优先，两者同时成立时只显示 notice；
+				    ④ 只有一档时不出：文案指向"切换预览源"，无源可切只会误导。 */}
+				{!noticeText &&
+					status === "playing" &&
+					bufferingSlow &&
+					choices.length > 1 && (
+						<div
+							className="trailer-preview__notice trailer-preview__notice--hint"
+							role="status"
+							aria-live="polite"
+						>
+							<span className="trailer-preview__notice-text">{t.bufferingSlow}</span>
+						</div>
+					)}
 				{noticeText && (
 					<div className="trailer-preview__notice" role="alert" aria-live="assertive">
 						<span className="trailer-preview__notice-text" title={noticeText}>
