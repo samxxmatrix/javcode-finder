@@ -1505,6 +1505,19 @@ button:focus-visible {
 	/* 播放加载期间 <video> 已参与渲染（否则 Chromium 暂停解码，首帧信号不来），
 	   这层用不透明底把 video 与其原生控件一起遮住，直到首帧就绪 */
 	background: #000;
+	/* 播完回到封面时这一层会重新挂载，<img> 重新解码有一帧黑底可看 —— 淡入盖掉。
+	   首次挂载同样走这条，观感一致。 */
+	animation: cover-fade-in 0.12s ease-out;
+}
+
+@keyframes cover-fade-in {
+	from {
+		opacity: 0;
+	}
+
+	to {
+		opacity: 1;
+	}
 }
 
 .trailer-preview__cover {
@@ -1714,6 +1727,39 @@ button:focus-visible {
 	background: rgba(0, 0, 0, 0.55);
 }
 
+/* 播放中缓冲指示：画面左上角 18px 小环，不压暗、不占布局、不挡点击。
+   起播阶段不出现（由 status==="playing" 的守卫挡掉），那时封面中央已有压暗转圈。
+   z-index 低于 notice（2）：横幅出现时覆盖它，属可接受 —— 横幅是错误/兜底提示，优先级更高。 */
+.trailer-preview__buffering {
+	position: absolute;
+	z-index: 1;
+	top: 6px;
+	left: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.45);
+	pointer-events: none;
+}
+
+/* 复用全局 .spinner，但压到容器尺寸：默认 28px + 14px 下边距会把圈顶出左上角 */
+.trailer-preview__buffering .spinner {
+	width: 12px;
+	height: 12px;
+	border-width: 2px;
+	margin-bottom: 0;
+}
+
+/* 播放中：横幅浮在画面上，不参与布局 —— 画面不缩小、不位移。
+   idle 时保持原样式（面板色底、不透明），避免影响封面页的信息可读性。 */
+.trailer-preview__media--playing .trailer-preview__notice {
+	background: rgba(0, 0, 0, 0.62);
+	opacity: 1;
+}
+
 /* 音量配置行 */
 .settings-field__volume-row {
 	display: flex;
@@ -1883,6 +1929,10 @@ button:focus-visible {
 	.trailer-preview__title-short,
 	.trailer-preview__title-text,
 	.trailer-preview__translate-pending {
+		animation: none;
+	}
+
+	.trailer-preview__cover-layer {
 		animation: none;
 	}
 

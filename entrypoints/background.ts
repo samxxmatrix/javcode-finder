@@ -26,6 +26,10 @@ import {
 import { isUncensoredCode } from "../src/lib/uncensored-code";
 import { createFalenoMissStore } from "../src/lib/faleno-miss";
 import {
+	buildResolutionCacheKey,
+	createResolutionCacheStore,
+} from "../src/lib/resolution-cache";
+import {
 	buildFc2DetailUrl,
 	buildFc2EmbedUrl,
 	buildFc2SampleUrl,
@@ -126,6 +130,11 @@ const D2PASS_FIRST_TIMEOUT_MS = 12000;
 // 只记**确认查无**（抛错不记，故障不代表站点没有该号）；仅内存不落 storage、上限 200 条 FIFO。
 // 实现与单测见 src/lib/faleno-miss.ts。
 const falenoMiss = createFalenoMissStore();
+
+// 解析结果内存缓存：A→B→A 往返时省掉第二次的两路并发解析与封面重下。
+// 只缓存 resolved（空结果/失败不写）、只活在本会话、TTL 3 分钟 + 上限 50 条。
+// 实现与单测见 src/lib/resolution-cache.ts。
+const resolutionCache = createResolutionCacheStore<PreviewResolution>();
 
 /** 反代查询统一入口：首次 8 s（D2PASS 传 12 s），失败后重试一次（5 s） */
 const fetchProxyWithRetry = (
@@ -601,6 +610,8 @@ export default defineBackground(() => {
 					apiKey?: string;
 					lookupEnabled?: boolean;
 					falenoPrefixes?: string[];
+					/** 跳过解析缓存，强制重新解析（「重新加载预览」用） */
+					force?: boolean;
 				};
 
 				// 标题翻译：优先 OpenAI 兼容 AI 服务（开关开启且地址/Key 齐全）；
@@ -1216,10 +1227,34 @@ export default defineBackground(() => {
 							releaseDate: resolution.media?.releaseDate ?? null,
 						});
 
+					// 缓存 key 带上影响解析结果的设置摘要：换了前缀或反代地址就不会命中旧结果
+					const cacheKey = buildResolutionCacheKey(code, {
+						lookupEnabled: msg.lookupEnabled === true,
+						falenoPrefixes,
+						apiBase: (msg.apiUrl || "").trim(),
+					});
+					// 「重新加载预览」传 force：用户点它就是因为怀疑结果不对，必须真的重解析
+					if (msg.force !== true) {
+						const cached = resolutionCache.get(cacheKey);
+						if (cached) {
+							sendResolution(cached);
+							return;
+						}
+					}
+
+					// 只缓存成功解析的结果：not_found / error 也写进去的话，
+					// 用户 3 分钟内重试会一直撞上同一条空结果。
+					const sendAndCache = (resolution: PreviewResolution) => {
+						if (resolution.status === "resolved") {
+							resolutionCache.set(cacheKey, resolution);
+						}
+						sendResolution(resolution);
+					};
+
 					// FC2 号独占链路：只查 FC2 公开 API，未命中即返回，不进入下面的多源回退
 					const fc2Id = fc2ArticleId(code);
 					if (fc2Id) {
-						sendResolution(await resolveFc2Preview(fc2Id));
+						sendAndCache(await resolveFc2Preview(fc2Id));
 						return;
 					}
 
@@ -1409,7 +1444,7 @@ export default defineBackground(() => {
 								}
 							: undefined,
 					});
-					sendResolution(resolution);
+					sendAndCache(resolution);
 				})();
 
 				return true; // 保持消息通道直到 sendResponse 被调用

@@ -7,6 +7,7 @@ import {
 	pickDefaultPreviewChoice,
 	planCover,
 	planDirectMp4Start,
+	resolvePrefetchUrl,
 	transitionPreviewNotice,
 	type FirstFrameTarget,
 } from "../../src/lib/preview-state";
@@ -692,5 +693,40 @@ describe("buildPlaybackFallbackOrder（手动选档后的回退顺序）", () =>
 				startTierIndex: null,
 			}),
 		).toEqual([{ kind: "detail" }]);
+	});
+});
+
+describe("resolvePrefetchUrl（预取目标）", () => {
+	const mp4 = { directMp4: true, previewUrl: "https://x/a.mp4" };
+	const hls = { directMp4: false, previewUrl: "https://x/a.m3u8" };
+
+	it("idle 时预取当前档的 mp4 直链", () => {
+		expect(resolvePrefetchUrl("idle", mp4)).toBe("https://x/a.mp4");
+	});
+
+	it("播放中不预取：改 src 会打断当前画面", () => {
+		expect(resolvePrefetchUrl("playing", mp4)).toBeNull();
+		expect(resolvePrefetchUrl("loading", mp4)).toBeNull();
+	});
+
+	it("已失败（failed）仍可预取：用户可能重试或换档", () => {
+		expect(resolvePrefetchUrl("failed", mp4)).toBe("https://x/a.mp4");
+	});
+
+	it("HLS 档不预取（走 hls.js，preload 无意义）", () => {
+		expect(resolvePrefetchUrl("idle", hls)).toBeNull();
+	});
+
+	it("没有档位或地址为空时返回 null", () => {
+		expect(resolvePrefetchUrl("idle", null)).toBeNull();
+		expect(resolvePrefetchUrl("idle", undefined)).toBeNull();
+		expect(
+			resolvePrefetchUrl("idle", { directMp4: true, previewUrl: "" }),
+		).toBeNull();
+	});
+
+	it("取的是传进来的那一档（第 2 档被记住时预取的就是第 2 档）", () => {
+		const second = { directMp4: true, previewUrl: "https://x/b.mp4" };
+		expect(resolvePrefetchUrl("idle", second)).toBe("https://x/b.mp4");
 	});
 });

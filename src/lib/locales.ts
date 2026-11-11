@@ -107,6 +107,8 @@ export interface LocaleMessages {
 	usedFallback: string;
 	lookupRetry: string;
 	playbackRetry: string;
+	/** 播放中缓冲持续较久时，缓冲指示器的悬停说明（只作 title，不占画面文字） */
+	bufferingSlow: string;
 	closePreview: string;
 	retryTranslate: string;
 	googleVerifyHint: string;
@@ -312,6 +314,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     usedFallback: "已使用备用来源",
     lookupRetry: "重新查询",
     playbackRetry: "重新播放",
+    bufferingSlow: "网络较慢，可切换预览源",
     closePreview: "关闭预览",
     retryTranslate: "重新翻译",
     googleVerifyHint: "谷歌翻译需要人工验证",
@@ -528,6 +531,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     usedFallback: "已使用備用來源",
     lookupRetry: "重新查詢",
     playbackRetry: "重新播放",
+    bufferingSlow: "網路較慢，可切換預覽來源",
     closePreview: "關閉預覽",
     retryTranslate: "重新翻譯",
     googleVerifyHint: "谷歌翻譯需要人工驗證",
@@ -748,6 +752,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     usedFallback: "Using a fallback source",
     lookupRetry: "Retry lookup",
     playbackRetry: "Retry playback",
+    bufferingSlow: "Slow network — try switching the preview source",
     closePreview: "Close preview",
     retryTranslate: "Retry translation",
     googleVerifyHint: "Google Translate needs human verification",

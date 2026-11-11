@@ -20,8 +20,10 @@ import {
 	pickDefaultPreviewChoice,
 	planCover,
 	planDirectMp4Start,
+	resolvePrefetchUrl,
 	transitionPreviewNotice,
 	type FallbackStage,
+	type PlayerStatus,
 	type PreviewChoice,
 } from "../../../src/lib/preview-state";
 import {
@@ -66,6 +68,13 @@ const TITLE_DRAG_TOLERANCE_PX = 6;
  * 只靠 6px 位移阈值挡不住「轻拖 3px 松手」，那样浮层会被拖滚动条这个动作顺手关掉。
  */
 const TITLE_SCROLLBAR_ZONE_PX = 10;
+/**
+ * 缓冲指示器的显示延迟：waiting/playing 在弱网下会高频翻转，
+ * 立刻显示会让转圈频闪，300ms 足够滤掉瞬时抖动，又不会让人觉得"卡了还没提示"。
+ */
+const BUFFERING_SHOW_DELAY_MS = 300;
+/** 缓冲持续超过这个时长才在 title 上提示"可切换预览源"，避免短暂停顿就报慢 */
+const BUFFERING_HINT_DELAY_MS = 8000;
 
 interface TrailerPreviewProps {
 	code: string;
@@ -79,7 +88,6 @@ interface TrailerPreviewProps {
 	favoriteBlocked?: boolean;
 }
 
-type PlayerStatus = "idle" | "loading" | "playing" | "failed";
 type ResolutionState = PreviewResolution | { status: "loading" };
 
 export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
@@ -100,6 +108,12 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
 	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
+	// 播放中缓冲中：与 status 正交（status 仍是 playing，画面只是暂时没数据）
+	const [buffering, setBuffering] = useState(false);
+	// 缓冲已持续到让人怀疑网络：只用来改指示器的 title 文案，不影响外观与状态
+	const [bufferingSlow, setBufferingSlow] = useState(false);
+	const bufferingTimerRef = useRef<number | null>(null);
+	const bufferingHintTimerRef = useRef<number | null>(null);
 	const [noticeDismissed, setNoticeDismissed] = useState(false);
 	// 实际在播的来源：主媒体起步，每切一档回退就更新 → 「xxx源播放失败」文案取它
 	const [playSource, setPlaySource] = useState<PreviewLookupSource | null>(null);
@@ -221,6 +235,29 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		rootRef.current?.scrollIntoView({ block: "start" });
 	}, []);
 
+	// 清缓冲提示：显示延迟与慢速提示两个计时器一起收掉（移除是即时的，不等延迟）
+	const clearBuffering = useCallback(() => {
+		if (bufferingTimerRef.current !== null) {
+			window.clearTimeout(bufferingTimerRef.current);
+			bufferingTimerRef.current = null;
+		}
+		if (bufferingHintTimerRef.current !== null) {
+			window.clearTimeout(bufferingHintTimerRef.current);
+			bufferingHintTimerRef.current = null;
+		}
+		setBuffering(false);
+		setBufferingSlow(false);
+	}, []);
+
+	// 只要不在播放态就复位：换号、切档、起播、失败、重载全部由这一条覆盖，
+	// 不必往每个入口各写一行（漏一个就会留下一个永远转的圈）。
+	useEffect(() => {
+		if (status !== "playing") clearBuffering();
+	}, [status, clearBuffering]);
+
+	// 卸载时收计时器，避免回调打到已卸载组件
+	useEffect(() => clearBuffering, [clearBuffering]);
+
 	const media: PreviewMedia | null =
 		resolution.status === "resolved" ? resolution.media : null;
 	// 首屏封面只在「解析结果变化」时算一次（planCover 内部读记住的封面来源）：
@@ -242,19 +279,29 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 预取元数据：实测首帧总耗时 ~7 s，其中 6.9 s 花在"连接 + moov"上
 	// （loadedmetadata 6.911 s → rvfc 7.025 s，只差 0.11 s）。
 	// 解析出地址就提前设 src + preload="metadata"，把这 6.9 s 从"点击后"挪到"看封面时"，
-	// 点击后基本只剩解码首帧。只预取主档 mp4 直链：后备档等用户切过去再拉，
-	// 避免为了"可能不看"的第二套视频提前打日本源站。
-	const primaryUrl = primaryChoice?.directMp4 ? primaryChoice.previewUrl : null;
+	// 点击后基本只剩解码首帧。
+	//
+	// 预取目标必须是**实际会被播的那一档**（activeChoice），不能固定主档：
+	// 用户在设置里记住第 2 档时，播的是 choices[1]，固定预取主档等于白等一遍完整连接。
+	// 只预取 mp4 直链；HLS 走 hls.js，预取无意义。
+	const prefetchUrl = resolvePrefetchUrl(status, activeChoice);
 	useEffect(() => {
 		const video = videoRef.current;
-		if (!video || !primaryUrl) return;
+		if (!video || !prefetchUrl) return;
+		const currentSrc = video.getAttribute("src");
 		// 同一地址不重复触发，否则会把已开始的加载白重下一遍
-		if (video.getAttribute("src") === primaryUrl) return;
+		if (currentSrc === prefetchUrl) return;
+		// 播完回封面时 status 变回 idle，但 src 还留着上一档（可能走了详情页兜底，
+		// 与 activeChoice 不同）。为一个已经播完的地址重新拉取纯属浪费，这里直接放过。
+		// 切档 / 换号都会先 removeAttribute("src")，所以不会误挡真正的预取。
+		if (status === "idle" && currentSrc) return;
 		video.preload = "metadata";
-		video.src = primaryUrl;
-	}, [primaryUrl]);
+		video.src = prefetchUrl;
+	}, [prefetchUrl, status]);
 
-	const resolveCurrentCode = useCallback(async () => {
+	// force：跳过 background 的解析缓存，强制重新走一遍多源解析。
+	// 只有「重新加载预览」会传 true —— 用户点它正是因为怀疑手上的结果不对（如地址过期）。
+	const resolveCurrentCode = useCallback(async (force = false) => {
 		const requestId = ++resolutionRequestRef.current;
 		playbackRequestRef.current++;
 		destroyHlsInstance(hlsRef);
@@ -298,6 +345,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				apiUrl: settings.apiUrl,
 				apiKey: settings.apiKey,
 				falenoPrefixes: settings.falenoPrefixes,
+				force,
 			})) as PreviewResolution | undefined;
 			if (requestId !== resolutionRequestRef.current) return;
 			setResolution(
@@ -712,7 +760,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		}
 	};
 
-	const handleReload = () => void resolveCurrentCode();
+	const handleReload = () => void resolveCurrentCode(true);
 
 	const handleClose = () => {
 		destroyHlsInstance(hlsRef);
@@ -1029,7 +1077,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				</button>
 			</header>
 
-			<div className="trailer-preview__media">
+			<div
+				className={`trailer-preview__media${
+					status === "playing" ? " trailer-preview__media--playing" : ""
+				}`}
+			>
 				{/* video 常驻 DOM，hls.js attachMedia 需要已挂载的元素；未播放时隐藏 */}
 				<video
 					ref={videoRef}
@@ -1041,10 +1093,6 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 						// 那样首帧信号永远不来（实测踩过）。此时画面被下面的封面层遮住。
 						display:
 							status === "playing" || status === "loading" ? "block" : "none",
-						// notice 贴封面顶部：播放中出现横幅时把 video 下移一个横幅高度，
-						// 高度同步减去 32px（二者相加正好是整高），否则横幅会盖住画面顶部
-						height: status === "playing" && noticeText ? "calc(100% - 32px)" : undefined,
-						marginTop: status === "playing" && noticeText ? "32px" : undefined,
 					}}
 					onError={() => {
 						if (
@@ -1055,7 +1103,43 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							failPlayback(playbackRequestRef.current, playAttemptRef.current);
 						}
 					}}
+					onWaiting={() => {
+						// 起播阶段的 waiting 交给封面上的居中转圈，这里只管"已经在看却卡住"
+						if (status !== "playing") return;
+						if (bufferingTimerRef.current !== null) return;
+						bufferingTimerRef.current = window.setTimeout(() => {
+							bufferingTimerRef.current = null;
+							setBuffering(true);
+							bufferingHintTimerRef.current = window.setTimeout(() => {
+								bufferingHintTimerRef.current = null;
+								setBufferingSlow(true);
+							}, BUFFERING_HINT_DELAY_MS);
+						}, BUFFERING_SHOW_DELAY_MS);
+					}}
+					onPlaying={clearBuffering}
+					onCanPlay={clearBuffering}
+					onPause={clearBuffering}
+					onEnded={() => {
+						// 暂停不触发 ended，只有真播完才回封面
+						if (status !== "playing") return;
+						// 显式归零：下次点 ▶ 确定从头开始，避免某些情况下重播立刻又 ended
+						const video = videoRef.current;
+						if (video) video.currentTime = 0;
+						setStatus("idle");
+					}}
 				/>
+				{/* 播放中缓冲提示：左上角、不压暗、不占布局。
+				    必须挂在 cover-layer 之外 —— 播放时那一层整层卸载，放进去会跟着消失。 */}
+				{status === "playing" && buffering && (
+					<span
+						className="trailer-preview__buffering"
+						role="status"
+						aria-hidden="true"
+						title={bufferingSlow ? t.bufferingSlow : undefined}
+					>
+						<span className="spinner" />
+					</span>
+				)}
 				{status !== "playing" && presentation.showSpinner && (
 					<div className="trailer-preview__media-message" role="status">
 						<span className="spinner" aria-hidden="true" />

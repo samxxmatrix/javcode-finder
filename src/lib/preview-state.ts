@@ -357,6 +357,28 @@ export function pickDefaultPreviewChoice(
 	return second ?? choices[0] ?? null;
 }
 
+/** 播放器主状态（原定义在 TrailerPreview；预取判定也要用它，故移到这里） */
+export type PlayerStatus = "idle" | "loading" | "playing" | "failed";
+
+/**
+ * 预取目标地址：解析出地址就提前设 `src` + `preload="metadata"`，
+ * 把「连接 + moov」这段（实测 6.9 s）从"点击后"挪到"看封面时"。
+ *
+ * 三条规则：
+ * - **取实际会被播的那一档**，不能固定主档 —— 用户在设置里记住第 2 档时播的是 `choices[1]`，
+ *   固定预取主档等于白等一遍完整连接，点 ▶ 仍要重新拉；
+ * - **播放中不预取**：改 `src` 会打断当前画面（切档时由切档流程自己重新预取）；
+ * - **只预取 mp4 直链**：HLS 走 hls.js，`<video preload>` 对它没有意义。
+ */
+export function resolvePrefetchUrl(
+	status: PlayerStatus,
+	choice: Pick<PreviewChoice, "directMp4" | "previewUrl"> | null | undefined,
+): string | null {
+	if (status === "loading" || status === "playing") return null;
+	if (!choice?.directMp4) return null;
+	return choice.previewUrl || null;
+}
+
 /** 首屏封面方案：用哪张图开场，以及它失败后按什么顺序退 */
 export interface CoverPlan {
 	/** 首屏封面地址；null = 本次没有封面可显示 */
