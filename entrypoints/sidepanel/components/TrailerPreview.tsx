@@ -56,6 +56,17 @@ import type {
 import { EmbyBadge } from "./EmbyBadge";
 import { FavoriteIcon } from "./FavoriteIcon";
 
+/**
+ * 热区点击判定：按下到松手位移超过这个值就算拖动（拖滚动条、触控板惯性收尾都会派发 click），
+ * 不切换展开态。6px 是「手滑」和「真拖」的分界，实测 3px 级别的抖动仍算点击。
+ */
+const TITLE_DRAG_TOLERANCE_PX = 6;
+/**
+ * 展开态内容区右侧是原生滚动条（全局宽度 6px），落在这一带的按下位移再小也不算点击 ——
+ * 只靠 6px 位移阈值挡不住「轻拖 3px 松手」，那样浮层会被拖滚动条这个动作顺手关掉。
+ */
+const TITLE_SCROLLBAR_ZONE_PX = 10;
+
 interface TrailerPreviewProps {
 	code: string;
 	locale: SupportedLocale;
@@ -96,14 +107,19 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	// 记住的档位（1 = 第 1 档，2 = 第 2 档）：只在本次没有手动选择时决定默认档
 	const [preferredSlot, setPreferredSlot] = useState(getPreferredPreviewSlot);
-	// 标题/介绍区展开态：收起 90px 截断，展开 250px 浮在番号列表之上
+	// 标题/介绍区展开态：收起 4 行，展开浮在番号列表之上
 	const [titleExpanded, setTitleExpanded] = useState(false);
-	// 收起态下标题是否真的被截断：为 false 时连展开按钮都不渲染（短标题能完整显示）
-	const [titleTruncated, setTitleTruncated] = useState(false);
 	// 展开瞬间冻结的槽位高度：展开态标题层脱离文档流，靠它让番号列表不跳动
 	const [frozenSlotHeight, setFrozenSlotHeight] = useState<number | null>(null);
 	const titleContentRef = useRef<HTMLDivElement | null>(null);
 	const titleSlotRef = useRef<HTMLDivElement | null>(null);
+	const titleAreaRef = useRef<HTMLDivElement | null>(null);
+	// 热区按下的坐标：click 时据此区分「点一下」和「拖滚动条 / 划动」
+	const titlePointerRef = useRef<{
+		x: number;
+		y: number;
+		scrollbar: boolean;
+	} | null>(null);
 	// 标题译文（拼装翻译后拆分还原：标题译文 + 介绍译文；失败或英文界面保持 null）
 	const [translatedShort, setTranslatedShort] = useState<string | null>(null);
 	const [translatedLong, setTranslatedLong] = useState<string | null>(null);
@@ -718,44 +734,102 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		(media && canUseTitleAsShortTitle(media.source) ? media.title : null);
 	const displayLongTitle = media?.shortTitle ? media.title : null;
 
+	// 翻译进行中 / 失败：只看这几条决定小标记和重试行，与展开态无关。
+	// 翻译关掉时两个都不成立 —— 否则会挂一个点了也没用的「重新翻译」。
+	const translateEnabled = getSettings().translateEnabled;
+	const translatingTitle =
+		!titleReady && Boolean(media?.title) && translateEnabled;
+	const translateFailed =
+		titleReady && translateEnabled && !translatedShort && !translatedLong;
+
 	/**
-	 * 展开/收起。外层槽位是自适应高度，展开后标题层改绝对定位会脱离文档流，
+	 * 展开/收起。整块标题区就是热区，没有按钮：收起 4 行点开、展开态点一下收起。
+	 * 外层槽位是自适应高度，展开后标题层改绝对定位会脱离文档流，
 	 * 槽位若跟着塌掉、番号列表会往上窜 —— 所以展开那一刻先量收起态高度并冻结。
 	 */
-	const handleToggleTitle = useCallback(() => {
+	const handleToggleTitle = () => {
 		if (!titleExpanded) {
 			setFrozenSlotHeight(titleSlotRef.current?.offsetHeight ?? null);
 		}
 		setTitleExpanded(!titleExpanded);
-	}, [titleExpanded]);
+	};
 
 	/**
-	 * 展开按钮的可见性只看一件事：收起态下标题内容是否真的溢出 74px。
-	 * - 用 useLayoutEffect 而不是 useEffect：收起时先量再画，避免按钮闪一下才消失；
-	 * - 展开态不测量（内容自适应高度，量出来必然"不溢出"），按钮靠 titleExpanded 保住，
-	 *   否则展开后按钮消失、用户没法收起；
-	 * - 文本变化（原文/译文/翻译就绪）与容器宽度变化（ResizeObserver，折行会变）都要重量。
+	 * 热区按下：只记坐标，不在这里切换。
+	 * 若在 pointerdown 就切换，按下滚动条的那一瞬间浮层就关了，根本没法拖。
 	 */
-	useLayoutEffect(() => {
-		const element = titleContentRef.current;
-		if (!element || titleExpanded) return;
-		const measure = () => {
-			// +1 容差：亚像素行高会把「刚好放得下」算成溢出，按钮就白留了
-			setTitleTruncated(element.scrollHeight > element.clientHeight + 1);
+	const handleTitlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+		const content = titleContentRef.current;
+		let scrollbar = false;
+		if (content && titleExpanded) {
+			const rect = content.getBoundingClientRect();
+			scrollbar =
+				event.clientX >= rect.right - TITLE_SCROLLBAR_ZONE_PX &&
+				event.clientX <= rect.right + 2 &&
+				event.clientY >= rect.top &&
+				event.clientY <= rect.bottom;
+		}
+		titlePointerRef.current = {
+			x: event.clientX,
+			y: event.clientY,
+			scrollbar,
 		};
-		measure();
-		const observer = new ResizeObserver(measure);
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [
-		titleExpanded,
-		displayShortTitle,
-		displayLongTitle,
-		translatedShort,
-		translatedLong,
-		titleReady,
-		locale,
-	]);
+	};
+
+	/**
+	 * 热区点击 → 切换两态。
+	 * 滚轮滚动不产生 click，但拖滚动条、触控板惯性收尾会产生；靠按下坐标的位移把它们筛掉。
+	 * 区内若将来加按钮，给它标 data-title-no-toggle 就能不被这一层抢走点击。
+	 */
+	const handleTitleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+		const down = titlePointerRef.current;
+		titlePointerRef.current = null;
+		if (down?.scrollbar) return;
+		if (
+			down &&
+			Math.hypot(event.clientX - down.x, event.clientY - down.y) >
+				TITLE_DRAG_TOLERANCE_PX
+		) {
+			return;
+		}
+		const target = event.target as HTMLElement | null;
+		if (target?.closest("[data-title-no-toggle]")) return;
+		handleToggleTitle();
+	};
+
+	// 热区是 role=button，空格默认滚页面，得自己拦一下
+	const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+		if (event.key !== "Enter" && event.key !== " ") return;
+		event.preventDefault();
+		handleToggleTitle();
+	};
+
+	/**
+	 * 兜底收起：点简介区外任意处 / Esc。
+	 *
+	 * pointerdown 走 capture 只为尽早收起，**不** preventDefault、不 stopPropagation ——
+	 * 这一次点击要照常落到下面的番号列表，一次点击既收起又切号。
+	 * 刻意不加全屏背板：背板会吃掉第一次点击，用户点番号得点两下，比原方案更糟。
+	 */
+	useEffect(() => {
+		if (!titleExpanded) return;
+		const handleOutside = (event: PointerEvent) => {
+			const area = titleAreaRef.current;
+			if (area && event.target instanceof Node && area.contains(event.target)) {
+				return;
+			}
+			setTitleExpanded(false);
+		};
+		const handleEsc = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setTitleExpanded(false);
+		};
+		document.addEventListener("pointerdown", handleOutside, true);
+		document.addEventListener("keydown", handleEsc, true);
+		return () => {
+			document.removeEventListener("pointerdown", handleOutside, true);
+			document.removeEventListener("keydown", handleEsc, true);
+		};
+	}, [titleExpanded]);
 
 	/**
 	 * 收起时把标题内容强制滚回顶端。
@@ -1148,64 +1222,61 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							: undefined
 					}
 				>
-					<div className="trailer-preview__title-area">
+					{/* 整个标题区就是热区：没有圆钮、没有提示文案。
+						可发现性只靠 hover 时极轻的底色变化；键盘走 role=button + Enter/Space。 */}
+					<div
+						ref={titleAreaRef}
+						className={`trailer-preview__title-area${
+							translatingTitle ? " trailer-preview__title-area--translating" : ""
+						}`}
+						role="button"
+						tabIndex={0}
+						aria-expanded={titleExpanded}
+						aria-label={titleExpanded ? t.collapseTitle : t.expandTitle}
+						onPointerDown={handleTitlePointerDown}
+						onClick={handleTitleClick}
+						onKeyDown={handleTitleKeyDown}
+					>
 						<div className="trailer-preview__title-content" ref={titleContentRef}>
-					{/* 标题行：金色（dmm 商品名 / javtrailers 卡片标题），解析到即显示；翻译完成后替换为译文 */}
-					{displayShortTitle && (
-						<p className="trailer-preview__title-short">
-							{renderTitleText(translatedShort || displayShortTitle)}
-						</p>
-					)}
-					{/* 介绍行：dmm / d2pass 这类 title 即作品介绍文的源，翻译流程结束后显示，避免原文→译文的闪烁 */}
-					{displayLongTitle && titleReady && (
-						<p className="trailer-preview__title-text">
-							{renderTitleText(translatedLong || displayLongTitle || "")}
-						</p>
-					)}
-					{/* 翻译失败时显示重试图标（标题/介绍行共用，三种界面语言均适用） */}
-					{titleReady && !translatedShort && !translatedLong && (
-						<button
-							type="button"
-							className="trailer-preview__translate-retry"
-							onClick={handleRetryTranslate}
-							disabled={retrying}
-							title={t.retryTranslate}
-							aria-label={t.retryTranslate}
-						>
-							{retrying ? (
-								<span
-									className="spinner spinner--small"
-									aria-hidden="true"
-								/>
-							) : (
-								<svg
-									viewBox="0 0 1024 1024"
-									fill="currentColor"
-									width="13"
-									height="13"
-									aria-hidden="true"
+							{/* 标题行：金色（dmm 商品名 / javtrailers 卡片标题），解析到即显示。
+								译文到达时换一次 key → 只让这一行重挂淡入，不动展开态与槽位高度。 */}
+							{displayShortTitle && (
+								<p
+									key={translatedShort ? "title-zh" : "title-origin"}
+									className="trailer-preview__title-short"
 								>
-									<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
-									<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
-								</svg>
+									{renderTitleText(translatedShort || displayShortTitle)}
+								</p>
 							)}
-						</button>
-					)}
-					{/* 谷歌限流时显示人工验证提示 */}
-					{needsVerify && (
-						<div className="trailer-preview__verify">
-							<span>{t.googleVerifyHint}</span>
-							<button
-								type="button"
-								className="trailer-preview__verify-btn"
-								onClick={() => openVerifyWindow(displayLongTitle || displayShortTitle || "")}
+							{/* 介绍行：原文立刻可读 —— 等翻译再显示会让人对着空白干等。
+								译文到达后在同一位置淡入替换。 */}
+							{displayLongTitle && (
+								<p
+									key={translatedLong ? "intro-zh" : "intro-origin"}
+									className="trailer-preview__title-text"
+								>
+									{renderTitleText(translatedLong || displayLongTitle)}
+								</p>
+							)}
+						</div>
+						{/* 翻译中标记：绝对定位，不占高度、不推正文，译文一到就消失 */}
+						{translatingTitle && (
+							<span
+								className="trailer-preview__translate-pending"
+								aria-hidden="true"
 							>
-								{t.openVerifyPage}
-							</button>
-						</div>
-					)}
-						</div>
-					{/* 翻译错误信息区（每行一条：Worker 失败原因 + 备用服务失败原因），右上角单个关闭按钮 */}
+								{t.translatingTag}
+							</span>
+						)}
+					</div>
+				</div>
+			)}
+
+			{/* 错误 / 验证 / 重试刻意放在热区之外：
+				① 它们都是可点控件，留在区内会被「点一下切换」抢走点击；
+				② 收起态只有 73px，塞在里面会被裁掉，出错时反而看不见。 */}
+			{Boolean(translateErrors?.length || needsVerify || translateFailed) && (
+				<div className="trailer-preview__notices">
 					{translateErrors && translateErrors.length > 0 && (
 						<div className="trailer-preview__translate-error" role="alert">
 							<div className="trailer-preview__translate-error-list">
@@ -1237,43 +1308,46 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						</div>
 					)}
-					{/* 展开按钮只在「收起态确有截断」或「当前就是展开态」时出现：
-					    短标题能完整显示时，一个点不动的按钮只会误导用户。 */}
-					{(titleExpanded || titleTruncated) && (
+					{needsVerify && (
+						<div className="trailer-preview__verify">
+							<span>{t.googleVerifyHint}</span>
+							<button
+								type="button"
+								className="trailer-preview__verify-btn"
+								onClick={() =>
+									openVerifyWindow(displayLongTitle || displayShortTitle || "")
+								}
+							>
+								{t.openVerifyPage}
+							</button>
+						</div>
+					)}
+					{translateFailed && (
 						<button
 							type="button"
-							className="trailer-preview__title-toggle"
-							aria-expanded={titleExpanded}
-							aria-label={titleExpanded ? t.collapseTitle : t.expandTitle}
-							title={titleExpanded ? t.collapseTitle : t.expandTitle}
-							onClick={handleToggleTitle}
+							className="trailer-preview__translate-retry"
+							onClick={handleRetryTranslate}
+							disabled={retrying}
 						>
-							<svg
-								viewBox="0 0 24 24"
-								width="14"
-								height="14"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2.2"
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								aria-hidden="true"
-							>
-								{/* 带长杆的箭头（不是单折角 chevron）：杆 + 两侧斜线组成箭头头部 */}
-								<path
-									d={
-										titleExpanded
-											? "M12 19V5M5.5 11.5L12 5l6.5 6.5"
-											: "M12 5v14M5.5 12.5L12 19l6.5-6.5"
-									}
-								/>
-							</svg>
+							{retrying ? (
+								<span className="spinner spinner--small" aria-hidden="true" />
+							) : (
+								<svg
+									viewBox="0 0 1024 1024"
+									fill="currentColor"
+									width="12"
+									height="12"
+									aria-hidden="true"
+								>
+									<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
+									<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
+								</svg>
+							)}
+							<span>{t.retryTranslate}</span>
 						</button>
 					)}
-					</div>
 				</div>
 			)}
-
 		</section>
 	);
 };

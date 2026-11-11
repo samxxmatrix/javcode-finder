@@ -1734,7 +1734,7 @@ button:focus-visible {
 	text-align: right;
 }
 
-/* 标题区外层：收起态高度随内容自适应（短标题不留空槽），上限 90px。
+/* 标题区外层：收起态高度随内容自适应（短标题不留空槽），上限 96px = 1px 上边框 + 8px 上下内边距 + 79px 内容。
    为什么展开时还要 heights：标题层展开后改绝对定位（浮在番号列表之上），
    绝对定位不占空间，槽位会塌成 0、列表往上窜。因此展开那一刻由组件把
    收起态实测高度写成行内 style 冻结住，列表位置保持不动。 */
@@ -1742,18 +1742,20 @@ button:focus-visible {
 	position: relative;
 	flex: 0 0 auto;
 	height: auto;
-	max-height: 90px;
+	max-height: 96px;
 }
 
-/* 兜底：万一没拿到冻结高度（例如状态异常），仍按原设计的 90px 占位 */
+/* 兜底：万一没拿到冻结高度（例如状态异常），仍按设计的 96px 占位 */
 .trailer-preview__title-slot--expanded {
-	height: 90px;
+	height: 96px;
 }
 
-/* 预览下方的影片标题区域。
-   收起：在流内（撑起外层槽位高度），内容最多 74px（8+74+8 = 90），超出截断、**不**内部滚动
+/* 预览下方的影片标题区域，整块就是展开热区（没有圆钮、没有提示文案）。
+   收起：在流内（撑起外层槽位高度），内容最多 79px（1+8+79+8 = 96），超出截断、**不**内部滚动
         （滚轮交给整页，避免小容器一格到底）；
-   展开：绝对定位浮在番号列表之上，最高 350px，文本仍超出时才出现滚动条。 */
+   展开：绝对定位浮在番号列表之上，最高 350px，文本仍超出时才出现滚动条。
+   交互：箭头光标（不是手型、也不是 I-beam）+ 禁止选中 —— 选区会和「点一下切换」打架，
+        而且不能复制时冒出 I-beam 只会让人以为可以选。 */
 .trailer-preview__title-area {
 	/* 收起态必须是流内定位：绝对定位会让自适应高度的外层槽位塌成 0 */
 	position: relative;
@@ -1767,13 +1769,37 @@ button:focus-visible {
 	border-top: 1px solid var(--border-subtle);
 	border-radius: 0 0 10px 10px;
 	background: var(--bg-surface);
+	outline: none;
+	transition: background-color 0.15s ease;
 }
 
-/* 收起态：内容最多占满 90px 减去上下 padding 与 1px 上边框（1+8+73+8 = 90），超出截断。
-   展开/收起按钮浮在它上面，不占净高度，所以这里能比按钮在流内时多显示一行。 */
+/* 子元素全覆盖：只写在本体上时，<p> 里仍会冒出文本光标与可选中区域 */
+.trailer-preview__title-area,
+.trailer-preview__title-area * {
+	cursor: default;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-user-drag: none;
+}
+
+/* 唯一的「这里能点」线索：极轻的底色变化（不收任何文案、不改光标形状） */
+.trailer-preview__title-area:hover {
+	background: var(--bg-surface-hover);
+}
+
+/* 只有键盘聚焦才画描边：鼠标点完不该留一圈框 */
+.trailer-preview__title-area:focus-visible {
+	outline: 2px solid var(--accent-gold);
+	outline-offset: -2px;
+}
+
+/* 收起态：内容最多 79px = 4 个行盒（12.5px × 1.5 = 18.75，4 行 = 75）+ 标题行后 4px 间距。
+   为什么必须是这个数：标题行与介绍行的行盒都是 18.75px，只要上限落在 4 行 + 4px 上，
+   截断就一定切在行与行之间 —— 不会露出半行被腰斩的残字，也就不需要底部渐隐来遮。 */
 .trailer-preview__title-content {
+	position: relative;
 	flex: 0 0 auto;
-	max-height: 73px;
+	max-height: 79px;
 	overflow: hidden;
 }
 
@@ -1790,41 +1816,55 @@ button:focus-visible {
 .trailer-preview__title-slot--expanded .trailer-preview__title-content {
 	flex: 1 1 auto;
 	height: auto;
-	/* 收起态的 74px 上限必须解除，否则展开后仍被裁 */
+	/* 收起态的 79px 上限必须解除，否则展开后仍被裁 */
 	max-height: none;
 	min-height: 0;
 	overflow-y: auto;
-	/* 给浮动按钮留出底部空间：滚到最后一行时不会被圆钮压住 */
-	padding-bottom: 26px;
+	/* 滚到底不把番号列表一起带走 */
+	overscroll-behavior: contain;
+	padding-bottom: 2px;
 }
 
-/* 圆形展开/收起按钮：绝对定位浮在标题内容之上，收起态位置仍是 90px 区域底部居中。
-   它不占流内高度，翻译错误横幅出现时给横幅留 margin-bottom，按钮才会落到横幅下方。 */
-.trailer-preview__title-toggle {
+/* 全局滚动条轨道是页面底色，落在浮层里会显出一条更深的竖带 —— 这里让它透明 */
+.trailer-preview__title-slot--expanded
+	.trailer-preview__title-content::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* 翻译中的角标：绝对定位，不占布局高度、不推正文；译文到达即消失 */
+.trailer-preview__translate-pending {
 	position: absolute;
-	z-index: 1;
-	bottom: 8px;
-	left: 50%;
-	transform: translateX(-50%);
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 20px;
-	height: 20px;
-	padding: 0;
-	/* 浮动在文字之上：底色必须与面板区分，否则圆钮会被正文吞掉 */
-	border: 1px solid rgba(255, 255, 255, 0.28);
-	border-radius: 50%;
-	background: rgba(0, 0, 0, 0.62);
-	backdrop-filter: blur(2px);
-	color: #e4e4e7;
-	cursor: pointer;
-	transition: color 0.15s ease, border-color 0.15s ease;
+	top: 7px;
+	right: 12px;
+	padding: 0 6px;
+	border: 1px solid rgba(245, 158, 11, 0.4);
+	border-radius: 9px;
+	background: var(--bg-surface);
+	font-size: 10.5px;
+	line-height: 15px;
+	color: var(--accent-gold-text);
+	pointer-events: none;
+	animation: title-fade-in 0.18s ease;
 }
 
-.trailer-preview__title-toggle:hover {
-	border-color: var(--accent-gold);
-	color: var(--accent-gold);
+/* 角标在右上角，展开态的滚动条也占那一角：往左让开 6px，别压住滑块 */
+.trailer-preview__title-slot--expanded .trailer-preview__translate-pending {
+	right: 20px;
+}
+
+/* 角标压在右上角，标题首行让出它的宽度；角标消失时同步回落，不会单独抖一次 */
+.trailer-preview__title-area--translating .trailer-preview__title-short {
+	padding-right: 44px;
+}
+
+/* 原文 → 译文：换 key 重挂该行时跑一次淡入（只动这一行，不动展开态与槽位高度） */
+@keyframes title-fade-in {
+	from {
+		opacity: 0.25;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 /* 短标题：金色，先行显示（不等待长文翻译） */
@@ -1835,6 +1875,20 @@ button:focus-visible {
 	line-height: 1.5;
 	margin-bottom: 4px;
 	overflow-wrap: break-word;
+	animation: title-fade-in 0.18s ease;
+}
+
+/* 用户要求减少动态效果时不要淡入，直接换字 */
+@media (prefers-reduced-motion: reduce) {
+	.trailer-preview__title-short,
+	.trailer-preview__title-text,
+	.trailer-preview__translate-pending {
+		animation: none;
+	}
+
+	.trailer-preview__title-area {
+		transition: none;
+	}
 }
 
 .trailer-preview__title-text {
@@ -1844,25 +1898,28 @@ button:focus-visible {
 	/* 文本中的 \n 保留换行；<br> 由组件转成元素换行 */
 	white-space: pre-wrap;
 	overflow-wrap: break-word;
+	animation: title-fade-in 0.18s ease;
 }
 
-/* 翻译重试图标 */
+/* 翻译失败后的重试行：在热区之外，带文字（图标单摆会被当成装饰） */
 .trailer-preview__translate-retry {
-	background: none;
-	border: none;
-	cursor: pointer;
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	vertical-align: middle;
+	align-self: flex-start;
+	gap: 5px;
+	padding: 3px 9px;
+	border: 1px solid var(--border-strong);
+	border-radius: 4px;
+	background: transparent;
 	color: var(--text-muted);
-	padding: 0 3px;
-	margin-left: 4px;
-	transition: color 0.15s ease;
+	font-size: 11.5px;
+	cursor: pointer;
+	transition: color 0.15s ease, border-color 0.15s ease;
 }
 
 .trailer-preview__translate-retry:hover:not(:disabled) {
 	color: var(--accent-gold);
+	border-color: var(--accent-gold);
 }
 
 .trailer-preview__translate-retry:disabled {
@@ -2024,13 +2081,22 @@ button:focus-visible {
 	padding: 7px 10px;
 }
 
+/* 错误 / 验证 / 重试：热区之外的一列，收起态也常驻可见。
+   间距由容器 gap 统一给，子项自己不再带上外边距 */
+.trailer-preview__notices {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	/* 与正文留一点气口：正文底部紧贴红框会看成同一个块 */
+	padding: 4px 12px 10px;
+}
+
 /* 谷歌翻译人工验证提示行 */
 .trailer-preview__verify {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
-	margin-top: 8px;
 	font-size: 12px;
 	color: var(--text-muted);
 }
@@ -2041,9 +2107,6 @@ button:focus-visible {
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: 8px;
-	margin-top: 8px;
-	/* 按钮浮动在标题区底部：横幅出现时给它让出位置，按钮才会落在横幅下方 */
-	margin-bottom: 26px;
 	padding: 6px 8px;
 	border: 1px solid var(--accent-red);
 	border-radius: 4px;

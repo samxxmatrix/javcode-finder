@@ -88,9 +88,11 @@ export interface LocaleMessages {
 	previewTitle: string;
 	/** 预览源切换控件的无障碍标签 / 悬停提示 */
 	switchPreviewSource: string;
-	/** 标题/介绍区底部展开、收起按钮 */
+	/** 标题/介绍区的无障碍标签：整块即热区，没有可见按钮 */
 	expandTitle: string;
 	collapseTitle: string;
+	/** 翻译进行中的角标（原文已显示，译文到达后淡入替换） */
+	translatingTag: string;
 	playTrailer: string;
 	previewVolumeLabel: string;
 	previewUnavailable: string;
@@ -294,8 +296,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       `发现新版本 v${version}，在新标签页打开 GitHub 最新 Release`,
     previewTitle: "预告片",
     switchPreviewSource: "切换预览源",
-    expandTitle: "展开",
-    collapseTitle: "收起",
+    expandTitle: "展开标题",
+    collapseTitle: "收起标题",
+    translatingTag: "译…",
     playTrailer: "播放预告片",
     previewVolumeLabel: "预览视频音量",
     previewUnavailable: "该番号暂无预告片",
@@ -509,8 +512,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       `發現新版本 v${version}，在新分頁開啟 GitHub 最新 Release`,
     previewTitle: "預告片預覽",
     switchPreviewSource: "切換預覽來源",
-    expandTitle: "展開",
-    collapseTitle: "收起",
+    expandTitle: "展開標題",
+    collapseTitle: "收起標題",
+    translatingTag: "譯…",
     playTrailer: "播放預告片",
     previewVolumeLabel: "預覽影片音量",
     previewUnavailable: "未獲取到預告片",
@@ -728,8 +732,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       `Version ${version} is available. Open the latest GitHub Release in a new tab`,
     previewTitle: "Preview",
     switchPreviewSource: "Switch preview source",
-    expandTitle: "Expand",
-    collapseTitle: "Collapse",
+    expandTitle: "Expand description",
+    collapseTitle: "Collapse description",
+    translatingTag: "Translating",
     playTrailer: "Play Trailer",
     previewVolumeLabel: "Preview volume",
     previewUnavailable: "Trailer unavailable",
