@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { isPlatformConfigured } from "../../../../src/lib/settings";
 import type { ThemeOption } from "../../../../src/lib/settings";
 import { PROJECT_HOME_URL } from "../../../../src/lib/release";
 import { ClearButton } from "../ClearButton";
+import { PlatformGroup } from "./PlatformGroup";
 import { SettingsSection } from "./SettingsSection";
 import { useDraft } from "./SettingsDraftContext";
 import type { UpdateCheckInfo } from "./types";
@@ -19,6 +21,36 @@ export function BasicSettingsPage({
 	const d = useDraft();
 	const { t } = d;
 	const [jumpOpen, setJumpOpen] = useState(false);
+	// 三组配置集中成一份数据：渲染与「已配置 N/3」计数共用，避免两处字段漂移
+	const platformGroups = [
+		{
+			index: 1,
+			idPrefix: "supjav",
+			name: d.supjavName,
+			template: d.supjav,
+			onNameChange: d.setSupjavName,
+			onTemplateChange: d.setSupjav,
+		},
+		{
+			index: 2,
+			idPrefix: "javdb",
+			name: d.javdbName,
+			template: d.javbus,
+			onNameChange: d.setJavdbName,
+			onTemplateChange: d.setJavbus,
+		},
+		{
+			index: 3,
+			idPrefix: "custom",
+			name: d.customName,
+			template: d.customTemplate,
+			onNameChange: d.setCustomName,
+			onTemplateChange: d.setCustomTemplate,
+		},
+	];
+	const configuredPlatformCount = platformGroups.filter((group) =>
+		isPlatformConfigured(group.name, group.template),
+	).length;
 
 	return (
 		<div className="settings-page">
@@ -174,7 +206,7 @@ export function BasicSettingsPage({
 				>
 					<span>{t.platformRulesLabel}</span>
 					<span className="settings-disclosure__meta">
-						{t.platformCount(3)}
+						{t.configuredCount(configuredPlatformCount, platformGroups.length)}
 					</span>
 					<svg
 						className={`settings-service__chevron${jumpOpen ? " settings-service__chevron--open" : ""}`}
@@ -192,145 +224,11 @@ export function BasicSettingsPage({
 
 			{jumpOpen && (
 				<div className="settings-disclosure__body">
-					<div className="settings-field">
-							<label className="settings-field__label" htmlFor="supjav-name">
-								{t.platformNameLabel}
-							</label>
-							<div className="settings-field__input-wrap">
-								<input
-									id="supjav-name"
-									type="text"
-									className="settings-field__input"
-									value={d.supjavName}
-									onChange={(e) => d.setSupjavName(e.target.value)}
-									placeholder={t.platformNameLabel}
-									spellCheck={false}
-									autoComplete="off"
-								/>
-								<ClearButton
-									show={Boolean(d.supjavName)}
-									onClick={() => d.setSupjavName("")}
-									title={t.clearInput}
-								/>
-							</div>
-						</div>
-
-						<div className="settings-field">
-							<label className="settings-field__label" htmlFor="supjav-template">
-								{t.platformUrlLabel(d.supjavName || t.customPlatformName)}
-							</label>
-							<div className="settings-field__input-wrap">
-								<input
-									id="supjav-template"
-									type="text"
-									className="settings-field__input"
-									value={d.supjav}
-									onChange={(e) => d.setSupjav(e.target.value)}
-									placeholder="https://example.com/search?q={code}"
-									spellCheck={false}
-									autoComplete="off"
-								/>
-								<ClearButton
-									show={Boolean(d.supjav)}
-									onClick={() => d.setSupjav("")}
-									title={t.clearInput}
-								/>
-							</div>
-						</div>
-
-						<div className="settings-field">
-							<label className="settings-field__label" htmlFor="javdb-name">
-								{t.platformNameLabel}
-							</label>
-							<div className="settings-field__input-wrap">
-								<input
-									id="javdb-name"
-									type="text"
-									className="settings-field__input"
-									value={d.javdbName}
-									onChange={(e) => d.setJavdbName(e.target.value)}
-									placeholder={t.platformNameLabel}
-									spellCheck={false}
-									autoComplete="off"
-								/>
-								<ClearButton
-									show={Boolean(d.javdbName)}
-									onClick={() => d.setJavdbName("")}
-									title={t.clearInput}
-								/>
-							</div>
-						</div>
-
-						<div className="settings-field">
-							<label className="settings-field__label" htmlFor="javbus-template">
-								{t.platformUrlLabel(d.javdbName || t.customPlatformName)}
-							</label>
-							<div className="settings-field__input-wrap">
-								<input
-									id="javbus-template"
-									type="text"
-									className="settings-field__input"
-									value={d.javbus}
-									onChange={(e) => d.setJavbus(e.target.value)}
-									placeholder="https://example.com/search?q={code}"
-									spellCheck={false}
-									autoComplete="off"
-								/>
-								<ClearButton
-									show={Boolean(d.javbus)}
-									onClick={() => d.setJavbus("")}
-									title={t.clearInput}
-								/>
-							</div>
-						</div>
-
-						<div className="settings-field">
-							<label className="settings-field__label" htmlFor="custom-name">
-								{t.platformNameLabel}
-							</label>
-							<div className="settings-field__input-wrap">
-								<input
-									id="custom-name"
-									type="text"
-									className="settings-field__input"
-									value={d.customName}
-									onChange={(e) => d.setCustomName(e.target.value)}
-									placeholder={t.platformNameLabel}
-									spellCheck={false}
-									autoComplete="off"
-								/>
-								<ClearButton
-									show={Boolean(d.customName)}
-									onClick={() => d.setCustomName("")}
-									title={t.clearInput}
-								/>
-							</div>
-						</div>
-
-						<div className="settings-field">
-							<label className="settings-field__label" htmlFor="custom-template">
-								{t.platformUrlLabel(d.customName || t.customPlatformName)}
-							</label>
-							<div className="settings-field__input-wrap">
-								<input
-									id="custom-template"
-									type="text"
-									className="settings-field__input"
-									value={d.customTemplate}
-									onChange={(e) => d.setCustomTemplate(e.target.value)}
-									placeholder="https://example.com/search?q={code}"
-									spellCheck={false}
-									autoComplete="off"
-								/>
-								<ClearButton
-									show={Boolean(d.customTemplate)}
-									onClick={() => d.setCustomTemplate("")}
-									title={t.clearInput}
-								/>
-							</div>
-						</div>
-					</div>
-				)}
+					{platformGroups.map((group) => (
+						<PlatformGroup key={group.idPrefix} {...group} />
+					))}
+				</div>
+			)}
 			</SettingsSection>
 			<SettingsSection title={t.settingsGroupVersion}>
 				<section className="settings-version">

@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
 	buildCoverUrlFromContentId,
+	buildDetailUrl,
+	buildSearchUrl,
 	buildTrailerUrlFromContentId,
+	JAVTRAILERS_BASE_URL,
 	parseDetailPageFallback,
 	parseDetailPageMeta,
 	parseSearchPageHtml,
@@ -15,11 +18,58 @@ const detailFixture = readFileSync(
 	"utf8",
 );
 
-// 截取自 javtrailers.com 日语搜索页真实 SSR HTML 的卡片结构（/ja/search 的链接带语言前缀）
+// 真实日语搜索页固件：卡片正文 vid-title 是日文原文，a[title] 是共用的一份英文标题。
+const searchFixture = readFileSync(
+	new URL("../fixtures/javtrailers-ja-search-DLDSS-529.html", import.meta.url),
+	"utf8",
+);
+
+const JA_CARD_TITLE =
+	"DLDSS-529 電撃移籍 DAHLIA 小泉玖美41歳 人妻から女優へ。あの’本物人妻’がやってきたー。";
+const JA_TITLE =
+	"電撃移籍 DAHLIA 小泉玖美41歳 人妻から女優へ。あの’本物人妻’がやってきたー。";
+
+// 截取自 javtrailers.com 日语搜索页真实 SSR HTML 的卡片结构（/ja/search 的链接带语言前缀）。
+// cardTitle=null 模拟源站改版、去掉 vid-title 的情况，用于验证英文 a[title] 兜底。
 const CARD = (
 	contentId: string,
 	alt: string,
-) => `<div class="card-container"><a href="/ja/video/${contentId}" class="video-link" title="Some movie title with &amp; symbols"><div class="card video-card"><div class="card-img-container"><img data-src="https://images.javtrailers.com/digital/video/${contentId}/${contentId}ps.w360.webp" alt="${alt}" class="card-img-top video-image"><span class="badge duration-badge">2:58:00</span></div></div></a></div>`;
+	cardTitle: string | null = JA_CARD_TITLE,
+) => {
+	const titleBlock =
+		cardTitle === null
+			? ""
+			: `<div class="card-text"><p class="card-text title mb-0 vid-title">${cardTitle}</p></div>`;
+	return `<div class="card-container"><a href="/ja/video/${contentId}" class="video-link" title="Some movie title with &amp; symbols"><div class="card video-card"><div class="card-img-container"><img data-src="https://images.javtrailers.com/digital/video/${contentId}/${contentId}ps.w360.webp" alt="${alt}" class="card-img-top video-image"><span class="badge duration-badge">2:58:00</span></div>${titleBlock}</div></a></div>`;
+};
+
+describe("JAVTRAILERS_BASE_URL", () => {
+	it("points at the Japanese site, not the English one", () => {
+		expect(JAVTRAILERS_BASE_URL).toBe("https://javtrailers.com/ja");
+	});
+});
+
+describe("buildSearchUrl / buildDetailUrl", () => {
+	it("builds the Japanese search URL and encodes the code", () => {
+		expect(buildSearchUrl("DLDSS-529")).toBe(
+			"https://javtrailers.com/ja/search/DLDSS-529",
+		);
+		expect(buildSearchUrl("ABP 123")).toBe(
+			"https://javtrailers.com/ja/search/ABP%20123",
+		);
+	});
+
+	it("builds the Japanese detail URL from a contentId", () => {
+		expect(buildDetailUrl("1dldss00529")).toBe(
+			"https://javtrailers.com/ja/video/1dldss00529",
+		);
+	});
+
+	it("never falls back to the English paths", () => {
+		expect(buildSearchUrl("ABP-123")).not.toContain(".com/search");
+		expect(buildDetailUrl("abc123")).not.toContain(".com/video");
+	});
+});
 
 describe("parseSearchPageHtml", () => {
 	it("returns the detail URL and contentId when the first card matches the code", () => {
@@ -27,8 +77,53 @@ describe("parseSearchPageHtml", () => {
 		expect(parseSearchPageHtml(html, "DLDSS-529")).toEqual({
 			detailUrl: "https://javtrailers.com/ja/video/1dldss00529",
 			contentId: "1dldss00529",
-			title: "Some movie title with & symbols",
+			title: JA_TITLE,
 		});
+	});
+
+	it("reads the Japanese vid-title from the real /ja/search fixture, not the English anchor title", () => {
+		const hit = parseSearchPageHtml(searchFixture, "DLDSS-529");
+		expect(hit?.contentId).toBe("1dldss00529");
+		expect(hit?.title).toBe(JA_TITLE);
+		expect(hit?.title).not.toContain("Shocking transfer");
+		expect(hit?.title).not.toMatch(/^DLDSS-529/);
+	});
+
+	it("strips the leading code only when it matches the card alt", () => {
+		expect(
+			parseSearchPageHtml(
+				CARD("1dldss00529", "DLDSS-529 jav", "ABP-123 別の作品タイトル"),
+				"DLDSS-529",
+			)?.title,
+		).toBe("ABP-123 別の作品タイトル");
+	});
+
+	it("decodes HTML entities inside vid-title", () => {
+		expect(
+			parseSearchPageHtml(
+				CARD(
+					"1dldss00529",
+					"DLDSS-529 jav",
+					"DLDSS-529 タイトル &amp; &#39;引用&#39;",
+				),
+				"DLDSS-529",
+			)?.title,
+		).toBe("タイトル & '引用'");
+	});
+
+	it("falls back to the English anchor title when vid-title is missing or empty", () => {
+		expect(
+			parseSearchPageHtml(
+				CARD("1dldss00529", "DLDSS-529 jav", null),
+				"DLDSS-529",
+			)?.title,
+		).toBe("Some movie title with & symbols");
+		expect(
+			parseSearchPageHtml(
+				CARD("1dldss00529", "DLDSS-529 jav", ""),
+				"DLDSS-529",
+			)?.title,
+		).toBe("Some movie title with & symbols");
 	});
 
 	it("tolerates case, hyphen, and space differences in the code", () => {
@@ -36,7 +131,7 @@ describe("parseSearchPageHtml", () => {
 		expect(parseSearchPageHtml(html, "dldss 529")).toEqual({
 			detailUrl: "https://javtrailers.com/ja/video/1dldss00529",
 			contentId: "1dldss00529",
-			title: "Some movie title with & symbols",
+			title: JA_TITLE,
 		});
 	});
 
@@ -65,7 +160,7 @@ describe("parseSearchPageHtml", () => {
 		expect(parseSearchPageHtml(html, "DLDSS-529")).toEqual({
 			detailUrl: "https://javtrailers.com/ja/video/1dldss00529",
 			contentId: "1dldss00529",
-			title: "Some movie title with & symbols",
+			title: JA_TITLE,
 		});
 	});
 

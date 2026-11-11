@@ -55,8 +55,9 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 | 反代未启用 + 非 FNS 号 | 仅 JT | DMM 需反代、FALENO 前缀不命中 |
 
 1. **javtrailers（封面方默认，全球可达）**：搜索页解析 Content ID（番号→Content ID 不可靠推导，如 `DLDSS-529` → `1dldss00529`，必须走搜索页解析）：
-   - background fetch `https://javtrailers.com/search/{code}`（扩展持有 `*://*/*` host permissions，不受 CORS 限制；5 秒超时）。
+   - background fetch `https://javtrailers.com/ja/search/{code}`（日语版；基础链接 `JAVTRAILERS_BASE_URL = https://javtrailers.com/ja`，由 `buildSearchUrl` / `buildDetailUrl` 派生，扩展持有 `*://*/*` host permissions，不受 CORS 限制；5 秒超时）。
    - `parseSearchPageHtml` 解析第一张 `card-container`：提取 `href="/video/{contentId}"` 与 `img` 的 `alt`（形如 `DLDSS-529 jav`），以 comparison key 比对确认精确匹配。
+   - 标题取同一卡片的 `<p class="card-text title mb-0 vid-title">`：日语版给**日文原文**（形如 `DLDSS-529 電撃移籍 DAHLIA …`，解析时剥掉开头番号、解 HTML 实体）；只有该元素缺失/为空时才回退 `<a title>`（各语言共用的一份英文标题）。此前只取 `<a title>`，JT 源标题恒为英文，英文界面还会把英文"翻"成英文。
    - 解析锚点必须为 `class="card-container"`：页面 `<style>` 中的 `.card-container` CSS 规则先于卡片出现（真实页面踩坑，见测试）。
 
 2. **DMM API（第二路；仅反代启用且番号非 FNS）**：background 请求 `{base}/{code}?key=`（自建 Vercel 东京部署，见 dmm-api接口文档.md；5 秒超时）。命中返回 cid、标题与介绍、封面大图、预告片 mp4 直链。它只贡献**标题与后备档**：封面仍优先 JavTrailers（DMM 图片要日本出口）。404 按未命中处理（JT 那一路照常在跑），其他错误保留来源、错误码/消息。**`dmmEnabled` 是"是否使用反代"的唯一权威开关**：开关关掉时，即便地址与 Key 还填着，DMM 不查、FALENO 也一律直连。
@@ -178,7 +179,7 @@ Extension 不提供榜单、评分、标记或账号体系，是纯粹的页面�
 ## 3. Settings
 
 - 存储于 `localStorage`（`javranking_search_settings`、`javranking_user_locale`），永不过期，读取失败降级默认值。
-- 可配置项：JavTrailers 跳转模板（默认 `https://javtrailers.com/search/{code}`）、JavDB 跳转模板（默认 `https://javdb.com/search?q={code}`）、DMM 查询 API（地址 + Key + 开关，打开时仅校验地址与 Key 非空，不调接口验证）、排除站点黑名单、番号识别正则、界面语言（简中/繁中/英）、界面外观（跟随系统 / 浅色 / 深色，默认跟随系统）。
+- 可配置项：三个自定义平台跳转模板（默认均为空，即不显示按钮；填 JavTrailers 日语搜索页可用 `https://javtrailers.com/ja/search/{code}`）、JavDB 跳转模板（如 `https://javdb.com/search?q={code}`）、DMM 查询 API（地址 + Key + 开关，打开时仅校验地址与 Key 非空，不调接口验证）、排除站点黑名单、番号识别正则、界面语言（简中/繁中/英）、界面外观（跟随系统 / 浅色 / 深色，默认跟随系统）。
 - 模板占位符：`{code}`、`{番号}`、`{ID}`；无占位符时按 URL 形态智能追加。
 - 旧版本 `missavTemplate` 字段迁移：自定义值保留，等于旧默认值时改用 JavTrailers 默认。
 

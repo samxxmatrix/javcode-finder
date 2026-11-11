@@ -1,5 +1,7 @@
 import {
 	buildCoverUrlFromContentId,
+	buildDetailUrl,
+	buildSearchUrl,
 	buildTrailerUrlFromContentId,
 	parseDetailPageFallback,
 	parseDetailPageMeta,
@@ -56,19 +58,19 @@ import {
 	buildBingUrl,
 	buildGoogleBody,
 	buildGooglePostUrl,
-	buildWorkerTranslateBody,
-	buildWorkerUrl,
+	buildOpenAIRequestBody,
+	buildOpenAIUrl,
 	formatBingError,
 	formatBingFetchError,
 	formatGoogleError,
 	formatGoogleFetchError,
-	formatWorkerError,
-	formatWorkerFetchError,
+	formatOpenAIError,
+	formatOpenAIFetchError,
 	parseBingResponse,
 	parseGoogleResponse,
-	parseWorkerHealth,
-	parseWorkerTranslation,
-	parseWorkerUsage,
+	parseOpenAIHealth,
+	parseOpenAIModels,
+	parseOpenAITranslation,
 	type FallbackService,
 	type TranslateTarget,
 } from "../src/lib/translate";
@@ -580,7 +582,8 @@ export default defineBackground(() => {
 					code?: string;
 					text?: string;
 					target?: TranslateTarget;
-					deeplKey?: string;
+					translateApiKey?: string;
+					translateModel?: string;
 					translateUrl?: string;
 					translateEnabled?: boolean;
 					fallbackService?: FallbackService;
@@ -600,52 +603,59 @@ export default defineBackground(() => {
 					falenoPrefixes?: string[];
 				};
 
-				// 标题翻译：优先自建 Worker（开关开启且地址/Key 齐全）；
+				// 标题翻译：优先 OpenAI 兼容 AI 服务（开关开启且地址/Key 齐全）；
 				// 失败或未配置时降级用户选定的备用服务（谷歌 t 端点或微软 Edge 内置接口）。
-				// Worker 失败原因（错误码+文案）随响应返回给面板显示在错误行，
+				// AI 服务失败原因随响应返回给面板显示在错误行（字段名沿用 workerError），
 				// 不影响备用服务出的译文。全程静默不输出控制台。
 				if (msg?.type === "jt:translate" && msg.text) {
-					const target = msg.target === "zh-TW" ? "zh-TW" : "zh-CN";
+					const target =
+						msg.target === "zh-TW"
+							? "zh-TW"
+							: msg.target === "en"
+								? "en"
+								: "zh-CN";
 					const fallback: FallbackService =
 						msg.fallbackService === "bing" ? "bing" : "google";
-					const key = (msg.deeplKey || "").trim();
+					const key = (msg.translateApiKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
+					const model = (msg.translateModel || "").trim();
 					void (async () => {
-						// 一级：自建 Worker（仅开关开启且地址与 Key 齐全时尝试）
+						// 一级：自建翻译服务（OpenAI 兼容 /v1/chat/completions）
+						// 仅开关开启且地址与 Key 齐全时尝试
 						let workerError: string | undefined;
 						if (msg.translateEnabled && baseUrl && key) {
 							try {
-								const res = await fetch(buildWorkerUrl(baseUrl, "translate"), {
+								const res = await fetch(buildOpenAIUrl(baseUrl, "chat"), {
 									method: "POST",
 									headers: {
 										Authorization: `Bearer ${key}`,
 										"Content-Type": "application/json",
 									},
-									body: buildWorkerTranslateBody(msg.text!, target),
+									body: buildOpenAIRequestBody(msg.text!, target, model),
 									signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
 								});
 								if (res.ok) {
 									const data = await res.json();
-									const translated = parseWorkerTranslation(data);
+									const translated = parseOpenAITranslation(data);
 									if (translated) {
 										sendResponse({ translated });
 										return;
 									}
-									// success: false 或空译文 → 记录原因并降级谷歌
-									workerError = formatWorkerError(res.status, data, target);
+									// 空译文 → 记录原因并降级备用服务
+									workerError = formatOpenAIError(res.status, data, target);
 								} else {
-									// 非 2xx → 记录原因并降级谷歌
+									// 非 2xx → 记录原因并降级备用服务
 									let data: unknown = null;
 									try {
 										data = await res.json();
 									} catch {
 										// 响应体不是 JSON 时仅用状态码
 									}
-									workerError = formatWorkerError(res.status, data, target);
+									workerError = formatOpenAIError(res.status, data, target);
 								}
 							} catch (error) {
-								// 网络异常/超时 → 记录原因并降级谷歌
-								workerError = formatWorkerFetchError(error, target);
+								// 网络异常/超时 → 记录原因并降级备用服务
+								workerError = formatOpenAIFetchError(error, target);
 							}
 						}
 						// 二级：微软 Edge 内置翻译接口（无认证；参数校验严格，语言码走 BCP-47 映射）
@@ -714,9 +724,9 @@ export default defineBackground(() => {
 					return true;
 				}
 
-				// Worker 健康检查：开关打开时的接口可用性验证
+				// 自建翻译服务健康检查：开关打开时的接口可用性验证（OpenAI 兼容 /v1/models）
 				if (msg?.type === "jt:health") {
-					const key = (msg.deeplKey || "").trim();
+					const key = (msg.translateApiKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					// 健康检查在设置页发起，界面语言可为英文：文案走三语言 messages
 					const m = messages[msg.locale ?? "zh-hans"];
@@ -730,7 +740,7 @@ export default defineBackground(() => {
 							return;
 						}
 						try {
-							const res = await fetch(buildWorkerUrl(baseUrl, "health"), {
+							const res = await fetch(buildOpenAIUrl(baseUrl, "models"), {
 								headers: { Authorization: `Bearer ${key}` },
 								signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
 							});
@@ -750,7 +760,7 @@ export default defineBackground(() => {
 								return;
 							}
 							const data = await res.json();
-							const healthy = parseWorkerHealth(data);
+							const healthy = parseOpenAIHealth(data);
 							sendResponse({
 								ok: healthy,
 								reason: healthy ? "ok" : "abnormal",
@@ -764,33 +774,31 @@ export default defineBackground(() => {
 					return true;
 				}
 
-				// Worker 用量：数据与基数均由接口返回；失败返回 null（界面显示 --/--万）
-				if (msg?.type === "jt:usage") {
-					const key = (msg.deeplKey || "").trim();
+				// 拉取可用模型列表（OpenAI 兼容 /v1/models），用于设置页下拉框
+				if (msg?.type === "jt:models") {
+					const key = (msg.translateApiKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					void (async () => {
 						if (!baseUrl || !key) {
-							sendResponse({ count: null, limit: null });
+							sendResponse({ models: [], error: "incomplete" });
 							return;
 						}
 						try {
-							const res = await fetch(buildWorkerUrl(baseUrl, "usage"), {
+							const res = await fetch(buildOpenAIUrl(baseUrl, "models"), {
 								headers: { Authorization: `Bearer ${key}` },
 								signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
 							});
 							if (!res.ok) {
-								sendResponse({ count: null, limit: null });
+								sendResponse({
+									models: [],
+									error: `HTTP ${res.status}`,
+								});
 								return;
 							}
 							const data = await res.json();
-							const usage = parseWorkerUsage(data);
-							sendResponse(
-								usage
-									? { count: usage.count, limit: usage.limit }
-									: { count: null, limit: null },
-							);
+							sendResponse({ models: parseOpenAIModels(data) });
 						} catch {
-							sendResponse({ count: null, limit: null });
+							sendResponse({ models: [], error: "network" });
 						}
 					})();
 					return true;
@@ -1034,10 +1042,9 @@ export default defineBackground(() => {
 							return;
 						}
 						try {
-							const res = await fetch(
-								`https://javtrailers.com/ja/video/${encodeURIComponent(contentId)}`,
-								{ signal: AbortSignal.timeout(5000) },
-							);
+							const res = await fetch(buildDetailUrl(contentId), {
+								signal: AbortSignal.timeout(5000),
+							});
 							if (!res.ok) {
 								sendResponse({ coverUrl: null, trailerUrl: null });
 								return;
@@ -1267,10 +1274,9 @@ export default defineBackground(() => {
 						javtrailersLookup: async () => {
 							let res: Response;
 							try {
-								res = await fetch(
-									`https://javtrailers.com/ja/search/${encodeURIComponent(code)}`,
-									{ signal: AbortSignal.timeout(5000) },
-								);
+								res =							res = await fetch(buildSearchUrl(code), {
+								signal: AbortSignal.timeout(5000),
+							});
 							} catch (error) {
 								throw {
 									source: "javtrailers",

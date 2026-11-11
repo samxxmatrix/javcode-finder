@@ -33,11 +33,7 @@ import {
 	buildMergedTranslateText,
 	splitMergedTranslation,
 } from "../../../src/lib/translate";
-import { mapWithConcurrency } from "../../../src/lib/concurrency";
-import {
-	PERFORMER_TRANSLATE_CONCURRENCY,
-	buildMetaRow,
-} from "../../../src/lib/preview-meta";
+import { buildMetaRow } from "../../../src/lib/preview-meta";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { toExternalSearchCode } from "../../../src/lib/normalize-code";
 import {
@@ -111,10 +107,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 标题译文（拼装翻译后拆分还原：标题译文 + 介绍译文；失败或英文界面保持 null）
 	const [translatedShort, setTranslatedShort] = useState<string | null>(null);
 	const [translatedLong, setTranslatedLong] = useState<string | null>(null);
-	// 出演者译文映射：原名 → 译文（原名做键，天然去重）。未就绪或失败时回退原名
-	const [performerTranslations, setPerformerTranslations] = useState<
-		Record<string, string>
-	>({});
+	// 出演者姓名属专有名词，始终展示原名，不做逐名翻译
 	// 标题显示就绪：翻译流程结束（成功/失败）或英文界面直接跳过。期间不渲染标题区，避免原文→译文的闪烁
 	const [titleReady, setTitleReady] = useState(false);
 	// 手动重试翻译进行中
@@ -136,8 +129,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		const res = (await browser.runtime.sendMessage({
 			type: "jt:translate",
 			text,
-			target: locale === "zh-hant" ? "zh-TW" : "zh-CN",
-			deeplKey: s.deeplApiKey,
+			target: locale === "en" ? "en" : locale === "zh-hant" ? "zh-TW" : "zh-CN",
+			translateApiKey: s.translateApiKey,
+			translateModel: s.translateModel,
 			translateUrl: s.translateApiUrl,
 			translateEnabled: s.translateEnabled,
 			fallbackService: s.fallbackService,
@@ -274,7 +268,6 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		);
 		setTranslatedShort(null);
 		setTranslatedLong(null);
-		setPerformerTranslations({});
 		setTitleReady(false);
 		setNeedsVerify(false);
 		setRetrying(false);
@@ -325,17 +318,13 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		coverIndexRef.current = 0;
 	}, [initialCoverUrl]);
 
-	// 中文/繁中界面下翻译标题；英文界面不翻译。失败保持 null（回退原文）
-	// 标题与介绍拼装一次发送（标题 <code> 标签保护标记），返回后还原拆分
+	// 三种界面语言都翻译标题：简中→简体中文、繁中→繁体中文、英文→英文（源文为日文）。
+	// 失败保持 null（回退原文）。标题与介绍拼装一次发送（标题 <code> 标签保护标记），返回后还原拆分。
 	useEffect(() => {
 		// 闭包内 property narrowing 不保留，取局部常量
 		const title = media?.title;
 		if (!title) return;
 		const shortTitle = media?.shortTitle;
-		if (locale === "en") {
-			setTitleReady(true);
-			return;
-		}
 		setTitleReady(false);
 		let disposed = false;
 		void (async () => {
@@ -360,33 +349,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		};
 	}, [media?.title, media?.shortTitle, locale]);
 
-	// 出演者逐名翻译：**每个名字单独请求**，才能吃到 Worker 的 KV 缓存（同一出演者跨作品复用）。
-	// 失败静默保留原名 —— 绝不触碰标题那套错误/验证状态（translateErrors / needsVerify / 验证窗）。
-	useEffect(() => {
-		const names = media?.performers ?? [];
-		if (names.length === 0 || locale === "en") return;
-		let disposed = false;
-		void mapWithConcurrency(
-			[...new Set(names)],
-			PERFORMER_TRANSLATE_CONCURRENCY,
-			async (name) => {
-				try {
-					const result = await requestTranslate(name);
-					if (disposed || !result.translated) return;
-					setPerformerTranslations((previous) =>
-						previous[name] === result.translated
-							? previous
-							: { ...previous, [name]: result.translated },
-					);
-				} catch {
-					// 静默：保留原名
-				}
-			},
-		);
-		return () => {
-			disposed = true;
-		};
-	}, [media?.performers, locale]);
+	// 出演者姓名不翻译：浮条直接展示源站原名（见 buildMetaRow）
 
 	// 翻译失败后手动重试（验证窗口关闭后也自动调用）
 	const handleRetryTranslate = async () => {
@@ -413,7 +376,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			const win = await browser.windows.create({
 				url: buildGoogleVerifyUrl(
 					text,
-					locale === "zh-hant" ? "zh-TW" : "zh-CN",
+					locale === "en" ? "en" : locale === "zh-hant" ? "zh-TW" : "zh-CN",
 				),
 				type: "popup",
 				width: 420,
@@ -817,7 +780,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		hasTrailer: Boolean(activeChoice),
 		noticeDismissed,
 	});
-	// 封面底部浮条：左出演者（逐名译文）、右发布日；点播放后随 status 一起消失。
+	// 封面底部浮条：左出演者（原名）、右发布日；点播放后随 status 一起消失。
 	// 注意用"封面层在渲染"而不是"有封面地址"：源站没给封面时（老 caribbeancom 号）
 	// 面板仍渲染封面层（黑底 + 播放按钮），此时出演者/日期照样要显示。
 	const coverLayerVisible =
@@ -826,7 +789,6 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		playbackStatus: status,
 		coverLayerVisible,
 		performers: media?.performers ?? [],
-		translations: performerTranslations,
 		releaseDate: media?.releaseDate ?? null,
 	});
 	const formatLookupError = (error: PreviewLookupError) => {
@@ -878,15 +840,20 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				? [presentation.retryAction.type]
 				: [];
 
-	// 标题文本渲染：连续换行压缩为单个（删除空行），<br> 转成元素换行
-	// （DMM 的介绍文与翻译结果都可能含 <br> 或连续 \n）
+	// 标题文本渲染：统一换行写法后删除所有空行，非空行之间只保留一个换行。
+	// 源站介绍文与译文可能混用 \r\n、<br>/<br/>、连续 \n，甚至「只有空格」的行；
+	// 先全部归一成 \n 再按行过滤，避免 <br><br> 之类漏出空行（CSS 是 pre-wrap，
+	// 残留的 \r 和多余 \n 都会真的渲染成空白行）。只改显示，不动翻译输入。
 	const renderTitleText = (text: string) => {
-		const collapsed = text.replace(/\n+/g, "\n").replace(/^\n+|\n+$/g, "");
-		const parts = collapsed.split(/<br\s*\/?>/i);
-		return parts.map((part, i) => (
+		const lines = text
+			.replace(/\r\n?/g, "\n")
+			.replace(/<br\b[^>]*>/gi, "\n")
+			.split("\n")
+			.filter((line) => line.trim() !== "");
+		return lines.map((line, i) => (
 			<React.Fragment key={i}>
 				{i > 0 && <br />}
-				{part}
+				{line}
 			</React.Fragment>
 		));
 	};
@@ -1091,7 +1058,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 									</svg>
 								</button>
 							) : null}
-							{/* 封面底部浮条：左出演者（逐名译文，空格分隔）、右发布日（贴右）。
+							{/* 封面底部浮条：左出演者（原名，空格分隔）、右发布日（贴右）。
 							    渲染条件由 buildMetaRow 决定：idle + 封面可见 + 至少一侧有数据 */}
 							{meta.show && (
 								<div className="trailer-preview__meta">
@@ -1195,8 +1162,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							{renderTitleText(translatedLong || displayLongTitle || "")}
 						</p>
 					)}
-					{/* 中文/繁中界面翻译失败时显示重试图标（标题/介绍行共用） */}
-					{locale !== "en" && titleReady && !translatedShort && !translatedLong && (
+					{/* 翻译失败时显示重试图标（标题/介绍行共用，三种界面语言均适用） */}
+					{titleReady && !translatedShort && !translatedLong && (
 						<button
 							type="button"
 							className="trailer-preview__translate-retry"

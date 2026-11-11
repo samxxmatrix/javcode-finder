@@ -185,7 +185,7 @@ describe("planDirectMp4Start", () => {
 
 const media: PreviewMedia = {
 	source: "javtrailers",
-	detailUrl: "https://javtrailers.com/video/abc123",
+	detailUrl: "https://javtrailers.com/ja/video/abc123",
 	contentId: "abc123",
 	title: "Trailer title",
 	shortTitle: null,

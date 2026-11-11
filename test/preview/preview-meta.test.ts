@@ -1,17 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-	PERFORMER_TRANSLATE_CONCURRENCY,
-	buildMetaRow,
-} from "../../src/lib/preview-meta";
+import { buildMetaRow } from "../../src/lib/preview-meta";
 
 describe("buildMetaRow", () => {
-	it("封面层在渲染 + idle + 有数据 → 显示，并给出空格连接的两段文本", () => {
+	it("封面层在渲染 + idle + 有数据 → 显示，并给出空格连接的原名文本", () => {
 		expect(
 			buildMetaRow({
 				playbackStatus: "idle",
 				coverLayerVisible: true,
 				performers: ["柏木雫", "吉高寧々"],
-				translations: {},
 				releaseDate: "2026-10-02",
 			}),
 		).toEqual({
@@ -22,23 +18,10 @@ describe("buildMetaRow", () => {
 		});
 	});
 
-	it("译文逐个替换；空白译文回退原名", () => {
-		const row = buildMetaRow({
-			playbackStatus: "idle",
-			coverLayerVisible: true,
-			performers: ["柏木雫", "吉高寧々"],
-			translations: { 柏木雫: "柏木雫（译）", 吉高寧々: "   " },
-			releaseDate: null,
-		});
-		expect(row.performersText).toBe("柏木雫（译） 吉高寧々");
-		expect(row.fullNames).toBe("柏木雫 吉高寧々");
-	});
-
 	it("播放中 / 加载中 / 播放失败 / 封面层不渲染 → 不显示", () => {
 		const base = {
 			coverLayerVisible: true,
 			performers: ["柏木雫"],
-			translations: {},
 			releaseDate: "2026-10-02",
 		} as const;
 		expect(buildMetaRow({ ...base, playbackStatus: "loading" }).show).toBe(false);
@@ -56,7 +39,6 @@ describe("buildMetaRow", () => {
 				playbackStatus: "idle",
 				coverLayerVisible: true,
 				performers: [],
-				translations: {},
 				releaseDate: "2026-10-02",
 			}),
 		).toEqual({
@@ -73,15 +55,8 @@ describe("buildMetaRow", () => {
 				playbackStatus: "idle",
 				coverLayerVisible: true,
 				performers: [],
-				translations: {},
 				releaseDate: null,
 			}).show,
 		).toBe(false);
-	});
-});
-
-describe("PERFORMER_TRANSLATE_CONCURRENCY", () => {
-	it("是 4（保护 Worker：名字多时也不一次放出去）", () => {
-		expect(PERFORMER_TRANSLATE_CONCURRENCY).toBe(4);
 	});
 });

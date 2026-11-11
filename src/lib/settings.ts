@@ -21,10 +21,12 @@ export interface ExtensionSettings {
 	codeExcludeRegex: string;
 	// 预览视频音量（0-100），所有预览播放统一使用
 	previewVolume: number;
-	// DeepL 自建 Worker 翻译（Bearer key 即为 CLIENT_API_KEY）
-	deeplApiKey: string;
-	// Worker 地址（空 = 未配置，直接用谷歌翻译）
+	// 自建翻译服务（OpenAI 兼容）：Bearer Key
+	translateApiKey: string;
+	// 自建翻译服务地址（OpenAI 兼容 base URL，空 = 未配置，直接用谷歌翻译）
 	translateApiUrl: string;
+	// 翻译模型名（OpenAI 兼容 model 字段；空 = 由后端使用默认模型）
+	translateModel: string;
 	// 启用开关：关闭时跳过 Worker，直接走备用翻译服务
 	translateEnabled: boolean;
 	// 备用翻译服务：Worker 失败/未配置时兜底（谷歌或微软 Edge 内置接口）
@@ -67,7 +69,10 @@ export const LOCALE_STORAGE_KEY = "javranking_user_locale";
 
 // 旧版本默认跳转 MissAV；若用户从未自定义过该模板，升级后应改用新默认（空 = 未配置）
 export const LEGACY_MISSAV_TEMPLATE = "https://missav.ws/cn/{code}";
-// 旧版本默认跳转 JavTrailers 搜索页
+// 旧版本默认跳转 JavTrailers 搜索页（**英文版历史值**）。
+// 这是迁移判定值，不是当前站点地址：改成 /ja/ 会让老用户存下的旧默认值
+// 被误判为「用户自定义过」，反而把英文链接永久保留下来。当前基础链接见
+// javtrailers.ts 的 JAVTRAILERS_BASE_URL。
 export const LEGACY_JAVTRAILERS_TEMPLATE = "https://javtrailers.com/search/{code}";
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
@@ -82,8 +87,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	customRegex: DEFAULT_CODE_REGEX,
 	codeExcludeRegex: "",
 	previewVolume: 100,
-	deeplApiKey: "",
+	translateApiKey: "",
 	translateApiUrl: "",
+	translateModel: "",
 	translateEnabled: false,
 	fallbackService: "google",
 	webdavUrl: "",
@@ -251,8 +257,17 @@ export function normalizeSettings(parsed: unknown): ExtensionSettings {
 			typeof data.customTemplate === "string"
 				? data.customTemplate.trim()
 				: "",
-		deeplApiKey:
-			typeof data.deeplApiKey === "string" ? data.deeplApiKey.trim() : "",
+		// 旧字段名迁移（DeepL 时期）：新键优先，缺失时回退读旧键 deeplApiKey
+		translateApiKey:
+			typeof data.translateApiKey === "string" && data.translateApiKey.trim()
+				? data.translateApiKey.trim()
+				: typeof data.deeplApiKey === "string"
+					? data.deeplApiKey.trim()
+					: "",
+		translateModel:
+			typeof data.translateModel === "string"
+				? data.translateModel.trim()
+				: "",
 		translateApiUrl:
 			typeof data.translateApiUrl === "string"
 				? data.translateApiUrl.trim()
@@ -376,10 +391,14 @@ export function saveSettings(
 				settings.customTemplate !== undefined
 					? settings.customTemplate.trim()
 					: current.customTemplate,
-			deeplApiKey:
-				settings.deeplApiKey !== undefined
-					? settings.deeplApiKey.trim()
-					: current.deeplApiKey,
+			translateApiKey:
+				settings.translateApiKey !== undefined
+					? settings.translateApiKey.trim()
+					: current.translateApiKey,
+			translateModel:
+				settings.translateModel !== undefined
+					? settings.translateModel.trim()
+					: current.translateModel,
 			translateApiUrl:
 				settings.translateApiUrl !== undefined
 					? settings.translateApiUrl.trim()
@@ -606,7 +625,8 @@ export function configSignature(settings: ExtensionSettings): string {
 		trim(settings.customName),
 		trim(settings.customTemplate),
 		settings.previewVolume,
-		trim(settings.deeplApiKey),
+		trim(settings.translateApiKey),
+		trim(settings.translateModel),
 		trim(settings.translateApiUrl),
 		settings.translateEnabled,
 		settings.fallbackService,

@@ -6,125 +6,215 @@ import {
 	buildGooglePostUrl,
 	buildGoogleVerifyUrl,
 	buildMergedTranslateText,
-	buildWorkerTranslateBody,
-	buildWorkerUrl,
-	formatUsage,
-	shouldShowUsage,
-	formatWorkerError,
-	formatWorkerFetchError,
+	buildOpenAIRequestBody,
+	buildOpenAIUrl,
 	formatBingError,
 	formatBingFetchError,
 	formatGoogleError,
 	formatGoogleFetchError,
 	formatFetchErrorMessage,
+	formatOpenAIError,
+	formatOpenAIFetchError,
 	parseBingResponse,
 	parseGoogleResponse,
-	parseWorkerHealth,
-	parseWorkerTranslation,
-	parseWorkerUsage,
+	parseOpenAIHealth,
+	parseOpenAIModels,
+	parseOpenAITranslation,
 	splitMergedTranslation,
 	targetToBingLang,
 } from "../src/lib/translate";
 
-describe("buildWorkerUrl", () => {
-	it("joins base URL with path, normalizing trailing slash", () => {
-		expect(buildWorkerUrl("https://translate.example.com/", "translate")).toBe(
-			"https://translate.example.com/translate",
+describe("buildOpenAIUrl", () => {
+	it("joins base URL with /v1/chat/completions, normalizing trailing slash", () => {
+		expect(buildOpenAIUrl("https://api.example.com/", "chat")).toBe(
+			"https://api.example.com/v1/chat/completions",
 		);
-		expect(buildWorkerUrl("https://translate.example.com", "health")).toBe(
-			"https://translate.example.com/health",
+		expect(buildOpenAIUrl("https://api.example.com", "chat")).toBe(
+			"https://api.example.com/v1/chat/completions",
+		);
+	});
+
+	it("joins base URL with /v1/models for the health/models endpoint", () => {
+		expect(buildOpenAIUrl("https://api.example.com/", "models")).toBe(
+			"https://api.example.com/v1/models",
+		);
+	});
+
+	it("does not duplicate /v1 when the base already ends with it", () => {
+		expect(buildOpenAIUrl("http://localhost:11434/v1", "chat")).toBe(
+			"http://localhost:11434/v1/chat/completions",
+		);
+		expect(buildOpenAIUrl("https://api.example.com/v1/", "models")).toBe(
+			"https://api.example.com/v1/models",
+		);
+		expect(buildOpenAIUrl("https://api.example.com/V1", "chat")).toBe(
+			"https://api.example.com/V1/chat/completions",
+		);
+	});
+
+	it("still appends /v1 when it only appears as a path segment earlier", () => {
+		expect(buildOpenAIUrl("https://api.example.com/v1beta", "chat")).toBe(
+			"https://api.example.com/v1beta/v1/chat/completions",
 		);
 	});
 });
 
-describe("buildWorkerTranslateBody", () => {
-	it("uses ZH target for simplified Chinese", () => {
-		const body = JSON.parse(buildWorkerTranslateBody("Hello world", "zh-CN"));
-		expect(body).toEqual({ text: "Hello world", target_lang: "ZH" });
+describe("buildOpenAIRequestBody", () => {
+	it("includes the model when provided, with temperature 0 and system+user messages", () => {
+		const body = JSON.parse(
+			buildOpenAIRequestBody("<code>短标题</code>\n长标题", "zh-CN", "gpt-4o-mini"),
+		);
+		expect(body.model).toBe("gpt-4o-mini");
+		expect(body.temperature).toBe(0);
+		expect(body.messages).toHaveLength(2);
+		expect(body.messages[0].role).toBe("system");
+		expect(body.messages[1].role).toBe("user");
+		expect(body.messages[1].content).toBe("<code>短标题</code>\n长标题");
 	});
 
-	it("uses ZH-HANT target for traditional Chinese", () => {
-		const body = JSON.parse(buildWorkerTranslateBody("Hello world", "zh-TW"));
-		expect(body).toEqual({ text: "Hello world", target_lang: "ZH-HANT" });
+	it("omits the model field when empty (backend default)", () => {
+		const body = JSON.parse(buildOpenAIRequestBody("text", "zh-CN", ""));
+		expect(body.model).toBeUndefined();
+		expect(body.temperature).toBe(0);
+	});
+
+	it("uses a Simplified-Chinese system prompt for zh-CN", () => {
+		const body = JSON.parse(buildOpenAIRequestBody("x", "zh-CN", "m"));
+		expect(body.messages[0].content).toContain("简体");
+	});
+
+	it("uses a Traditional-Chinese system prompt for zh-TW", () => {
+		const body = JSON.parse(buildOpenAIRequestBody("x", "zh-TW", "m"));
+		expect(body.messages[0].content).toContain("繁體");
+	});
+
+	it("uses an English system prompt for en", () => {
+		const body = JSON.parse(buildOpenAIRequestBody("x", "en", "m"));
+		expect(body.messages[0].content).toContain("English");
 	});
 });
 
-describe("parseWorkerTranslation", () => {
-	it("extracts the translated text", () => {
+describe("translation system prompt (OpenAI mode)", () => {
+	// 三语提示词必须锁定同一套 <code> 拆分契约，任一语言漏规则都会导致标题串进介绍
+	const prompts = (["zh-CN", "zh-TW", "en"] as const).map(
+		(target) =>
+			JSON.parse(buildOpenAIRequestBody("x", target, "m")).messages[0]
+				.content as string,
+	);
+
+	it("locks the <code> contract in every locale", () => {
+		for (const p of prompts) {
+			expect(p).toContain("<code>");
+			expect(p).toContain("</code>");
+			expect(p).toMatch(/必须翻译|必須翻譯|NOT code/);
+			expect(p).toMatch(/不得移动|不得移動|Do not move/);
+		}
+	});
+
+	it("forbids translation prefixes and extra commentary in every locale", () => {
+		for (const p of prompts) {
+			expect(p).toContain("Here's the translation:");
+			expect(p).toMatch(/只输出译文|只輸出譯文|Output only the translation/);
+		}
+	});
+
+	it("keeps the newline contract without introducing %% separators", () => {
+		for (const p of prompts) {
+			expect(p).not.toContain("%%");
+			expect(p).toMatch(/换行|換行|newline/);
+		}
+	});
+
+	it("keeps performer names untranslated in every locale", () => {
+		for (const p of prompts) {
+			expect(p).toMatch(
+				/出演者姓名|出演者／女優姓名|Never translate a person's name/,
+			);
+		}
+	});
+});
+
+describe("parseOpenAITranslation", () => {
+	it("extracts content from the first choice message", () => {
 		expect(
-			parseWorkerTranslation({
-				success: true,
-				translation: "你好世界",
+			parseOpenAITranslation({
+				choices: [{ message: { role: "assistant", content: "你好世界" } }],
 			}),
 		).toBe("你好世界");
 	});
 
 	it("keeps the code tag marker unchanged", () => {
 		expect(
-			parseWorkerTranslation({
-				success: true,
-				translation: "<code>短标题译文</code>\n长标题译文",
+			parseOpenAITranslation({
+				choices: [
+					{ message: { role: "assistant", content: "<code>短标题译文</code>\n长标题译文" } },
+				],
 			}),
 		).toBe("<code>短标题译文</code>\n长标题译文");
 	});
 
-	it("returns empty string for malformed or failed responses", () => {
-		expect(parseWorkerTranslation(null)).toBe("");
-		expect(parseWorkerTranslation({})).toBe("");
-		expect(parseWorkerTranslation({ success: true })).toBe("");
-		expect(parseWorkerTranslation({ success: false, translation: "x" })).toBe("");
-	});
-});
-
-describe("parseWorkerHealth", () => {
-	it("returns true only for success with ok status", () => {
-		expect(parseWorkerHealth({ success: true, status: "ok" })).toBe(true);
-		expect(parseWorkerHealth({ success: false })).toBe(false);
-		expect(parseWorkerHealth(null)).toBe(false);
-		expect(parseWorkerHealth({})).toBe(false);
-	});
-});
-
-describe("formatWorkerError", () => {
-	it("formats error code and message from the response body", () => {
+	it("returns empty string for malformed or missing content", () => {
+		expect(parseOpenAITranslation(null)).toBe("");
+		expect(parseOpenAITranslation({})).toBe("");
+		expect(parseOpenAITranslation({ choices: [] })).toBe("");
 		expect(
-			formatWorkerError(
+			parseOpenAITranslation({ choices: [{ message: { role: "assistant" } }] }),
+		).toBe("");
+	});
+});
+
+describe("parseOpenAIHealth", () => {
+	it("returns true for an OpenAI models list shape", () => {
+		expect(parseOpenAIHealth({ object: "list", data: [] })).toBe(true);
+		expect(parseOpenAIHealth({ data: [{ id: "a" }] })).toBe(true);
+	});
+
+	it("returns false for non-list shapes", () => {
+		expect(parseOpenAIHealth({})).toBe(false);
+		expect(parseOpenAIHealth(null)).toBe(false);
+		expect(parseOpenAIHealth({ object: "error" })).toBe(false);
+	});
+});
+
+describe("parseOpenAIModels", () => {
+	it("extracts ids from the data array", () => {
+		expect(
+			parseOpenAIModels({ object: "list", data: [{ id: "gpt-4o" }, { id: "gpt-4o-mini" }] }),
+		).toEqual(["gpt-4o", "gpt-4o-mini"]);
+	});
+
+	it("returns an empty array when data is missing or not an array", () => {
+		expect(parseOpenAIModels({})).toEqual([]);
+		expect(parseOpenAIModels(null)).toEqual([]);
+		expect(parseOpenAIModels({ data: [{ foo: "bar" }] })).toEqual([]);
+	});
+});
+
+describe("formatOpenAIError", () => {
+	it("prefers the response error.message", () => {
+		expect(
+			formatOpenAIError(
 				401,
-				{
-					success: false,
-					code: "AUTH_INVALID",
-					error: "访问密钥无效",
-				},
+				{ error: { message: "Invalid API key" } },
 				"zh-CN",
 			),
-		).toBe("翻译服务错误 [AUTH_INVALID]：访问密钥无效");
-		expect(
-			formatWorkerError(
-				413,
-				{
-					success: false,
-					code: "INPUT_TOO_LONG",
-					error: "输入文本过长",
-				},
-				"zh-CN",
-			),
-		).toBe("翻译服务错误 [INPUT_TOO_LONG]：输入文本过长");
+		).toBe("翻译服务错误：Invalid API key");
 	});
 
-	it("falls back to HTTP status when body has no error message", () => {
-		expect(formatWorkerError(502, null, "zh-CN")).toBe("翻译服务错误：HTTP 502");
-		expect(formatWorkerError(500, {}, "zh-CN")).toBe("翻译服务错误：HTTP 500");
-	});
-
-	it("keeps the code when error message is missing", () => {
-		expect(
-			formatWorkerError(200, { success: false, code: "EMPTY_TEXT" }, "zh-CN"),
-		).toBe("翻译服务错误 [EMPTY_TEXT]：HTTP 200");
+	it("falls back to HTTP status when no message", () => {
+		expect(formatOpenAIError(502, null, "zh-CN")).toBe("翻译服务错误：HTTP 502");
+		expect(formatOpenAIError(500, {}, "zh-CN")).toBe("翻译服务错误：HTTP 500");
 	});
 
 	it("uses traditional Chinese phrases for zh-TW", () => {
-		expect(formatWorkerError(500, {}, "zh-TW")).toBe("翻譯服務錯誤：HTTP 500");
-		expect(formatWorkerError(0, null, "zh-TW")).toBe("翻譯服務錯誤：未知錯誤");
+		expect(formatOpenAIError(500, {}, "zh-TW")).toBe("翻譯服務錯誤：HTTP 500");
+		expect(formatOpenAIError(0, null, "zh-TW")).toBe("翻譯服務錯誤：未知錯誤");
+	});
+
+	it("uses English phrases for en", () => {
+		expect(
+			formatOpenAIError(0, null, "en"),
+		).toBe("Translation service error：Unknown error");
 	});
 });
 
@@ -200,76 +290,6 @@ describe("splitMergedTranslation", () => {
 	});
 });
 
-describe("parseWorkerUsage", () => {	it("extracts count and limit from the wrapped usage object", () => {
-		expect(
-			parseWorkerUsage({
-				success: true,
-				usage: { character_count: 4239, character_limit: 1000000 },
-			}),
-		).toEqual({ count: 4239, limit: 1000000 });
-	});
-
-	it("returns null for malformed responses", () => {
-		expect(parseWorkerUsage(null)).toBeNull();
-		expect(parseWorkerUsage({})).toBeNull();
-		expect(parseWorkerUsage({ success: true })).toBeNull();
-		expect(
-			parseWorkerUsage({
-				success: true,
-				usage: { character_count: "4239", character_limit: 1000000 },
-			}),
-		).toBeNull();
-		expect(
-			parseWorkerUsage({
-				success: true,
-				usage: { character_count: -1, character_limit: 1000000 },
-			}),
-		).toBeNull();
-	});
-});
-
-describe("formatUsage", () => {
-	it("formats count and limit in ten-thousands with interface-provided base", () => {
-		expect(formatUsage(4239, 1000000)).toBe("0.4239/100万");
-		expect(formatUsage(0, 1000000)).toBe("0.0000/100万");
-		expect(formatUsage(1000000, 1000000)).toBe("100.0000/100万");
-	});
-
-	it("returns --/--万 when count or limit is missing", () => {
-		expect(formatUsage(null, 1000000)).toBe("--/--万");
-		expect(formatUsage(4239, null)).toBe("--/--万");
-		expect(formatUsage(null, null)).toBe("--/--万");
-	});
-});
-
-describe("shouldShowUsage", () => {
-	it("hidden when disabled even with data", () => {
-		expect(shouldShowUsage(false, { count: 1, limit: 2 })).toBe(false);
-	});
-
-	it("hidden when enabled but usage not fetched", () => {
-		expect(shouldShowUsage(true, { count: null, limit: null })).toBe(false);
-	});
-
-	it("visible when enabled and usage fetched", () => {
-		expect(shouldShowUsage(true, { count: 1, limit: 2 })).toBe(true);
-	});
-});
-
-describe("formatUsage i18n unit", () => {
-	it("uses 万 for zh-hans (default)", () => {
-		expect(formatUsage(4239, 1000000, "zh-hans")).toBe("0.4239/100万");
-	});
-
-	it("uses 萬 for zh-hant", () => {
-		expect(formatUsage(4239, 1000000, "zh-hant")).toBe("0.4239/100萬");
-	});
-
-	it("uses M (millions) for en", () => {
-		expect(formatUsage(4239000, 1000000, "en")).toBe("4.24M/1M");
-	});
-});
-
 describe("buildGooglePostUrl", () => {
 	it("builds the gtx POST URL without the q parameter", () => {
 		const url = buildGooglePostUrl("zh-CN");
@@ -283,6 +303,10 @@ describe("buildGooglePostUrl", () => {
 
 	it("uses zh-TW for traditional Chinese", () => {
 		expect(buildGooglePostUrl("zh-TW")).toContain("tl=zh-TW");
+	});
+
+	it("uses en for the English target", () => {
+		expect(buildGooglePostUrl("en")).toContain("tl=en");
 	});
 });
 
@@ -338,6 +362,10 @@ describe("targetToBingLang", () => {
 	it("maps zh-TW to zh-Hant", () => {
 		expect(targetToBingLang("zh-TW")).toBe("zh-Hant");
 	});
+
+	it("maps en to en", () => {
+		expect(targetToBingLang("en")).toBe("en");
+	});
 });
 
 describe("buildBingUrl", () => {
@@ -351,6 +379,10 @@ describe("buildBingUrl", () => {
 
 	it("uses zh-Hant for traditional Chinese", () => {
 		expect(buildBingUrl("zh-TW")).toContain("to=zh-Hant");
+	});
+
+	it("uses en for the English target", () => {
+		expect(buildBingUrl("en")).toContain("to=en");
 	});
 });
 
@@ -444,16 +476,19 @@ describe("formatGoogleFetchError", () => {
 	});
 });
 
-describe("formatWorkerFetchError", () => {
+describe("formatOpenAIFetchError", () => {
 	it("uses service prefix with localized failure phrase", () => {
 		const timeout = new Error("timeout");
 		timeout.name = "TimeoutError";
-		expect(formatWorkerFetchError(timeout, "zh-CN")).toBe("翻译服务错误：请求超时");
-		expect(formatWorkerFetchError(new Error("Failed to fetch"), "zh-CN")).toBe(
+		expect(formatOpenAIFetchError(timeout, "zh-CN")).toBe("翻译服务错误：请求超时");
+		expect(formatOpenAIFetchError(new Error("Failed to fetch"), "zh-CN")).toBe(
 			"翻译服务错误：网络连接失败",
 		);
-		expect(formatWorkerFetchError(new Error("Failed to fetch"), "zh-TW")).toBe(
+		expect(formatOpenAIFetchError(new Error("Failed to fetch"), "zh-TW")).toBe(
 			"翻譯服務錯誤：網路連線失敗",
+		);
+		expect(formatOpenAIFetchError(new Error("Failed to fetch"), "en")).toBe(
+			"Translation service error：Network connection failed",
 		);
 	});
 });
@@ -468,6 +503,9 @@ describe("formatFetchErrorMessage", () => {
 		);
 		expect(formatFetchErrorMessage(new Error("Failed to fetch"), "zh-TW")).toBe(
 			"網路連線失敗",
+		);
+		expect(formatFetchErrorMessage(new Error("Failed to fetch"), "en")).toBe(
+			"Network connection failed",
 		);
 	});
 });

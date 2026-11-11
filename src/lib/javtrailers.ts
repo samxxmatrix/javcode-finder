@@ -1,16 +1,43 @@
 import { toComparisonKey } from "./normalize-code";
 import { pickReleaseDate, toPerformers } from "./release-meta";
 
+/**
+ * JavTrailers 站点基础链接（**日语版**）。所有主域请求（搜索页 / 详情页）一律由它派生，
+ * 不要再散落硬编码：不带 /ja 的英文版会返回英文标题与英文元数据。
+ * 注意 CDN 子域（images / media.javtrailers.com）是独立的资产域名，不走这个前缀。
+ */
+export const JAVTRAILERS_BASE_URL = "https://javtrailers.com/ja";
+
+/** 搜索页：日语版 /ja/search/{code} */
+export function buildSearchUrl(code: string): string {
+	return `${JAVTRAILERS_BASE_URL}/search/${encodeURIComponent(code)}`;
+}
+
+/** 详情页：日语版 /ja/video/{contentId} */
+export function buildDetailUrl(contentId: string): string {
+	return `${JAVTRAILERS_BASE_URL}/video/${encodeURIComponent(contentId)}`;
+}
+
 export interface SearchPageResolution {
 	detailUrl: string;
 	contentId: string;
-	// 影片完整标题（来自卡片 a 标签的 title 属性），无标题时为 null
+	// 影片标题（优先日语卡片正文 vid-title；取不到才回退 a 标签的英文 title），无标题时为 null
 	title: string | null;
 }
 
-/** 解码 SSR HTML 属性中常见的 HTML 实体 */
+/** 解码 SSR HTML 属性/正文里常见的 HTML 实体（含十进制与十六进制数字实体） */
 function decodeHtmlEntities(text: string): string {
+	const fromCodePoint = (
+		match: string,
+		digits: string,
+		radix: number,
+	): string => {
+		const code = Number.parseInt(digits, radix);
+		return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+	};
 	return text
+		.replace(/&#(\d+);/g, (m, d: string) => fromCodePoint(m, d, 10))
+		.replace(/&#x([0-9a-f]+);/gi, (m, d: string) => fromCodePoint(m, d, 16))
 		.replace(/&amp;/g, "&")
 		.replace(/&#39;|&apos;/g, "'")
 		.replace(/&quot;/g, '"')
@@ -19,12 +46,50 @@ function decodeHtmlEntities(text: string): string {
 }
 
 /**
+ * vid-title 形如 `DLDSS-529 電撃移籍 DAHLIA …`：开头番号只用于定位作品，不是标题的一部分。
+ * 仅当开头 token 与卡片 alt 番号一致时才剥掉，避免误删以英数字开头的正常标题。
+ */
+function stripLeadingCode(text: string, altCode: string): string {
+	const match = /^([A-Za-z0-9][A-Za-z0-9_-]*)\s+/.exec(text);
+	if (!match || toComparisonKey(match[1]) !== toComparisonKey(altCode)) {
+		return text;
+	}
+	return text.slice(match[0].length).trim() || text;
+}
+
+/**
+ * 第一张卡片的标题有两个来源，优先级不可颠倒（2026-11-11 线上实测）：
+ * 1. `<p class="card-text title mb-0 vid-title">`：日语版搜索页给**日文原文**
+ *    （`/ja/search/DLDSS-529` → `DLDSS-529 電撃移籍 DAHLIA …`；英文版同一位置是英文）。
+ * 2. `<a title="…">`：站点所有语言共用的一份**英文**标题，仅在 vid-title 缺失时兜底。
+ * 此前只取 a 标签，导致 JT 源标题恒为英文，英文界面还会「把英文翻成英文」。
+ */
+function readCardTitle(cardHtml: string, altCode: string): string | null {
+	const cardTitle = cardHtml.match(
+		/<p[^>]*class="[^"]*vid-title[^"]*"[^>]*>([\s\S]*?)<\/p>/i,
+	);
+	if (cardTitle) {
+		const text = decodeHtmlEntities(
+			(cardTitle[1] ?? "").replace(/<[^>]+>/g, " "),
+		)
+			.replace(/\s+/g, " ")
+			.trim();
+		if (text) return stripLeadingCode(text, altCode);
+	}
+	const anchorTitle = cardHtml.match(
+		/href="(?:\/ja)?\/video\/[a-zA-Z0-9_-]+"[^>]*title="([^"]*)"/,
+	);
+	return anchorTitle ? decodeHtmlEntities(anchorTitle[1]!) : null;
+}
+
+/**
  * 解析 javtrailers 搜索页 HTML，确认第一张结果卡片是否精确匹配目标番号。
  * 命中时返回其详情页 URL、Content ID（javtrailers 的完整番号格式，含前缀与补零，
  * 如 1dldss00547）与影片标题，否则返回 null（调用方回退到搜索页）。
  *
  * 搜索页为 SSR，卡片结构（已实测验证）：
- * <div class="card-container"><a href="/video/{contentId}" title="{标题}">...<img alt="{番号} jav">
+ * <div class="card-container"><a href="/ja/video/{contentId}" title="{英文标题}">…<img alt="{番号} jav">
+ *   <p class="card-text title mb-0 vid-title">{番号} {日文标题}</p></a></div>
  */
 export function parseSearchPageHtml(
 	html: string,
@@ -48,21 +113,15 @@ export function parseSearchPageHtml(
 	if (!hrefMatch || !altMatch) return null;
 
 	// alt 形如 "DLDSS-529 jav"：提取空格前的番号 token 与目标比对
-	const altCode = altMatch[1]!.split(/\s+/)[0];
+	const altCode = altMatch[1]!.split(/\s+/)[0] ?? "";
 	const altKey = toComparisonKey(altCode);
 	if (!altKey || !altKey.includes(targetKey)) return null;
 
-	// a 标签的 title 属性即影片完整标题（不含番号前缀）；日语站同样是英文标题，口径不变
-	const titleMatch = firstCard.match(
-		/href="(?:\/ja)?\/video\/[a-zA-Z0-9_-]+"[^>]*title="([^"]*)"/,
-	);
-	const title = titleMatch ? decodeHtmlEntities(titleMatch[1]!) : null;
-
 	const contentId = hrefMatch[1]!.toLowerCase();
 	return {
-		detailUrl: `https://javtrailers.com/ja/video/${contentId}`,
+		detailUrl: buildDetailUrl(contentId),
 		contentId,
-		title,
+		title: readCardTitle(firstCard, altCode),
 	};
 }
 

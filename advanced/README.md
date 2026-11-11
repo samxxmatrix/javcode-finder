@@ -17,7 +17,7 @@ advanced/
 
 `adaptive-proxy.js` 是可选的入口层：当 `*.vercel.app` 直连不理想时，用它套一层自有域名。
 
-> 原 `deepl-translate-api/`（DeepL 翻译 Worker）已于 2026-11-05 归档并从仓库移除：DeepL 停止开放免费 API 账号注册，该方案失去低成本前提。已有部署可继续使用，扩展的翻译功能则默认走谷歌 / 微软公开翻译接口，不依赖任何后端。
+> 原 `deepl-translate-api/`（DeepL 翻译 Worker）已于 2026-11-05 归档并从仓库移除：DeepL 停止开放免费 API 账号注册，该方案失去低成本前提。扩展侧自建翻译已改为对接任意 **OpenAI 兼容**服务（`POST /v1/chat/completions` + `GET /v1/models`），不再兼容原 Worker 的私有 `/translate`、`/usage` 接口；不配置时默认走谷歌 / 微软公开翻译接口，不依赖任何后端。
 
 ## 部署 javcode-api 的两个前提
 

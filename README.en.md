@@ -6,7 +6,7 @@ JavCode Finder scans the current page for video codes when you click the toolbar
 
 - **Code scanning**: pulls every code on the page in one pass and de-duplicates them. Handles censored codes (`IPX-118`, `DLDSS-529`), uncensored codes, and all `FC2-*` spellings. Both the recognition regex and a **code blocklist regex** are editable in settings
 - **Cover & trailer preview**: clicking a code loads its cover, title and description, performers, and release date on demand, with inline trailer playback
-- **Title & performer translation**: in Chinese UI the Japanese title and performer names are translated automatically. Public translation endpoints (Google / Microsoft, switchable in settings) are used by default; a self-hosted translation service can be configured for reliability
+- **Title & performer translation**: the Japanese title and performer names are translated into the UI language (Simplified Chinese, Traditional Chinese, or English). Public translation endpoints (Google / Microsoft, switchable in settings) are used by default; any OpenAI-compatible AI service can also be configured
 - **Page locate**: find and highlight where the code appears on the current page; repeated clicks cycle through multiple occurrences
 - **Favorites**: bookmark the codes you care about; stored locally by default, with cloud sync available in settings
 - **Cloud sync**: with it enabled, your favorite codes and settings sync to the cloud (your own WebDAV space) and are shared across devices
@@ -55,7 +55,7 @@ The extension **works without any backend**: code scanning, highlighting, librar
 
 `advanced/` also contains `adaptive-proxy.js` (an optional edge layer that puts your own domain in front of `*.vercel.app`); see [`advanced/README.md`](advanced/README.md) for the full list.
 
-> Translation needs no backend. The translation API URL / key in settings only connects to an existing self-hosted translation service; the DeepL worker this project used to ship (`deepl-translate-api`) is archived and no longer maintained, because DeepL has stopped issuing free API accounts. Existing deployments keep working, but the source and deployment guide are no longer part of this repository.
+> Translation needs no dedicated backend. The translation API URL / key / model fields in settings connect to any **OpenAI-compatible** service (a self-hosted proxy, OpenAI's official API, or a local model): enter the Base URL (e.g. `https://api.openai.com` or your own) and API key, then pick a model from the `/v1/models` dropdown or type one in. Enabling the switch first calls `GET /v1/models` to validate reachability and the key. Translations use `POST /v1/chat/completions`, with the translation prompt added automatically by the extension. There is no character quota in AI mode, so no usage figures are shown. The old DeepL worker (`deepl-translate-api`) is archived; its private `/translate` and `/usage` endpoints are no longer supported.
 
 Note: deploying means fetching public pages under your own account, so check compliance and platform terms yourself. Covers and trailers returned by the backend are **direct origin URLs**, so "lookup succeeded" does not mean "the image loads" — if the client's network cannot reach the Japanese origin, images and video will still fail, which is unrelated to the lookup API.
 

@@ -34,9 +34,15 @@ export interface LocaleMessages {
 	nextPage: string;
 	settingsTitle: string;
 	settingsDesc: string;
-	platformNameLabel: string;
-	platformUrlLabel: (name: string) => string;
-	customPlatformName: string;
+	/** 平台组内名称字段的短标签 */
+	platformFieldNameLabel: string;
+	/** 平台组内链接规则字段的短标签 */
+	platformFieldUrlLabel: string;
+	/** 名称为空时的组标题占位（按固定槽位编号） */
+	platformGroupFallback: (index: number) => string;
+	/** 组头配置状态：与 configuredPlatforms 的判据一致 */
+	platformConfigured: string;
+	platformNotConfigured: string;
 	clearInput: string;
 	closeError: string;
 	translateUrlLabel: string;
@@ -103,7 +109,12 @@ export interface LocaleMessages {
 	retryTranslate: string;
 	googleVerifyHint: string;
 	openVerifyPage: string;
-	deeplApiKeyLabel: string;
+	translateApiKeyLabel: string;
+	translateModelLabel: string;
+	translateModelPlaceholder: string;
+	translateModelsRefresh: string;
+	translateModelsLoading: string;
+	translateModelsEmpty: string;
 	fallbackServiceLabel: string;
 	fallbackGoogle: string;
 	fallbackBing: string;
@@ -198,15 +209,10 @@ export interface LocaleMessages {
 	statusConfiguredOff: string;
 	statusNotConfigured: string;
 	configuredCount: (count: number, total: number) => string;
-	platformCount: (count: number) => string;
 	platformRulesLabel: string;
 	basicTranslateDesc: string;
 	translatePriorityDesc: string;
 	translateServiceLabel: string;
-	/** 自建翻译服务不可达（网络/5xx）时的用量区提示 */
-	translateServiceOffline: string;
-	/** 用量/健康刷新进行中的提示 */
-	translateUsageLoading: string;
 	resetDefaultsDesc: string;
 	resetConfirm: string;
 }
@@ -238,9 +244,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsTitle: "搜索与跳转设置",
     settingsDesc:
       "自定义外部平台跳转规则，支持 {code} 或 {番号} 占位符。示例效果预览 (以 ABP-123 为例)：https://example.com/search?q=ABP-123。链接规则填写：https://example.com/search?q={code}",
-    platformNameLabel: "平台名称",
-    platformUrlLabel: (name) => `${name} 链接规则`,
-    customPlatformName: "自定义平台",
+    platformFieldNameLabel: "名称",
+    platformFieldUrlLabel: "链接",
+    platformGroupFallback: (n) => `平台 ${n}`,
+    platformConfigured: "已配置",
+    platformNotConfigured: "未配置",
     clearInput: "清除内容",
     closeError: "关闭",
     translateUrlLabel: "翻译 API 地址",
@@ -305,7 +313,12 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retryTranslate: "重新翻译",
     googleVerifyHint: "谷歌翻译需要人工验证",
     openVerifyPage: "打开验证页面",
-    deeplApiKeyLabel: "翻译 API Key",
+    translateApiKeyLabel: "翻译 API Key",
+    translateModelLabel: "模型",
+    translateModelPlaceholder: "留空用后端默认模型",
+    translateModelsRefresh: "获取模型",
+    translateModelsLoading: "加载模型中…",
+    translateModelsEmpty: "未获取到模型列表，可手动输入",
     fallbackServiceLabel: "备用翻译服务",
     fallbackGoogle: "谷歌翻译",
     fallbackBing: "微软翻译",
@@ -411,13 +424,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     statusConfiguredOff: "未启用",
     statusNotConfigured: "未配置",
     configuredCount: (count, total) => `已配置 ${count}/${total}`,
-    platformCount: (count) => `${count} 个平台`,
     platformRulesLabel: "平台跳转规则",
     basicTranslateDesc: "进阶设置里的翻译服务未启用或不可用时，自动使用这里选择的备用翻译服务。",
-    translatePriorityDesc: "启用后优先使用自建翻译服务；未启用或验证失败时自动降级到基础设置里的备用翻译。",
-    translateServiceLabel: "自建翻译服务",
-    translateServiceOffline: "服务离线",
-    translateUsageLoading: "加载中…",
+    translatePriorityDesc: "启用后优先使用 OpenAI 兼容的 AI 翻译服务；未启用或调用失败时自动降级到基础设置里的备用翻译。",
+    translateServiceLabel: "AI 翻译服务",
     resetDefaultsDesc: "清除全部配置并恢复出厂设置，此操作不可撤销。",
     resetConfirm: "确定要恢复默认设置吗？所有配置（含 API 地址与密钥）都会被清除。",
   },
@@ -448,9 +458,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     settingsTitle: "搜尋與跳轉設定",
     settingsDesc:
       "自訂外部平台跳轉規則，支援 {code} 或 {番号} 佔位符。範例效果預覽 (以 ABP-123 為例)：https://example.com/search?q=ABP-123。連結規則填寫：https://example.com/search?q={code}",
-    platformNameLabel: "平台名稱",
-    platformUrlLabel: (name) => `${name} 連結規則`,
-    customPlatformName: "自訂平台",
+    platformFieldNameLabel: "名稱",
+    platformFieldUrlLabel: "連結",
+    platformGroupFallback: (n) => `平台 ${n}`,
+    platformConfigured: "已設定",
+    platformNotConfigured: "未設定",
     clearInput: "清除內容",
     closeError: "關閉",
     translateUrlLabel: "翻譯 API 位址",
@@ -516,7 +528,12 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retryTranslate: "重新翻譯",
     googleVerifyHint: "谷歌翻譯需要人工驗證",
     openVerifyPage: "開啟驗證頁面",
-    deeplApiKeyLabel: "翻譯 API Key",
+    translateApiKeyLabel: "翻譯 API Key",
+    translateModelLabel: "模型",
+    translateModelPlaceholder: "留空用後端預設模型",
+    translateModelsRefresh: "取得模型",
+    translateModelsLoading: "載入模型中…",
+    translateModelsEmpty: "未獲取到模型清單，可手動輸入",
     fallbackServiceLabel: "備用翻譯服務",
     fallbackGoogle: "谷歌翻譯",
     fallbackBing: "微軟翻譯",
@@ -622,13 +639,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     statusConfiguredOff: "未啟用",
     statusNotConfigured: "未設定",
     configuredCount: (count, total) => `已設定 ${count}/${total}`,
-    platformCount: (count) => `${count} 個平台`,
     platformRulesLabel: "平台跳轉規則",
     basicTranslateDesc: "進階設定裡的翻譯服務未啟用或不可用時，自動使用這裡選擇的備用翻譯服務。",
-    translatePriorityDesc: "啟用後優先使用自建翻譯服務；未啟用或驗證失敗時自動降級到基礎設定裡的備用翻譯。",
-    translateServiceLabel: "自建翻譯服務",
-    translateServiceOffline: "服務離線",
-    translateUsageLoading: "載入中…",
+    translatePriorityDesc: "啟用後優先使用 OpenAI 相容的 AI 翻譯服務；未啟用或呼叫失敗時自動降級到基礎設定裡的備用翻譯。",
+    translateServiceLabel: "AI 翻譯服務",
     resetDefaultsDesc: "清除全部設定並恢復出廠預設，此操作無法復原。",
     resetConfirm: "確定要恢復預設設定嗎？所有設定（含 API 位址與金鑰）都會被清除。",
   },
@@ -658,12 +672,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     pageLabel: (n) => `Page ${n}`,
     prevPage: "Previous page",
     nextPage: "Next page",
-    settingsTitle: "Search & Navigation Settings",
+    settingsTitle: "Settings",
     settingsDesc:
       "Customize external navigation rules, supporting {code} or {番号} placeholders. Preview example (ABP-123): https://example.com/search?q=ABP-123. Fill the rule with: https://example.com/search?q={code}",
-    platformNameLabel: "Platform name",
-    platformUrlLabel: (name) => `${name} URL Template`,
-    customPlatformName: "Custom Platform",
+    platformFieldNameLabel: "Name",
+    platformFieldUrlLabel: "Link",
+    platformGroupFallback: (n) => `Platform ${n}`,
+    platformConfigured: "Configured",
+    platformNotConfigured: "Not set",
     clearInput: "Clear",
     closeError: "Close",
     translateUrlLabel: "Translation API URL",
@@ -674,7 +690,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     searchCodePlaceholder: "Enter code",
     searchCodeLabel: "Search Code",
     settingsSaved: "Settings saved!",
-    backToScanner: "Back to Scanner",
+    backToScanner: "Back",
     reloadPreview: "Reload preview",
     languageLabel: "Language",
     languageAuto: "Follow Browser",
@@ -697,9 +713,9 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
       "Custom regular expression pattern used to extract video codes from web pages.",
     regexSyntaxError: "Invalid regular expression syntax",
     resetRegex: "Reset to Default Regex",
-    extensionVersionLabel: "Current extension version",
+    extensionVersionLabel: "Version",
     checkUpdateAction: "Check for updates",
-    upToDateLabel: "Up to date",
+    upToDateLabel: "Latest",
     updateAvailableShort: "Update available",
     downloadUpdate: "Download update",
     openProjectRepo: "Open project on GitHub",
@@ -710,7 +726,7 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     updateNow: "Update now",
     updateAvailableAria: (version) =>
       `Version ${version} is available. Open the latest GitHub Release in a new tab`,
-    previewTitle: "Trailer Preview",
+    previewTitle: "Preview",
     switchPreviewSource: "Switch preview source",
     expandTitle: "Expand",
     collapseTitle: "Collapse",
@@ -731,7 +747,12 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     retryTranslate: "Retry translation",
     googleVerifyHint: "Google Translate needs human verification",
     openVerifyPage: "Open verification page",
-    deeplApiKeyLabel: "翻译 API Key",
+    translateApiKeyLabel: "Translation API Key",
+    translateModelLabel: "Model",
+    translateModelPlaceholder: "Leave empty for backend default",
+    translateModelsRefresh: "Get models",
+    translateModelsLoading: "Loading models…",
+    translateModelsEmpty: "No models fetched; type manually",
     fallbackServiceLabel: "Fallback translation service",
     fallbackGoogle: "Google Translate",
     fallbackBing: "Microsoft Translate",
@@ -838,13 +859,10 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     statusConfiguredOff: "Off",
     statusNotConfigured: "Not configured",
     configuredCount: (count, total) => `${count}/${total} configured`,
-    platformCount: (count) => `${count} platforms`,
     platformRulesLabel: "Platform jump rules",
     basicTranslateDesc: "When the advanced translation service is off or unavailable, the fallback service selected here is used automatically.",
-    translatePriorityDesc: "When enabled, your own translation service is used first; it falls back to the basic translation service if disabled or verification fails.",
-    translateServiceLabel: "Custom translation service",
-    translateServiceOffline: "Service offline",
-    translateUsageLoading: "Loading…",
+    translatePriorityDesc: "When enabled, an OpenAI-compatible AI service translates first; it falls back to the basic translation service if disabled or the call fails.",
+    translateServiceLabel: "AI translation",
     resetDefaultsDesc: "Clear all settings and restore factory defaults. This cannot be undone.",
     resetConfirm: "Reset all settings to defaults? All configuration (including API URLs and keys) will be cleared.",
   },

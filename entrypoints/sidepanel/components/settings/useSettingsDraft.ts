@@ -80,29 +80,27 @@ export function useSettingsDraft({
 	// 自定义平台：无默认配置，空 = 面板不显示按钮
 	const [customName, setCustomName] = useState("");
 	const [customTemplate, setCustomTemplate] = useState("");
-	const [deeplApiKey, setDeeplApiKey] = useState("");
-	// 自建 Worker 翻译：地址与开关（默认关闭 = 纯备用服务模式）
+	const [translateApiKey, setTranslateApiKey] = useState("");
+	// 自建翻译服务（OpenAI 兼容）：地址、模型与开关（默认关闭 = 纯备用服务模式）
 	const [translateUrl, setTranslateUrl] = useState("");
+	const [translateModel, setTranslateModel] = useState("");
 	const [translateEnabled, setTranslateEnabled] = useState(false);
 	// 备用翻译服务：自建服务未配置或调用失败时的兜底（默认谷歌）
 	const [fallbackService, setFallbackService] =
 		useState<FallbackService>("google");
-	// Worker 用量：数据与基数均由接口返回；null = 未获取（显示 --/--万）
-	const [translateUsage, setTranslateUsage] = useState<{
-		count: number | null;
-		limit: number | null;
-	}>({ count: null, limit: null });
+	// /v1/models 拉到的模型列表（下拉框用）；空 = 拉取失败，退回手填
+	const [translateModels, setTranslateModels] = useState<string[]>([]);
+	const [translateModelsLoading, setTranslateModelsLoading] = useState(false);
+	const [translateModelsError, setTranslateModelsError] = useState<string | null>(
+		null,
+	);
 	// 开关打开时的验证错误行（可关闭）
 	const [translateVerifyError, setTranslateVerifyError] = useState<
 		string | null
 	>(null);
-	// 用量刷新进行中 / 服务离线标记：仅开关启用时才有意义
-	const [translateUsageLoading, setTranslateUsageLoading] = useState(false);
-	const [translateOffline, setTranslateOffline] = useState(false);
 	const [webdavUrl, setWebdavUrl] = useState("");
 	const [webdavUser, setWebdavUser] = useState("");
 	const [webdavPass, setWebdavPass] = useState("");
-	const [showPass, setShowPass] = useState(false);
 	// 云盘同步开关（打开才存取云端，打开时验证）
 	const [webdavEnabled, setWebdavEnabled] = useState(false);
 	const [webdavError, setWebdavError] = useState<string | null>(null);
@@ -169,73 +167,87 @@ export function useSettingsDraft({
 	// 自动保存的瞬时反馈：saved = 刚写盘（1.2s 后自动隐藏）
 	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
-	// 合并刷新：先健康检查（带 reason 分类），健康再拉用量；
-	// 序号守卫防止快速改 url/key 时旧响应覆盖新值；加载/离线态驱动 UI。
-	// 默认从 latest 快照取值；云恢复/挂载等异步灌值场景传显式参数，避免读到旧帧。
-	const usageSeq = useRef(0);
-	const pollTranslateStatus = async (
+	// 拉取可用模型列表（/v1/models），用于设置页下拉框；
+	// 凭据缺失直接清空列表；同一 url|key 签名不变则不重复拉取（手动「获取模型」可 force）。
+	// AI 模式无字符配额，故只有模型列表、没有用量轮询。
+	const modelsSig = useRef<string | null>(null);
+	const fetchTranslateModels = async (
 		urlOverride?: string,
 		keyOverride?: string,
-		enabledOverride?: boolean,
+		options: { force?: boolean; autoSelect?: boolean } = {},
 	) => {
-		const enabled = enabledOverride ?? latest.current.translateEnabled;
 		const url = (urlOverride ?? latest.current.translateApiUrl).trim();
-		const key = (keyOverride ?? latest.current.deeplApiKey).trim();
-		// 防御闸：关闭 / 无凭据 一律不调接口 —— 彻底杜绝“关闭仍调接口”
-		if (!enabled || !url || !key) return;
-		const seq = ++usageSeq.current;
-		setTranslateUsageLoading(true);
+		const key = (keyOverride ?? latest.current.translateApiKey).trim();
+		if (!url || !key) {
+			modelsSig.current = null;
+			setTranslateModels([]);
+			setTranslateModelsError(null);
+			return;
+		}
+		const sig = `${url}|${key}`;
+		if (!options.force && modelsSig.current === sig) return; // 未变化不重复拉
+		modelsSig.current = sig;
+		setTranslateModelsLoading(true);
+		setTranslateModelsError(null); // 清掉上次失败，避免下拉面板一直显示旧错误
 		try {
-			const health = (await browser.runtime.sendMessage({
-				type: "jt:health",
-				deeplKey: key,
-				translateUrl: url,
-				locale,
-			})) as { ok?: boolean; reason?: string; error?: string } | undefined;
-			if (seq !== usageSeq.current) return; // 丢弃过期响应
-			const reason = health?.reason ?? "abnormal";
-			if (reason === "network" || reason === "server") {
-				// 网络层或 5xx：服务不可达，标记离线并清空用量
-				setTranslateOffline(true);
-				setTranslateUsage({ count: null, limit: null });
-				return;
-			}
-			setTranslateOffline(false);
-			if (reason !== "ok") {
-				// auth/abnormal/incomplete：接口错误不显示用量
-				setTranslateUsage({ count: null, limit: null });
-				return;
-			}
 			const res = (await browser.runtime.sendMessage({
-				type: "jt:usage",
-				deeplKey: key,
+				type: "jt:models",
+				translateApiKey: key,
 				translateUrl: url,
-			})) as { count?: number | null; limit?: number | null } | undefined;
-			if (seq !== usageSeq.current) return;
-			setTranslateUsage({ count: res?.count ?? null, limit: res?.limit ?? null });
+			})) as { models?: string[]; error?: string } | undefined;
+			if (modelsSig.current !== sig) return; // 丢弃过期响应
+			const models = Array.isArray(res?.models) ? res.models : [];
+			const error = res?.error
+				? res.error === "network"
+					? t.networkError
+					: res.error === "incomplete"
+						? t.translateApiIncomplete
+						: res.error
+				: null;
+			setTranslateModels(models);
+			setTranslateModelsError(error);
+			// 手动「获取模型」成功时：输入框已有值就保留（只刷新列表），
+			// 为空才自动填第一个；自动拉取永远不覆盖用户手填值。
+			// 用函数式更新读当前值，避免 latest 快照落后一帧。
+			if (options.autoSelect && !error && models.length > 0) {
+				setTranslateModel((current) =>
+					current.trim() ? current : models[0]!,
+				);
+			}
 		} catch {
-			if (seq !== usageSeq.current) return;
-			setTranslateOffline(true);
-			setTranslateUsage({ count: null, limit: null });
+			if (modelsSig.current !== sig) return;
+			setTranslateModels([]);
+			setTranslateModelsError(t.networkError);
 		} finally {
-			if (seq === usageSeq.current) setTranslateUsageLoading(false);
+			if (modelsSig.current === sig) setTranslateModelsLoading(false);
 		}
 	};
 
-	// 启用开关：打开时先验证接口 /health，成功再拉用量；
+	/**
+	 * 「获取模型」按钮：忽略签名缓存强制重拉；输入框为空时自动填第一个模型，
+	 * 已有手填值则只刷新列表、不覆盖。失败信息落在下拉面板里
+	 * （不写进 translateModel，避免错误文本被存成模型名）。
+	 */
+	const refreshTranslateModels = () =>
+		fetchTranslateModels(undefined, undefined, {
+			force: true,
+			autoSelect: true,
+		});
+
+	// 启用开关：打开时先验证接口 /v1/models，成功再拉模型列表；
 	// 验证失败回弹关闭并显示可关闭的错误信息行
 	const handleToggleTranslate = async (checked: boolean) => {
 		setTranslateVerifyError(null);
 		if (!checked) {
 			setTranslateEnabled(false);
-			// 即时清空用量与状态，避免旧数字残留 / “离线”误显
-			setTranslateUsage({ count: null, limit: null });
-			setTranslateOffline(false);
-			setTranslateUsageLoading(false);
+			// 即时清空模型列表与状态，避免旧数据残留
+			modelsSig.current = null;
+			setTranslateModels([]);
+			setTranslateModelsError(null);
 			return;
 		}
 		const url = translateUrl.trim();
-		const key = deeplApiKey.trim();
+		const key = translateApiKey.trim();
 		if (!url || !key) {
 			setTranslateVerifyError(t.translateApiIncomplete);
 			setTranslateEnabled(false);
@@ -245,7 +257,7 @@ export function useSettingsDraft({
 		try {
 			const health = (await browser.runtime.sendMessage({
 				type: "jt:health",
-				deeplKey: key,
+				translateApiKey: key,
 				translateUrl: url,
 				locale,
 			})) as { ok?: boolean; error?: string } | undefined;
@@ -257,8 +269,8 @@ export function useSettingsDraft({
 				return;
 			}
 			setTranslateEnabled(true);
-			// 健康已通过，顺带刷新用量（显式参数，跳过 latest 旧帧）
-			void pollTranslateStatus(url, key, true);
+			// 健康已通过，顺带拉取模型列表（显式参数，跳过 latest 旧帧）
+			void fetchTranslateModels(url, key);
 		} catch {
 			setTranslateVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setTranslateEnabled(false);
@@ -618,7 +630,8 @@ export function useSettingsDraft({
 		setJavdbName(current.javdbName);
 		setCustomName(current.customName);
 		setCustomTemplate(current.customTemplate);
-		setDeeplApiKey(current.deeplApiKey);
+		setTranslateApiKey(current.translateApiKey);
+		setTranslateModel(current.translateModel);
 		setTranslateUrl(current.translateApiUrl);
 		setTranslateEnabled(current.translateEnabled);
 		setFallbackService(current.fallbackService);
@@ -656,7 +669,8 @@ export function useSettingsDraft({
 		customName,
 		customTemplate,
 		previewVolume,
-		deeplApiKey,
+		translateApiKey,
+		translateModel,
 		translateApiUrl: translateUrl,
 		translateEnabled,
 		fallbackService,
@@ -761,7 +775,7 @@ export function useSettingsDraft({
 		setSaveState("saved");
 		// 仅启用时才查用量；显式参数避免读到灌值前的旧帧
 		if (saved.translateEnabled) {
-			void pollTranslateStatus(saved.translateApiUrl, saved.deeplApiKey, true);
+			void fetchTranslateModels(saved.translateApiUrl, saved.translateApiKey);
 		}
 	};
 
@@ -928,15 +942,17 @@ export function useSettingsDraft({
 		setJavdbName(DEFAULT_SETTINGS.javdbName);
 		setCustomName("");
 		setCustomTemplate("");
-		setDeeplApiKey("");
+		setTranslateApiKey("");
+		setTranslateModel("");
 		setTranslateUrl("");
 		setTranslateEnabled(false);
-		setTranslateUsage({ count: null, limit: null });
+		modelsSig.current = null;
+		setTranslateModels([]);
+		setTranslateModelsError(null);
 		setTranslateVerifyError(null);
 		setWebdavUrl("");
 		setWebdavUser("");
 		setWebdavPass("");
-		setShowPass(false);
 		setWebdavEnabled(false);
 		setWebdavError(null);
 		setApiUrl(DEFAULT_SETTINGS.apiUrl);
@@ -1002,7 +1018,7 @@ export function useSettingsDraft({
 	// 上次落盘时的签名：用来区分“真的改了”与“只重渲染了一次”
 	const savedSignature = useRef<string | null>(null);
 	// 上次拉取用量的翻译配置签名：没换地址/Key 就不重复请求
-	const usageSignature = useRef<string | null>(null);
+	const modelsSignature = useRef<string | null>(null);
 
 	// 挂载：灌入已保存配置 -> 才允许自动保存接管，否则首帧空表单会把配置写成空值。
 	// 用 state 而不是 ref：ready 变化要触发自动保存 effect 重新评估一次签名
@@ -1020,9 +1036,9 @@ export function useSettingsDraft({
 				total: index?.total ?? 0,
 			});
 		})();
-		// 挂载只在“已启用”时查用量；显式参数避免读到灌值前的旧帧
+		// 挂载时若已启用则拉取模型列表；显式参数避免读到灌值前的旧帧
 		if (current.translateEnabled) {
-			void pollTranslateStatus(current.translateApiUrl, current.deeplApiKey, true);
+			void fetchTranslateModels(current.translateApiUrl, current.translateApiKey);
 		}
 		// 首帧把签名记下来：hydrate 已经写盘一次，不该再触发一次保存
 		savedSignature.current = configSignature(current);
@@ -1087,14 +1103,11 @@ export function useSettingsDraft({
 			}
 			savedSignature.current = signature;
 			setSaveState("saved");
-			const translateSig = `${latest.current.translateApiUrl}|${latest.current.deeplApiKey}`;
-			// 未启用不查用量；签名变化才重新拉取（latest 此时已是最新帧）
-			if (
-				usageSignature.current !== translateSig &&
-				latest.current.translateEnabled
-			) {
-				usageSignature.current = translateSig;
-				void pollTranslateStatus();
+			const translateSig = `${latest.current.translateApiUrl}|${latest.current.translateApiKey}`;
+			// 凭据变化（无论是否启用）都重新拉取模型列表（latest 此时已是最新帧）
+			if (modelsSignature.current !== translateSig) {
+				modelsSignature.current = translateSig;
+				void fetchTranslateModels();
 			}
 		}, SAVE_DEBOUNCE_MS);
 
@@ -1126,14 +1139,6 @@ export function useSettingsDraft({
 		return () => clearTimeout(timer);
 	}, [saveState]);
 
-	// 开启后每 60s 轻量轮询：刷新用量 + 探测服务是否离线（R5/R6）。
-	// 依赖 translateEnabled：开启即起、关闭即停；pollTranslateStatus 内部防御闸作二次保险。
-	useEffect(() => {
-		if (!translateEnabled) return;
-		const id = setInterval(() => void pollTranslateStatus(), 60000);
-		return () => clearInterval(id);
-	}, [translateEnabled]);
-
 	return {
 		t,
 		locale,
@@ -1144,18 +1149,18 @@ export function useSettingsDraft({
 		javdbName,
 		customName,
 		customTemplate,
-		deeplApiKey,
+		translateApiKey,
+		translateModel,
 		translateUrl,
 		translateEnabled,
 		fallbackService,
-		translateUsage,
-		translateUsageLoading,
-		translateOffline,
+		translateModels,
+		translateModelsLoading,
+		translateModelsError,
 		translateVerifyError,
 		webdavUrl,
 		webdavUser,
 		webdavPass,
-		showPass,
 		webdavEnabled,
 		webdavError,
 		cloudConflict,
@@ -1196,14 +1201,14 @@ export function useSettingsDraft({
 		setJavdbName,
 		setCustomName,
 		setCustomTemplate,
-		setDeeplApiKey,
+		setTranslateApiKey,
+		setTranslateModel,
 		setTranslateUrl,
 		setFallbackService,
 		setTranslateVerifyError,
 		setWebdavUrl,
 		setWebdavUser,
 		setWebdavPass,
-		setShowPass,
 		setWebdavError,
 		setApiUrl,
 		setApiKey,
@@ -1217,6 +1222,8 @@ export function useSettingsDraft({
 		setPreviewVolume,
 		// 动作
 		handleToggleTranslate,
+		fetchTranslateModels,
+		refreshTranslateModels,
 		handleToggleLookup,
 		handleToggleEmby,
 		handleToggleEmbyDropFavorites,

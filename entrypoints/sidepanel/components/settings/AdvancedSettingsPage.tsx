@@ -1,10 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_CODE_REGEX } from "../../../../src/lib/settings";
-import {
-	formatUsage,
-	shouldShowUsage,
-} from "../../../../src/lib/translate";
 import { ClearButton } from "../ClearButton";
+import { SecretField } from "./SecretField";
 import {
 	FieldError,
 	InfoTip,
@@ -26,11 +23,26 @@ export function AdvancedSettingsPage() {
 	const [embyOpen, setEmbyOpen] = useState(false);
 	const [translateOpen, setTranslateOpen] = useState(false);
 	const [webdavOpen, setWebdavOpen] = useState(false);
+	// 模型下拉（自定义 combobox）：点击箭头无条件显示全部模型，不按输入值过滤
+	const [modelsOpen, setModelsOpen] = useState(false);
+	const modelSelectRef = useRef<HTMLDivElement>(null);
+
+	// 面板外点击或 Esc 收起；箭头按钮在 ref 内，不会被自己的 pointerdown 关掉
+	useEffect(() => {
+		if (!modelsOpen) return;
+		const onPointerDown = (event: PointerEvent) => {
+			if (!modelSelectRef.current?.contains(event.target as Node)) {
+				setModelsOpen(false);
+			}
+		};
+		document.addEventListener("pointerdown", onPointerDown);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [modelsOpen]);
 
 	const lookupConfigured = Boolean(d.apiUrl.trim() && d.apiKey.trim());
 	const embyConfigured = Boolean(d.embyUrl.trim() && d.embyApiKey.trim());
 	const translateConfigured = Boolean(
-		d.translateUrl.trim() && d.deeplApiKey.trim(),
+		d.translateUrl.trim() && d.translateApiKey.trim(),
 	);
 
 	// 校验期间统一显示「连接中」：开关同时被禁用，用户不会重复点击
@@ -102,23 +114,17 @@ export function AdvancedSettingsPage() {
 						<label className="settings-field__label" htmlFor="api-key">
 							{t.apiKeyLabel}
 						</label>
-						<div className="settings-field__input-wrap">
-							<input
-								id="api-key"
-								type="text"
-								className="settings-field__input settings-field__input--code"
-								value={d.apiKey}
-								onChange={(e) => d.setApiKey(e.target.value)}
-								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-								spellCheck={false}
-								autoComplete="off"
-							/>
-							<ClearButton
-								show={Boolean(d.apiKey)}
-								onClick={() => d.setApiKey("")}
-								title={t.clearInput}
-							/>
-						</div>
+						<SecretField
+							id="api-key"
+							value={d.apiKey}
+							onChange={(v) => d.setApiKey(v)}
+							onClear={() => d.setApiKey("")}
+							placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+							code
+							clearLabel={t.clearInput}
+							showLabel={t.showPassword}
+							hideLabel={t.hidePassword}
+						/>
 					</div>
 				</ServiceRow>
 
@@ -179,27 +185,21 @@ export function AdvancedSettingsPage() {
 						<label className="settings-field__label" htmlFor="emby-api-key">
 							{t.embyApiKeyLabel}
 						</label>
-						<div className="settings-field__input-wrap">
-							<input
-								id="emby-api-key"
-								type="text"
-								className="settings-field__input settings-field__input--code"
-								value={d.embyApiKey}
-								onChange={(e) => {
-									d.setEmbyApiKey(e.target.value);
-									// 同上：改 Key 等于换了服务器，超额提示一并清理
-									d.setEmbyTooLarge(false);
-								}}
-								placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-								spellCheck={false}
-								autoComplete="off"
-							/>
-							<ClearButton
-								show={Boolean(d.embyApiKey)}
-								onClick={() => d.setEmbyApiKey("")}
-								title={t.clearInput}
-							/>
-						</div>
+						<SecretField
+							id="emby-api-key"
+							value={d.embyApiKey}
+							onChange={(v) => {
+								d.setEmbyApiKey(v);
+								// 同上：改 Key 等于换了服务器，超额提示一并清理
+								d.setEmbyTooLarge(false);
+							}}
+							onClear={() => d.setEmbyApiKey("")}
+							placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+							code
+							clearLabel={t.clearInput}
+							showLabel={t.showPassword}
+							hideLabel={t.hidePassword}
+						/>
 					</div>
 					{/*
 						删除收藏：不是隐藏图标，而是真实删掉「已在 Emby 库中」的收藏。
@@ -281,36 +281,8 @@ export function AdvancedSettingsPage() {
 
 			<SettingsSection
 				title={t.settingsGroupTranslateService}
-				tip={t.translatePriorityDesc}
-				titleAside={
-					/* 仅开关启用时显示用量区；按优先级：离线 → 加载中 → 数字 → 不显示 */
-					d.translateEnabled
-						? d.translateOffline
-							? (
-								<span className="settings-section__usage settings-section__usage--offline">
-									{t.translateServiceOffline}
-								</span>
-							)
-							: d.translateUsageLoading
-								? (
-									<span className="settings-section__usage settings-section__usage--loading">
-										{t.translateUsageLoading}
-									</span>
-								)
-								: shouldShowUsage(d.translateEnabled, d.translateUsage)
-									? (
-										<span className="settings-section__usage">
-											{formatUsage(
-												d.translateUsage.count,
-												d.translateUsage.limit,
-												d.locale,
-											)}
-										</span>
-									)
-									: null
-						: null
-				}
-			>
+			tip={t.translatePriorityDesc}
+		>
 			<ServiceRow
 				title={t.translateServiceLabel}
 				enabled={d.translateEnabled}
@@ -358,26 +330,118 @@ export function AdvancedSettingsPage() {
 					</div>
 					<div className="settings-field">
 						<div className="settings-field__header-row">
-							<label className="settings-field__label" htmlFor="deepl-key">
-								{t.deeplApiKeyLabel}
+							<label className="settings-field__label" htmlFor="translate-key">
+								{t.translateApiKeyLabel}
 							</label>
 						</div>
-						<div className="settings-field__input-wrap">
-							<input
-								id="deepl-key"
-								type="text"
-								className="settings-field__input settings-field__input--code"
-								value={d.deeplApiKey}
-								onChange={(e) => d.setDeeplApiKey(e.target.value)}
-								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-								spellCheck={false}
-								autoComplete="off"
-							/>
-							<ClearButton
-								show={Boolean(d.deeplApiKey)}
-								onClick={() => d.setDeeplApiKey("")}
-								title={t.clearInput}
-							/>
+						<SecretField
+							id="translate-key"
+							value={d.translateApiKey}
+							onChange={(v) => d.setTranslateApiKey(v)}
+							onClear={() => d.setTranslateApiKey("")}
+							placeholder="sk-..."
+							code
+							clearLabel={t.clearInput}
+							showLabel={t.showPassword}
+							hideLabel={t.hidePassword}
+						/>
+					</div>
+					<div className="settings-field">
+						<div className="settings-field__header-row">
+							<label className="settings-field__label" htmlFor="translate-model">
+								{t.translateModelLabel}
+							</label>
+							<button
+								type="button"
+								className="settings-field__reset-link settings-section__aside"
+								onClick={() => {
+									// 展开下拉：成功填列表、失败填错误信息，都在选择区里可见
+									setModelsOpen(true);
+									void d.refreshTranslateModels();
+								}}
+								disabled={!translateConfigured || d.translateModelsLoading}
+								title={t.translateModelsRefresh}
+							>
+								{t.translateModelsRefresh}
+							</button>
+						</div>
+						<div
+							className="settings-model-select"
+							ref={modelSelectRef}
+							onKeyDown={(e) => {
+								if (e.key === "Escape") setModelsOpen(false);
+							}}
+						>
+							<div className="settings-field__input-wrap">
+								<input
+									id="translate-model"
+									type="text"
+									className="settings-field__input settings-field__input--code"
+									value={d.translateModel}
+									onChange={(e) => d.setTranslateModel(e.target.value)}
+									placeholder={t.translateModelPlaceholder}
+									spellCheck={false}
+									autoComplete="off"
+									role="combobox"
+									aria-expanded={modelsOpen}
+									aria-controls="translate-model-menu"
+								/>
+								<ClearButton
+									show={Boolean(d.translateModel)}
+									onClick={() => d.setTranslateModel("")}
+									title={t.clearInput}
+								/>
+								<button
+									type="button"
+									className="settings-model-select__toggle"
+									onClick={() => setModelsOpen((v) => !v)}
+									aria-label={t.translateModelLabel}
+									aria-expanded={modelsOpen}
+									aria-controls="translate-model-menu"
+								>
+									<span aria-hidden="true">▾</span>
+								</button>
+							</div>
+							{modelsOpen && (
+								<div
+									id="translate-model-menu"
+									className="settings-model-select__menu"
+									role="listbox"
+								>
+									{d.translateModelsError ? (
+										<p className="settings-model-select__error">
+											{d.translateModelsError}
+										</p>
+									) : d.translateModelsLoading ? (
+										<p className="settings-model-select__empty">
+											{t.translateModelsLoading}
+										</p>
+									) : d.translateModels.length > 0 ? (
+										// 不过滤：输入框已有值时，点箭头依然列出全部模型
+										d.translateModels.map((m) => (
+											<button
+												key={m}
+												type="button"
+												role="option"
+												aria-selected={d.translateModel === m}
+												className={`settings-model-select__option${
+													d.translateModel === m ? " is-selected" : ""
+												}`}
+												onClick={() => {
+													d.setTranslateModel(m);
+													setModelsOpen(false);
+												}}
+											>
+												{m}
+											</button>
+										))
+									) : (
+										<p className="settings-model-select__empty">
+											{t.translateModelsEmpty}
+										</p>
+									)}
+								</div>
+							)}
 						</div>
 					</div>
 				</ServiceRow>
@@ -564,46 +628,16 @@ export function AdvancedSettingsPage() {
 							title={t.clearInput}
 						/>
 					</div>
-					<div className="webdav-pass-row">
-						<div className="settings-field__input-wrap">
-							<input
-								id="webdav-pass"
-								type={d.showPass ? "text" : "password"}
-								className="settings-field__input"
-								value={d.webdavPass}
-								onChange={(e) => d.setWebdavPass(e.target.value)}
-								placeholder={t.webdavPassPlaceholder}
-								autoComplete="off"
-							/>
-							<ClearButton
-								show={Boolean(d.webdavPass)}
-								onClick={() => d.setWebdavPass("")}
-								title={t.clearInput}
-							/>
-						</div>
-						<button
-							type="button"
-							className="webdav-pass-toggle"
-							onClick={() => d.setShowPass(!d.showPass)}
-							title={d.showPass ? t.hidePassword : t.showPassword}
-							aria-label={d.showPass ? t.hidePassword : t.showPassword}
-						>
-							<svg
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2"
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								width="15"
-								height="15"
-								aria-hidden="true"
-							>
-								<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-								<circle cx="12" cy="12" r="3" />
-							</svg>
-						</button>
-					</div>
+					<SecretField
+						id="webdav-pass"
+						value={d.webdavPass}
+						onChange={(v) => d.setWebdavPass(v)}
+						onClear={() => d.setWebdavPass("")}
+						placeholder={t.webdavPassPlaceholder}
+						clearLabel={t.clearInput}
+						showLabel={t.showPassword}
+						hideLabel={t.hidePassword}
+					/>
 
 					{/* 参数已填但开关没开：给一个就地的一键入口，省得用户回到行首找开关 */}
 					{!d.webdavEnabled && d.webdavUrl.trim() && d.webdavUser.trim() && (

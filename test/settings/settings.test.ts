@@ -464,6 +464,7 @@ describe("settings", () => {
 		it("falls back to the new default when legacy values equal old defaults", () => {
 			storageMock[SETTINGS_STORAGE_KEY] = JSON.stringify({
 				missavTemplate: "https://missav.ws/cn/{code}",
+				// 故意保留英文旧默认值：模拟老用户存储，验证它会被迁移成新默认
 				javtrailersTemplate: "https://javtrailers.com/search/{code}",
 			});
 			expect(getSettings().supjavTemplate).toBe(
@@ -508,9 +509,10 @@ describe("settings", () => {
 				{ javbusTemplate: "https://example.com/{code}" },
 				{ customName: "C" },
 				{ customTemplate: "https://example.com/{code}" },
-				{ previewVolume: 50 },
-				{ deeplApiKey: "key" },
-				{ translateApiUrl: "https://translate.example/" },
+			{ previewVolume: 50 },
+			{ translateApiKey: "key" },
+			{ translateModel: "gpt-4o-mini" },
+			{ translateApiUrl: "https://translate.example/" },
 				{ translateEnabled: true },
 				{ fallbackService: "bing" },
 				{ apiUrl: "https://proxy.example/" },
@@ -575,10 +577,10 @@ describe("settings", () => {
 
 		it("replaces {code} placeholder", () => {
 			const url = resolveSearchUrl(
-				"https://javtrailers.com/search/{code}",
+				"https://javtrailers.com/ja/search/{code}",
 				"ABP-123",
 			);
-			expect(url).toBe("https://javtrailers.com/search/ABP-123");
+			expect(url).toBe("https://javtrailers.com/ja/search/ABP-123");
 		});
 
 		it("replaces {番号} placeholder", () => {
