@@ -119,7 +119,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const [preferredSlot, setPreferredSlot] = useState(getPreferredPreviewSlot);
 	// 标题/介绍区展开态：收起 4 行，展开浮在番号列表之上
 	const [titleExpanded, setTitleExpanded] = useState(false);
-	// 展开瞬间冻结的槽位高度：展开态标题层脱离文档流，靠它让番号列表不跳动
+	// 展开瞬间冻结的槽位高度：展开态标题层脱离文档流，靠它让番号列表不跳动。
+	// 必须是带小数的实测值（95.503 这种），不能用 offsetHeight —— 它会四舍五入成 96，
+	// 展开时把槽位悄悄撑高 0.5px，下方列表跟着抖一下（收起再抖回去）。
 	const [frozenSlotHeight, setFrozenSlotHeight] = useState<number | null>(null);
 	const titleContentRef = useRef<HTMLDivElement | null>(null);
 	const titleSlotRef = useRef<HTMLDivElement | null>(null);
@@ -785,10 +787,15 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	 * 展开/收起。整块标题区就是热区，没有按钮：收起 4 行点开、展开态点一下收起。
 	 * 外层槽位是自适应高度，展开后标题层改绝对定位会脱离文档流，
 	 * 槽位若跟着塌掉、番号列表会往上窜 —— 所以展开那一刻先量收起态高度并冻结。
+	 *
+	 * 取 `getBoundingClientRect().height` 而不是 `offsetHeight`：后者四舍五入到整数，
+	 * 实测收起态 95.503px 会被记成 96，展开瞬间槽位凭空高 0.5px，列表跟着抖。
+	 * 保留 3 位小数足够（1/64px 以下的差别肉眼与布局都感知不到）。
 	 */
 	const handleToggleTitle = () => {
 		if (!titleExpanded) {
-			setFrozenSlotHeight(titleSlotRef.current?.offsetHeight ?? null);
+			const rect = titleSlotRef.current?.getBoundingClientRect();
+			setFrozenSlotHeight(rect ? Math.round(rect.height * 1000) / 1000 : null);
 		}
 		setTitleExpanded(!titleExpanded);
 	};
