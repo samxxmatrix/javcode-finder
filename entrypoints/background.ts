@@ -1309,7 +1309,7 @@ export default defineBackground(() => {
 						javtrailersLookup: async () => {
 							let res: Response;
 							try {
-								res =							res = await fetch(buildSearchUrl(code), {
+								res = await fetch(buildSearchUrl(code), {
 								signal: AbortSignal.timeout(5000),
 							});
 							} catch (error) {

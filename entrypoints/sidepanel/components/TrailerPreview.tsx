@@ -6,6 +6,7 @@ import React, {
 	useRef,
 	useState,
 } from "react";
+import { parseTitleLines } from "../../../src/lib/inline-links";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
 import {
 	destroyHlsBefore,
@@ -16,13 +17,16 @@ import {
 	armPlayingOnFirstFrame,
 	buildPlaybackFallbackOrder,
 	buildPreviewChoices,
+	classifyMissingTrailerError,
 	getPreviewPresentation,
 	pickDefaultPreviewChoice,
 	planCover,
 	planDirectMp4Start,
+	resolvePlaybackOutcome,
 	resolvePrefetchUrl,
 	transitionPreviewNotice,
 	type FallbackStage,
+	type PlaybackFailureReason,
 	type PlayerStatus,
 	type PreviewChoice,
 } from "../../../src/lib/preview-state";
@@ -107,6 +111,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 封面加载中：隐藏 img 与 broken 占位，显示 spinner 直到图片就绪
 	const [coverLoading, setCoverLoading] = useState(false);
 	const [status, setStatus] = useState<PlayerStatus>("idle");
+	// 播放链走尽后是否确认「资源不存在」：只有全部档都是 JT 主 playlist 404 才置真
+	const [trailerMissing, setTrailerMissing] = useState(false);
 	// 播放中缓冲已持续到让人怀疑网络：只在顶部出一行文字提示，不改外观与状态
 	const [bufferingSlow, setBufferingSlow] = useState(false);
 	const bufferingTimerRef = useRef<number | null>(null);
@@ -225,6 +231,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	const playAttemptRef = useRef(0);
 	// 已处理过失败的 attempt 号：同一档常同时收到 onError 与 play() rejection，只推进一次
 	const failureHandledRef = useRef(0);
+	// 本次播放链每一档的失败原因：终局判定要求「有记录且全部为确认 404」
+	const failureReasonsRef = useRef<PlaybackFailureReason[]>([]);
 	// 封面回退游标：planCover 给出的顺序里的下标（与播放链独立）
 	const coverIndexRef = useRef(0);
 
@@ -303,6 +311,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		videoRef.current?.load();
 		setResolution({ status: "loading" });
 		setStatus("idle");
+		setTrailerMissing(false);
 		setFallbackMedia(null);
 		setCoverError(false);
 		setCoverSrc(null);
@@ -318,6 +327,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		fallbackIndexRef.current = 0;
 		playAttemptRef.current = 0;
 		failureHandledRef.current = 0;
+		failureReasonsRef.current = [];
 		coverIndexRef.current = 0;
 		setNoticeDismissed((dismissed) =>
 			transitionPreviewNotice(dismissed, "lookup_retry"),
@@ -536,6 +546,11 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		while (true) {
 			const stage = fallbackOrderRef.current[fallbackIndexRef.current];
 			if (!stage) {
+				// 只有所有尝试档都是「JT 主 playlist 404」才收口为无片；
+				// 混入超时 / 网络 / CORS 失败时保持播放失败，不把抖动说成没片。
+				setTrailerMissing(
+					resolvePlaybackOutcome(failureReasonsRef.current) === "no_trailer",
+				);
 				setStatus("failed");
 				return;
 			}
@@ -576,11 +591,17 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 
 	// 某一档播放失败：同一档可能同时收到 onError 与 play() rejection，带上 attempt 去重；
 	// 上一档迟到的 error 因 attempt 已过期而被忽略，不会多跳一档。
-	function failPlayback(requestId: number, attempt: number) {
+	function failPlayback(
+		requestId: number,
+		attempt: number,
+		reason: PlaybackFailureReason = "unknown",
+	) {
 		if (requestId !== playbackRequestRef.current) return;
 		if (attempt !== playAttemptRef.current) return;
 		if (failureHandledRef.current === attempt) return;
 		failureHandledRef.current = attempt;
+		// 只记「实际起播过」的档：详情页兜底没拿到资源时只是 continue，不算失败档
+		failureReasonsRef.current.push(reason);
 		void advancePlayback(requestId);
 	}
 
@@ -669,10 +690,17 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 					hls.on(Hls.Events.ERROR, (_event, data) => {
 						if (requestId !== playbackRequestRef.current) return;
 						if (!data.fatal) return;
-						// 404 = 该番号无 HLS 预告片；其余（含 Firefox 上无 DNR 规则导致的 CORS 失败）
-						// 同样按加载失败处理 —— 两者都推进回退序列。
+						// 只有 JT 主 playlist 明确 404 才算「确认无片」；超时 / CORS / 5xx /
+						// 子播放列表与分片 404 一律按普通加载失败推进回退序列。
+						const reason = classifyMissingTrailerError({
+							details: data.details,
+							responseCode: data.response?.code,
+							url: data.url,
+							masterUrl: choice.previewUrl,
+							source: choice.source,
+						});
 						destroyHlsInstance(hlsRef);
-						failPlayback(requestId, attempt);
+						failPlayback(requestId, attempt, reason);
 					});
 				} else if (video.canPlayType("application/vnd.apple.mpegurl")) {
 					// Safari 原生支持 HLS，无需 hls.js
@@ -708,6 +736,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		});
 		fallbackIndexRef.current = 0;
 		failureHandledRef.current = 0;
+		failureReasonsRef.current = [];
+		setTrailerMissing(false);
 		// 播放开始时应用设置中的预览音量（0-100 → 0-1）
 		video.volume = getSettings().previewVolume / 100;
 		startChoicePlayback(video, choice, requestId);
@@ -745,6 +775,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		fallbackOrderRef.current = [];
 		fallbackIndexRef.current = 0;
 		failureHandledRef.current = 0;
+		failureReasonsRef.current = [];
+		setTrailerMissing(false);
 		if (wasPlaying) {
 			beginPlayback(choice);
 		} else {
@@ -899,6 +931,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		hasCover: Boolean(initialCoverUrl) && !coverError,
 		hasTrailer: Boolean(activeChoice),
 		noticeDismissed,
+		trailerMissing,
 	});
 	// 封面底部浮条：左出演者（原名）、右发布日；点播放后随 status 一起消失。
 	// 注意用"封面层在渲染"而不是"有封面地址"：源站没给封面时（老 caribbeancom 号）
@@ -962,21 +995,31 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 
 	// 标题文本渲染：统一换行写法后删除所有空行，非空行之间只保留一个换行。
 	// 源站介绍文与译文可能混用 \r\n、<br>/<br/>、连续 \n，甚至「只有空格」的行；
-	// 先全部归一成 \n 再按行过滤，避免 <br><br> 之类漏出空行（CSS 是 pre-wrap，
-	// 残留的 \r 和多余 \n 都会真的渲染成空白行）。只改显示，不动翻译输入。
-	const renderTitleText = (text: string) => {
-		const lines = text
-			.replace(/\r\n?/g, "\n")
-			.replace(/<br\b[^>]*>/gi, "\n")
-			.split("\n")
-			.filter((line) => line.trim() !== "");
-		return lines.map((line, i) => (
+	// 归一化与 <a> 恢复统一交给 parseTitleLines（兼容被翻译器实体化的标签）。
+	// 只改显示，不动翻译输入；链接带 data-title-no-toggle，点它不会收起简介。
+	const renderTitleText = (text: string) =>
+		parseTitleLines(text).map((segments, i) => (
 			<React.Fragment key={i}>
 				{i > 0 && <br />}
-				{line}
+				{segments.map((segment, j) =>
+					segment.type === "link" ? (
+						<a
+							key={j}
+							href={segment.href}
+							target="_blank"
+							rel="noopener noreferrer"
+							data-title-no-toggle
+							className="trailer-preview__title-link"
+							onKeyDown={(event) => event.stopPropagation()}
+						>
+							{segment.text}
+						</a>
+					) : (
+						<React.Fragment key={j}>{segment.text}</React.Fragment>
+					),
+				)}
 			</React.Fragment>
 		));
-	};
 
 	return (
 		<section

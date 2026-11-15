@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	clearCodeMarksForTab,
 	clearCodeMarksInTab,
 	markCodesForTab,
 	markCodesInTab,
@@ -579,5 +580,77 @@ describe("markCodesForTab", () => {
 		const injected = executeScript.mock.calls[0]![0];
 		expect(injected.args).toHaveLength(5);
 		expect(injected.args).not.toContain(undefined);
+	});
+});
+
+describe("Chrome 错误页：不可注入页面的预期失败", () => {
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warnSpy.mockRestore();
+	});
+
+	it("markCodesForTab 被错误页拒绝注入时不打告警、不抛错", async () => {
+		(globalThis as any).browser = {
+			scripting: {
+				executeScript: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("Frame with ID 0 is showing error page"),
+					),
+			},
+		};
+
+		await expect(markCodesForTab(7, [])).resolves.toBeUndefined();
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("clearCodeMarksForTab 被错误页拒绝注入时不打告警、不抛错", async () => {
+		(globalThis as any).browser = {
+			scripting: {
+				executeScript: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("Frame with ID 0 is showing error page"),
+					),
+			},
+		};
+
+		await expect(clearCodeMarksForTab(7)).resolves.toBeUndefined();
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("chrome-error:// 形式的拒绝同样静默", async () => {
+		(globalThis as any).browser = {
+			scripting: {
+				executeScript: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("Cannot access a chrome-error://chromewebdata/ URL"),
+					),
+			},
+		};
+
+		await markCodesForTab(7, []);
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("非错误页的注入失败仍保留告警", async () => {
+		(globalThis as any).browser = {
+			scripting: {
+				executeScript: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("Extension manifest must request permission"),
+					),
+			},
+		};
+
+		await markCodesForTab(7, []);
+		expect(warnSpy).toHaveBeenCalledTimes(1);
 	});
 });

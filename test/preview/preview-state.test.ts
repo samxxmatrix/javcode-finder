@@ -3,10 +3,12 @@ import {
 	armPlayingOnFirstFrame,
 	buildPlaybackFallbackOrder,
 	buildPreviewChoices,
+	classifyMissingTrailerError,
 	getPreviewPresentation,
 	pickDefaultPreviewChoice,
 	planCover,
 	planDirectMp4Start,
+	resolvePlaybackOutcome,
 	resolvePrefetchUrl,
 	transitionPreviewNotice,
 	type FirstFrameTarget,
@@ -728,5 +730,140 @@ describe("resolvePrefetchUrl（预取目标）", () => {
 	it("取的是传进来的那一档（第 2 档被记住时预取的就是第 2 档）", () => {
 		const second = { directMp4: true, previewUrl: "https://x/b.mp4" };
 		expect(resolvePrefetchUrl("idle", second)).toBe("https://x/b.mp4");
+	});
+});
+
+describe("getPreviewPresentation —— 播放链确认资源不存在", () => {
+	it("收口为「暂无预告片」并给重新查询，而不是播放失败", () => {
+		const result = getPreviewPresentation(
+			input(
+				{ status: "resolved", media, errors: [] },
+				{
+					hasCover: true,
+					hasTrailer: true,
+					playbackStatus: "failed",
+					trailerMissing: true,
+				},
+			),
+		);
+
+		expect(result.mediaMessage).toBeNull();
+		expect(result.showCover).toBe(true);
+		expect(result.showPlayButton).toBe(false);
+		expect(result.showPlaybackRetry).toBe(false);
+		expect(result.notices).toEqual([
+			{
+				key: "no_trailer",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
+		]);
+		expect(result.retryAction).toEqual({ type: "lookup" });
+	});
+
+	it("未确认无片时仍是播放失败（对照组，防误判收紧前的行为回归）", () => {
+		const result = getPreviewPresentation(
+			input(
+				{ status: "resolved", media, errors: [] },
+				{ hasCover: true, hasTrailer: true, playbackStatus: "failed" },
+			),
+		);
+
+		expect(result.mediaMessage).toBe("playback_failed");
+		expect(result.notices).toEqual([
+			{
+				key: "playback_error",
+				errors: [],
+				dismissible: true,
+				actions: [{ type: "dismiss" }],
+			},
+		]);
+		expect(result.retryAction).toEqual({ type: "playback" });
+	});
+
+	it("关过提示后不再常驻无片结论与重新查询入口", () => {
+		const result = getPreviewPresentation(
+			input(
+				{ status: "resolved", media, errors: [] },
+				{
+					hasCover: true,
+					hasTrailer: true,
+					playbackStatus: "failed",
+					trailerMissing: true,
+					noticeDismissed: true,
+				},
+			),
+		);
+
+		expect(result.notices).toEqual([]);
+		expect(result.retryAction).toBeNull();
+		expect(result.showPlaybackRetry).toBe(false);
+	});
+});
+
+const masterUrl =
+	"https://media.javtrailers.com/hlsvideo/freepv/h/hun/huntc00584/playlist.m3u8";
+const manifest404: Parameters<typeof classifyMissingTrailerError>[0] = {
+	details: "manifestLoadError",
+	responseCode: 404,
+	url: masterUrl,
+	masterUrl,
+	source: "javtrailers",
+};
+
+describe("classifyMissingTrailerError（只有 JT 主 playlist 404 才算确认无片）", () => {
+	it("命中：JT 主播放列表明确返回 404", () => {
+		expect(classifyMissingTrailerError(manifest404)).toBe("missing_trailer");
+	});
+
+	it("hls.js 未给 url 时仍按 details 判定", () => {
+		expect(
+			classifyMissingTrailerError({ ...manifest404, url: undefined }),
+		).toBe("missing_trailer");
+	});
+
+	const rejected: [
+		string,
+		Partial<Parameters<typeof classifyMissingTrailerError>[0]>,
+	][] = [
+		["子播放列表 404", { details: "levelLoadError" }],
+		["分片 404", { details: "fragLoadError" }],
+		["manifest 超时", { details: "manifestLoadTimeOut", responseCode: undefined }],
+		["连接失败 status=0", { responseCode: 0 }],
+		["服务端 503", { responseCode: 503 }],
+		["防盗链 403", { responseCode: 403 }],
+		[
+			"url 不是主档地址",
+			{ url: masterUrl.replace("playlist.m3u8", "huntc00584mmb.m3u8") },
+		],
+		["非 JT 来源", { source: "dmm" }],
+	];
+	it.each(rejected)("%s → 普通播放失败，不判无片", (_name, patch) => {
+		expect(classifyMissingTrailerError({ ...manifest404, ...patch })).toBe(
+			"unknown",
+		);
+	});
+});
+
+describe("resolvePlaybackOutcome（整链失败原因的合取判定）", () => {
+	it("所有尝试档都确认 404 → 无片", () => {
+		expect(resolvePlaybackOutcome(["missing_trailer"])).toBe("no_trailer");
+		expect(
+			resolvePlaybackOutcome(["missing_trailer", "missing_trailer"]),
+		).toBe("no_trailer");
+	});
+
+	it("JT 404 但 DMM 档因网络抖动失败 → 仍是播放失败", () => {
+		const reasons = [classifyMissingTrailerError(manifest404), "unknown" as const];
+		expect(resolvePlaybackOutcome(reasons)).toBe("failed");
+	});
+
+	it("没有任何失败记录（如 hls.js 不可用）→ 播放失败", () => {
+		expect(resolvePlaybackOutcome([])).toBe("failed");
+	});
+
+	it("全部是普通失败 → 播放失败", () => {
+		expect(resolvePlaybackOutcome(["unknown", "unknown"])).toBe("failed");
 	});
 });

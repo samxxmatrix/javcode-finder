@@ -1937,6 +1937,18 @@ button:focus-visible {
 	animation: title-fade-in 0.18s ease;
 }
 
+/* 简介里恢复出来的链接：与整块展开热区做视觉区分，点击与键盘都不触发收起 */
+.trailer-preview__title-link {
+	color: var(--accent-gold-text);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+
+.trailer-preview__title-link:hover {
+	color: var(--accent-gold-hover);
+}
+
 /* 翻译失败后的重试行：在热区之外，带文字（图标单摆会被当成装饰） */
 .trailer-preview__translate-retry {
 	display: inline-flex;

@@ -132,9 +132,11 @@ export const App: React.FC = () => {
 
 	// 获取面板目标的标签页：优先绑定 tab，否则当前窗口活动 tab
 	const getTargetTab = async (): Promise<
-		{ id?: number; url?: string } | undefined
+		{ id?: number; url?: string; pendingUrl?: string } | undefined
 	> => {
-		let targetTab: { id?: number; url?: string } | undefined;
+		let targetTab:
+			| { id?: number; url?: string; pendingUrl?: string }
+			| undefined;
 		if (boundTabId) {
 			try {
 				targetTab = await browser.tabs.get(boundTabId);
@@ -180,7 +182,12 @@ export const App: React.FC = () => {
 
 		// Check for restricted URLs if available
 		const lowerUrl = url.toLowerCase();
+		// Chrome 网络错误页禁止注入；导航失败时 tab.url 常仍是原始失败地址，
+		// pendingUrl 才指向 chrome-error://chromewebdata/，两者都要判
+		const lowerPendingUrl = (activeTab.pendingUrl || "").toLowerCase();
 		if (
+			lowerUrl.startsWith("chrome-error://") ||
+			lowerPendingUrl.startsWith("chrome-error://") ||
 			lowerUrl.startsWith("chrome://") ||
 			lowerUrl.startsWith("chrome-extension://") ||
 			lowerUrl.startsWith("edge://") ||
@@ -487,8 +494,13 @@ export const App: React.FC = () => {
 			if (favoritesModeRef.current) return;
 
 			// 扫描后同步页面标记：有候选则标记（命中收藏的番号显示书签图标），
-			// 无候选/排除/不支持时仅清理旧标记；收藏读 storage 最新值，不依赖 state
-			if (extraction.tabId !== undefined) {
+			// 无候选/排除站点时仅清理旧标记；收藏读 storage 最新值，不依赖 state
+			if (extraction.unsupported) {
+				// 页面本身不可注入：本轮没有标记落地，作废上一轮的 tab/promise，
+				// 否则 Emby 索引晚到时仍会朝这个页面发一次注定失败的注入
+				markTabIdRef.current = undefined;
+				markDoneRef.current = null;
+			} else if (extraction.tabId !== undefined) {
 				const codes = extraction.candidates;
 				// 记下首次注入的 promise 与目标 tab：Emby 在库结果晚到时要等它之后补一次重绘
 				markTabIdRef.current = extraction.tabId;

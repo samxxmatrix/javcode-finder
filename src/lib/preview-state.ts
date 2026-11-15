@@ -102,12 +102,71 @@ function buildFallbackOrder(
 	];
 }
 
+/** 一次播放档失败的原因：只有「JT 主 playlist 明确 404」能确认资源不存在 */
+export type PlaybackFailureReason = "missing_trailer" | "unknown";
+
+export interface MissingTrailerErrorInput {
+	/** hls.js ErrorData.details */
+	details: string;
+	/** hls.js ErrorData.response?.code；超时 / 连接失败时为 0 或 undefined */
+	responseCode?: number;
+	/** hls.js ErrorData.url（本次请求地址，缺失时不否决） */
+	url?: string;
+	/** 本次起播档的 HLS 主播放列表地址 */
+	masterUrl: string;
+	/** 起播档来源 */
+	source: PreviewLookupSource;
+}
+
+/**
+ * 把一次 HLS fatal error 分类成「确认无片」或「普通播放失败」。
+ *
+ * 只认 JavTrailers 主播放列表的明确 HTTP 404：网络抖动（status 0 / 超时）、
+ * CORS 失败、5xx、403、以及子播放列表或分片 404 都不算 —— 后者是资源不完整，
+ * 不是「这个番号没有预告片」。分片阶段由 details 与 url 双重排除。
+ */
+export function classifyMissingTrailerError({
+	details,
+	responseCode,
+	url,
+	masterUrl,
+	source,
+}: MissingTrailerErrorInput): PlaybackFailureReason {
+	if (source !== "javtrailers") return "unknown";
+	if (details !== "manifestLoadError") return "unknown";
+	if (responseCode !== 404) return "unknown";
+	if (url !== undefined && url !== masterUrl) return "unknown";
+	return "missing_trailer";
+}
+
+/**
+ * 回退链走尽后的终局判定（合取，不是「出现过 404」）。
+ *
+ * 必须**有失败记录**且**每一档都是确认 404**才收口为无片：一旦混入超时、
+ * 网络、CORS、解码或 mp4 无码失败，就保持播放失败并保留重试入口 —— 否则
+ * 网络抖动会被误报成「暂无预告片」。
+ */
+export function resolvePlaybackOutcome(
+	failures: readonly PlaybackFailureReason[],
+): "no_trailer" | "failed" {
+	return failures.length > 0 &&
+		failures.every((reason) => reason === "missing_trailer")
+		? "no_trailer"
+		: "failed";
+}
+
 export interface PreviewPresentationInput {
 	resolution: PreviewResolution | { status: "loading" };
 	playbackStatus: PreviewPlaybackStatus;
 	hasCover: boolean;
 	hasTrailer: boolean;
 	noticeDismissed: boolean;
+	/**
+	 * 播放链已确认「资源不存在」（所有尝试档都拿到 HLS 主 playlist 404）。
+	 * 与 hasTrailer 的区别：解析期只有 previewUrl 字符串，这里才是播放期的事实。
+	 * 为真时把播放失败收口成「暂无预告片」，避免把没片说成播放故障。
+	 */
+	trailerMissing?: boolean;
 }
 
 export interface PreviewNotice {
@@ -214,8 +273,14 @@ export function armPlayingOnFirstFrame(
 export function getPreviewPresentation(
 	input: PreviewPresentationInput,
 ): PreviewPresentation {
-	const { resolution, playbackStatus, hasCover, hasTrailer, noticeDismissed } =
-		input;
+	const {
+		resolution,
+		playbackStatus,
+		hasCover,
+		hasTrailer,
+		noticeDismissed,
+		trailerMissing,
+	} = input;
 
 	if (resolution.status === "loading") {
 		return {
@@ -231,7 +296,11 @@ export function getPreviewPresentation(
 
 	const lookupFailed = resolution.status === "error";
 	const hasLookupErrors = lookupFailed || resolution.errors.length > 0;
-	const playbackFailed = playbackStatus === "failed";
+	// 播放链已确认资源不存在时，播放器内部仍是 failed（这次确实没播成），
+	// 但展示层不算播放故障：不给「重新播放」，只留「重新查询」。
+	const confirmedMissingTrailer =
+		trailerMissing === true && playbackStatus === "failed";
+	const playbackFailed = playbackStatus === "failed" && !confirmedMissingTrailer;
 	const notices: PreviewNotice[] = [];
 
 	if (hasLookupErrors) {
@@ -256,7 +325,10 @@ export function getPreviewPresentation(
 		});
 	}
 
-	if (resolution.status === "resolved" && !hasTrailer) {
+	if (
+		resolution.status === "resolved" &&
+		(!hasTrailer || confirmedMissingTrailer)
+	) {
 		notices.push({
 			key: "no_trailer",
 			errors: [],
@@ -278,8 +350,13 @@ export function getPreviewPresentation(
 		? notices.filter((notice) => !notice.dismissible)
 		: notices;
 	const hasLookupRetry = hasLookupErrors;
-	const retryAction: PreviewRetryAction | null =
-		playbackFailed && hasLookupRetry
+	// 确认无片时「重新查询」随提示一起出现、一起消失，不常驻：
+	// 用户关掉提示后不再给任何重试动作（中央区也不显示重试按钮）。
+	const retryAction: PreviewRetryAction | null = confirmedMissingTrailer
+		? noticeDismissed
+			? null
+			: { type: "lookup" }
+		: playbackFailed && hasLookupRetry
 			? { type: "multiple", actions: ["playback", "lookup"] }
 			: playbackFailed
 				? { type: "playback" }
@@ -290,7 +367,10 @@ export function getPreviewPresentation(
 	return {
 		showSpinner: false,
 		showCover: resolution.status === "resolved" && hasCover,
-		showPlayButton: resolution.status === "resolved" && hasTrailer,
+		showPlayButton:
+			resolution.status === "resolved" &&
+			hasTrailer &&
+			!confirmedMissingTrailer,
 		showPlaybackRetry: playbackFailed && noticeDismissed,
 		mediaMessage: playbackFailed
 			? "playback_failed"
