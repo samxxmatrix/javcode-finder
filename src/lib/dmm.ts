@@ -31,53 +31,62 @@ export interface DmmLookupErrorData {
 /**
  * 反代入口 URL 通用构造:去尾斜杠 + 可选路径段 + 编码番号 + Key。
  * base 为空（未配置）时返回空串，调用方跳过请求。
+ *
+ * `refresh` 为真时追加 `refresh=1`：服务端据此跳过永久缓存、重新抓源站。
+ * 只有用户显式点「重新加载」才该用 —— 它会让本次请求走完整上游链路（含 12 s 预览探测预算），
+ * 且会把结果写回共享缓存，影响所有调用方。
  */
 function buildProxyUrl(
 	baseUrl: string,
 	segments: string[],
 	key: string,
 	code: string,
+	refresh = false,
 ): string {
 	const trimmed = (baseUrl || "").trim().replace(/\/+$/, "");
 	if (!trimmed || !code) return "";
 	const path = segments.map((segment) => `/${segment}`).join("");
-	return `${trimmed}${path}/${encodeURIComponent(code)}?key=${encodeURIComponent(key)}`;
+	const query = `?key=${encodeURIComponent(key)}${refresh ? "&refresh=1" : ""}`;
+	return `${trimmed}${path}/${encodeURIComponent(code)}${query}`;
 }
 
 /**
- * 拼接完整查询 URL：GET {base}/dmm/{code}?key={key}。
+ * 拼接完整查询 URL：GET {base}/dmm/{code}?key={key}[&refresh=1]。
  * base 为空（未配置）时返回空串，调用方跳过请求。
  */
 export function buildDmmLookupUrl(
 	baseUrl: string,
 	key: string,
 	code: string,
+	refresh = false,
 ): string {
-	return buildProxyUrl(baseUrl, ["dmm"], key, code);
+	return buildProxyUrl(baseUrl, ["dmm"], key, code, refresh);
 }
 
 /**
- * 拼接 FALENO 查询 URL：GET {base}/faleno/{code}?key={key}。
+ * 拼接 FALENO 查询 URL：GET {base}/faleno/{code}?key={key}[&refresh=1]。
  * 与 DMM 共用同一反代入口（东京出口 + 永久缓存），响应形状一致。
  */
 export function buildFalenoLookupUrl(
 	baseUrl: string,
 	key: string,
 	code: string,
+	refresh = false,
 ): string {
-	return buildProxyUrl(baseUrl, ["faleno"], key, code);
+	return buildProxyUrl(baseUrl, ["faleno"], key, code, refresh);
 }
 
 /**
- * 拼接 D2PASS（无码源）查询 URL：GET {base}/d2pass/{code}?key={key}。
+ * 拼接 D2PASS（无码源）查询 URL：GET {base}/d2pass/{code}?key={key}[&refresh=1]。
  * 合并后三个查询各有显式前缀，不再有根路径通配。
  */
 export function buildD2passLookupUrl(
 	baseUrl: string,
 	key: string,
 	code: string,
+	refresh = false,
 ): string {
-	return buildProxyUrl(baseUrl, ["d2pass"], key, code);
+	return buildProxyUrl(baseUrl, ["d2pass"], key, code, refresh);
 }
 
 /**

@@ -23,6 +23,9 @@ import {
 import { ERRORS, errorResult, okResult } from "../shared/errors.js";
 import { readConfig } from "../shared/config.js";
 import { normalizeQuery } from "../shared/router.js";
+// 资料完整性判定跨源复用：d2pass 的 result 字段名刻意为对齐 DMM 口径（title / cover_url /
+// preview_url，见 resolveCode），复制一份必然漂移，所以直接用同一份判定与写回保护。
+import { shouldKeepPrevious } from "../lib/dmm/cache-entry.js";
 
 /**
  * 缓存载荷版本。**改动响应字段口径时必须递增**。
@@ -291,10 +294,21 @@ async function lookup(rawCode, cfg, debugInfo, { refresh = false, wantPreview = 
 	// 这种"暂时性残缺"绝不能写进**永久**缓存，否则该番号会被永久判成没有剧情。
 	if (debugInfo.d2passError) {
 		debugInfo.cacheSkipped = "d2pass-error";
-	} else {
-		await cacheSet(code, { v: SCHEMA_VERSION, data: resolved.result, partial: !wantPreview, quality: quality ?? null });
+		return { result: resolved.result };
 	}
-	return { result: resolved.result };
+
+	// refresh 重抓后若新数据资料不全、旧条目完整，保留旧条目（与 DMM 分支同一口径）：
+	// 用户点「重新加载」是要"更好或不变"，一次源站抖动不该把永久完整条目降级。
+	let payload = resolved.result;
+	if (refresh) {
+		const previous = usableCache(await cacheGet(code), { wantPreview, quality });
+		if (shouldKeepPrevious(previous, resolved.result)) {
+			payload = previous;
+			debugInfo.cacheKeptPrevious = true;
+		}
+	}
+	await cacheSet(code, { v: SCHEMA_VERSION, data: payload, partial: !wantPreview, quality: quality ?? null });
+	return { result: payload };
 }
 
 async function pool(items, limit, worker) {

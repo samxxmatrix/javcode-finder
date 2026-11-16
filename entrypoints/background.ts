@@ -25,6 +25,7 @@ import {
 } from "../src/lib/d2pass";
 import { isUncensoredCode } from "../src/lib/uncensored-code";
 import { createFalenoMissStore } from "../src/lib/faleno-miss";
+import { createRefreshThrottle } from "../src/lib/refresh-throttle";
 import {
 	buildResolutionCacheKey,
 	createResolutionCacheStore,
@@ -135,6 +136,10 @@ const falenoMiss = createFalenoMissStore();
 // 只缓存 resolved（空结果/失败不写）、只活在本会话、TTL 3 分钟 + 上限 50 条。
 // 实现与单测见 src/lib/resolution-cache.ts。
 const resolutionCache = createResolutionCacheStore<PreviewResolution>();
+
+// 「重新加载预览」的防连点节流：5 s 内同一番号只放行一次 refresh，
+// 后续点击降级为普通请求（命中刚写入的缓存，照样很快）。实现与单测见 src/lib/refresh-throttle.ts。
+const refreshThrottle = createRefreshThrottle();
 
 /** 反代查询统一入口：首次 8 s（D2PASS 传 12 s），失败后重试一次（5 s） */
 const fetchProxyWithRetry = (
@@ -918,15 +923,21 @@ export default defineBackground(() => {
 					return true;
 				}
 
-				// DMM 查询（内部共用）：返回结构化错误以便预览保留接口详情。
+				/**
+				 * DMM 查询（内部共用）：返回结构化错误以便预览保留接口详情。
+				 * `refresh` 来自用户显式点「重新加载」，会让服务端跳过永久缓存重抓源站。
+				 */
 				const lookupDmm = async (
 					baseUrl: string,
 					key: string,
 					code: string,
+					refresh: boolean,
 				): Promise<DmmLookupData | null> => {
 					let res: Response;
 					try {
-						res = await fetchProxyWithRetry(buildDmmLookupUrl(baseUrl, key, code));
+						res = await fetchProxyWithRetry(
+							buildDmmLookupUrl(baseUrl, key, code, refresh),
+						);
 					} catch (error) {
 						const kind =
 							error instanceof Error && error.name === "TimeoutError"
@@ -960,11 +971,12 @@ export default defineBackground(() => {
 					baseUrl: string,
 					apiKey: string,
 					falenoCode: string,
+					refresh: boolean,
 				): Promise<DmmLookupData | null> => {
 					let res: Response;
 					try {
 						res = await fetchProxyWithRetry(
-							buildFalenoLookupUrl(baseUrl, apiKey, falenoCode),
+							buildFalenoLookupUrl(baseUrl, apiKey, falenoCode, refresh),
 						);
 					} catch (error) {
 						throw {
@@ -1008,11 +1020,12 @@ export default defineBackground(() => {
 					baseUrl: string,
 					key: string,
 					code: string,
+					refresh: boolean,
 				): Promise<D2passLookupData | null> => {
 					let res: Response;
 					try {
 						res = await fetchProxyWithRetry(
-							buildD2passLookupUrl(baseUrl, key, code),
+							buildD2passLookupUrl(baseUrl, key, code, refresh),
 							D2PASS_FIRST_TIMEOUT_MS,
 						);
 					} catch (error) {
@@ -1271,10 +1284,19 @@ export default defineBackground(() => {
 					// resolve-preview 用"是否提供了 falenoLookup"判定分支，内部返回 null 会被当成
 					// "FALENO 查无"进而触发一次多余的 DMM 补查。
 					const falenoBranch = matchesFalenoPrefix(code, falenoPrefixes);
+
+					// 「重新加载预览」带 force：除了跳过本地解析缓存（上面已处理），
+					// 还要让服务端跳过永久缓存重抓源站（refresh=1）。
+					// 但必须防连点：5 s 内同一番号只放行一次 refresh，后续点击降级为普通请求 ——
+					// 那一次已经把新结果写回服务端缓存，第二次命中它反而更快。
+					const wantRefresh = msg.force === true && refreshThrottle.allow(code);
+					// FALENO 会话负缓存会把 FNS 号直接短路成 0 请求，不清掉的话重载毫无效果
+					if (wantRefresh) falenoMiss.delete(code);
+
 					const resolution = await resolvePreview({
 						d2passEnabled: d2passOn,
 						d2passLookup: async () => {
-							const hit = await lookupD2pass(apiBase, apiKey, code);
+							const hit = await lookupD2pass(apiBase, apiKey, code, wantRefresh);
 							if (!hit) return null;
 							return {
 								source: "d2pass",
@@ -1291,7 +1313,7 @@ export default defineBackground(() => {
 						},
 						lookupEnabled: proxyOn,
 						dmmLookup: async () => {
-							const dmm = await lookupDmm(apiBase, apiKey, code);
+							const dmm = await lookupDmm(apiBase, apiKey, code, wantRefresh);
 							if (!dmm) return null;
 							return {
 								source: "dmm",
@@ -1372,6 +1394,7 @@ export default defineBackground(() => {
 											apiBase,
 											apiKey,
 											code,
+											wantRefresh,
 										);
 										if (!proxied) {
 											// 404 / 40401(ITEM_NOT_FOUND) / 响应解析不到 = 确认查无

@@ -67,4 +67,26 @@ describe("createFalenoMissStore（FALENO 会话级负缓存）", () => {
 		expect(a.has("FNS-263")).toBe(true);
 		expect(b.has("FNS-263")).toBe(false);
 	});
+
+	it("delete 清掉单条记录，不影响其他番号（用户显式重载要能翻案）", () => {
+		const store = createFalenoMissStore();
+		store.mark("FNS-263");
+		store.mark("FNS-264");
+
+		store.delete("FNS-263");
+
+		expect(store.has("FNS-263")).toBe(false);
+		expect(store.has("FNS-264")).toBe(true);
+		expect(store.size()).toBe(1);
+	});
+
+	it("delete 不存在的番号是幂等空操作", () => {
+		const store = createFalenoMissStore();
+		store.mark("FNS-263");
+
+		store.delete("FNS-999");
+
+		expect(store.size()).toBe(1);
+		expect(store.has("FNS-263")).toBe(true);
+	});
 });

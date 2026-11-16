@@ -75,6 +75,23 @@ export function isEntryIncomplete(entry) {
 }
 
 /**
+ * `refresh=1` 重抓后是否应**保留旧条目**而不覆盖。
+ *
+ * 起因：`refresh` 只跳过"读"，写回是无条件的。若重抓恰好遇到源站缺封面/预告片，
+ * 就会把原本**永久**的完整条目降级成 6h 的残缺条目，6 小时内所有调用方都看到缺图。
+ * 用户点「重新加载」的意图是"更好或不变"，所以只在这种"变差"的方向上拦截；
+ * 新条目只要资料齐全就照常覆盖（标题改字、换封面都能正常落盘）。
+ *
+ * @param previous 旧条目（已过 {@link usableEntry} 版本/键值/档位守卫；无则传 null）
+ * @param next 本次重抓出的新条目
+ * @returns true = 保留旧条目；false = 正常写入新条目
+ */
+export function shouldKeepPrevious(previous, next) {
+	if (!previous || !next) return false;
+	return isEntryIncomplete(next) && !isEntryIncomplete(previous);
+}
+
+/**
  * 写缓存时应下发的 TTL（秒）：资料不全 → `ttlSeconds`；资料齐全 → null（永久缓存）。
  * `ttlSeconds <= 0` 表示关闭该策略（一律永久）——运维旋钮，见 `INCOMPLETE_CACHE_TTL_SECONDS`。
  * @param entry 即将写入的条目

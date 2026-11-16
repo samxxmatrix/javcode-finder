@@ -18,6 +18,13 @@ export interface FalenoMissStore {
 	has(code: string): boolean;
 	/** 记下"确认查无"；同步做 FIFO 淘汰 */
 	mark(code: string): void;
+	/**
+	 * 清除该番号的"确认查无"记录。
+	 *
+	 * 供用户**显式重载**时调用：点「重新加载」就是不相信上一轮结果，
+	 * 若不清这里，FNS 号会被会话内的假阴性直接短路成 0 网络请求，重载毫无效果。
+	 */
+	delete(code: string): void;
 	/** 当前记录条数（供测试与诊断） */
 	size(): number;
 }
@@ -35,6 +42,9 @@ export function createFalenoMissStore(
 				if (oldest !== undefined) misses.delete(oldest);
 			}
 			misses.add(code);
+		},
+		delete: (code) => {
+			misses.delete(code);
 		},
 		size: () => misses.size,
 	};

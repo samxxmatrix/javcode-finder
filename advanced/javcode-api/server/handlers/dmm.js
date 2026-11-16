@@ -32,7 +32,13 @@ import {
   hasDetailContent,
   isBlockedPage,
 } from '../lib/dmm/upstream-outcome.js';
-import { SCHEMA_VERSION, cacheKeyFrom, entryTtlSeconds, usableEntry } from '../lib/dmm/cache-entry.js';
+import {
+  SCHEMA_VERSION,
+  cacheKeyFrom,
+  entryTtlSeconds,
+  shouldKeepPrevious,
+  usableEntry,
+} from '../lib/dmm/cache-entry.js';
 
 const COMMON_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -215,9 +221,18 @@ async function lookupDmm(code, quality, refresh) {
     detail_url: CHANNELS[channel].detail(cid)
   };
 
-  if (cacheKey) await setCached(cacheKey, resultData, entryTtlSeconds(resultData, incompleteCacheTtl()));
+  // refresh 重抓后若新数据资料不全、旧条目完整，保留旧条目：
+  // 用户点「重新加载」的意图是"更好或不变"，一次源站抖动不该把永久完整条目降级成 6h 残缺条目。
+  // 非 refresh 路径走到这里必然旧条目不可用（否则前面就命中了），保护条件不成立，等价于原逻辑。
+  let toWrite = resultData;
+  if (refresh && cacheKey) {
+    const previous = usableEntry(await getCached(cacheKey), cacheKey, quality);
+    if (shouldKeepPrevious(previous, resultData)) toWrite = previous;
+  }
 
-  return okResult({ ...resultData, cached: false });
+  if (cacheKey) await setCached(cacheKey, toWrite, entryTtlSeconds(toWrite, incompleteCacheTtl()));
+
+  return okResult({ ...toWrite, cached: false });
 }
 
 
@@ -351,9 +366,16 @@ async function handleFaleno(code, refresh) {
     detail_url: worksUrl
   };
 
-  if (cacheKey) await setCached(cacheKey, resultData, entryTtlSeconds(resultData, incompleteCacheTtl()));
+  // 与 DMM 分支同一套保护：refresh 拿回的残缺页面不许覆盖旧的完整条目
+  let toWrite = resultData;
+  if (refresh && cacheKey) {
+    const previous = usableEntry(await getCached(cacheKey), canonical);
+    if (shouldKeepPrevious(previous, resultData)) toWrite = previous;
+  }
 
-  return okResult({ ...resultData, cached: false });
+  if (cacheKey) await setCached(cacheKey, toWrite, entryTtlSeconds(toWrite, incompleteCacheTtl()));
+
+  return okResult({ ...toWrite, cached: false });
 }
 
 /**

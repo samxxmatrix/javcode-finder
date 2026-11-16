@@ -28,6 +28,20 @@ describe("buildDmmLookupUrl", () => {
 	it("returns empty string when base URL is empty", () => {
 		expect(buildDmmLookupUrl("", "k", "BDSM-091")).toBe("");
 	});
+
+	it("refresh 时追加 refresh=1：让「重新加载」连服务端缓存一起绕过", () => {
+		expect(
+			buildDmmLookupUrl("https://api.example.com", "my-key", "BDSM-091", true),
+		).toBe("https://api.example.com/dmm/BDSM-091?key=my-key&refresh=1");
+	});
+
+	it("refresh 缺省（false）时 URL 形状与此前逐字相同", () => {
+		expect(
+			buildDmmLookupUrl("https://api.example.com", "my-key", "BDSM-091", false),
+		).toBe(
+			buildDmmLookupUrl("https://api.example.com", "my-key", "BDSM-091"),
+		);
+	});
 });
 
 describe("buildFalenoLookupUrl", () => {
@@ -46,6 +60,12 @@ describe("buildFalenoLookupUrl", () => {
 	it("returns empty string when base URL is empty", () => {
 		expect(buildFalenoLookupUrl("", "k", "FNS-263")).toBe("");
 	});
+
+	it("refresh 时追加 refresh=1", () => {
+		expect(
+			buildFalenoLookupUrl("https://api.example.com", "k", "FNS-263", true),
+		).toBe("https://api.example.com/faleno/FNS-263?key=k&refresh=1");
+	});
 });
 
 describe("buildD2passLookupUrl", () => {
@@ -63,6 +83,12 @@ describe("buildD2passLookupUrl", () => {
 
 	it("returns empty string when base URL is empty", () => {
 		expect(buildD2passLookupUrl("", "k", "HEYZO-3953")).toBe("");
+	});
+
+	it("refresh 时追加 refresh=1", () => {
+		expect(
+			buildD2passLookupUrl("https://x.test", "k", "HEYZO-3953", true),
+		).toBe("https://x.test/d2pass/HEYZO-3953?key=k&refresh=1");
 	});
 });
 
