@@ -696,23 +696,14 @@ button:focus-visible {
 }
 
 .unmatched-item__link:hover {
-	background-color: var(--border-strong);
-	color: var(--text-primary);
+	color: var(--accent-gold);
+	border-color: var(--accent-gold);
 }
 
-.unmatched-item__link--supjav:hover {
-	border-color: var(--accent-gold);
+.unmatched-item__link[aria-pressed="true"] {
 	color: var(--accent-gold);
-}
-
-.unmatched-item__link--javdb:hover {
+	background-color: rgba(245, 158, 11, 0.15);
 	border-color: var(--accent-gold);
-	color: var(--accent-gold);
-}
-
-.unmatched-item__link--custom:hover {
-	border-color: var(--accent-gold);
-	color: var(--accent-gold);
 }
 
 /* 番号定位结果边框：绿=成功、红=失败，3 秒后状态清除恢复选中样式 */
