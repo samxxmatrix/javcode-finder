@@ -1486,7 +1486,7 @@ button:focus-visible {
 	aspect-ratio: 16 / 9;
 	background: #000;
 	/* 卡片改 overflow: visible 后，顶部圆角与黑底裁剪由媒体区自己兜 */
-	border-radius: 10px 10px 0 0;
+	border-radius: 0;
 	overflow: hidden;
 }
 
