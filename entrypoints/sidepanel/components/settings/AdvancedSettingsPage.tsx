@@ -23,6 +23,8 @@ export function AdvancedSettingsPage() {
 	const [embyOpen, setEmbyOpen] = useState(false);
 	const [translateOpen, setTranslateOpen] = useState(false);
 	const [webdavOpen, setWebdavOpen] = useState(false);
+	// 恢复默认确认弹窗
+	const [confirmReset, setConfirmReset] = useState(false);
 	// 模型下拉（自定义 combobox）：点击箭头无条件显示全部模型，不按输入值过滤
 	const [modelsOpen, setModelsOpen] = useState(false);
 	const modelSelectRef = useRef<HTMLDivElement>(null);
@@ -61,6 +63,32 @@ export function AdvancedSettingsPage() {
 
 	return (
 		<div className="settings-page">
+			{confirmReset && (
+				<div className="confirm-overlay" role="dialog" aria-modal="true">
+					<div className="confirm-dialog">
+						<p className="confirm-dialog__text">{t.resetConfirm}</p>
+						<div className="confirm-dialog__actions">
+							<button
+								type="button"
+								className="popup-btn popup-btn--secondary"
+								onClick={() => setConfirmReset(false)}
+							>
+								{t.cancel}
+							</button>
+							<button
+								type="button"
+								className="popup-btn popup-btn--danger"
+								onClick={() => {
+									d.handleReset();
+									setConfirmReset(false);
+								}}
+							>
+								{t.confirm}
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 			<SettingsSection
 				title={t.settingsGroupSources}
 				meta={t.configuredCount(configuredCount, 2)}
@@ -700,10 +728,7 @@ export function AdvancedSettingsPage() {
 					<button
 						type="button"
 						className="settings-field__reset-link settings-section__aside"
-						onClick={() => {
-							// 没有保存按钮兜底，恢复默认必须二次确认
-							if (window.confirm(t.resetConfirm)) d.handleReset();
-						}}
+						onClick={() => setConfirmReset(true)}
 					>
 						{t.resetDefaults}
 					</button>

@@ -2074,6 +2074,49 @@ button:focus-visible {
 	color: var(--accent-gold);
 }
 
+/* ===== 危险操作确认弹窗：替代系统 window.confirm ===== */
+.confirm-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100;
+}
+
+.confirm-dialog {
+	width: 300px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-strong);
+	border-radius: 12px;
+	padding: 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.confirm-dialog__text {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-secondary);
+}
+
+.confirm-dialog__actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+.confirm-dialog__actions .popup-btn {
+	flex: 1;
+	font-size: 12px;
+	padding: 7px 10px;
+	margin-top: 0;
+}
+
 /* 云端配置冲突：本地与云端都有自定义配置时，等用户选恢复或覆盖 */
 .cloud-conflict {
 	margin-top: 8px;

@@ -219,6 +219,10 @@ export interface LocaleMessages {
 	translateServiceLabel: string;
 	resetDefaultsDesc: string;
 	resetConfirm: string;
+	/** 通用确认按钮 */
+	confirm: string;
+	/** 通用取消按钮 */
+	cancel: string;
 }
 
 export const messages: Record<SupportedLocale, LocaleMessages> = {
@@ -436,6 +440,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateServiceLabel: "AI 翻译服务",
     resetDefaultsDesc: "清除全部配置并恢复出厂设置，此操作不可撤销。",
     resetConfirm: "确定要恢复默认设置吗？所有配置（含 API 地址与密钥）都会被清除。",
+    confirm: "确认",
+    cancel: "取消",
   },
 
   "zh-hant": {
@@ -653,6 +659,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateServiceLabel: "AI 翻譯服務",
     resetDefaultsDesc: "清除全部設定並恢復出廠預設，此操作無法復原。",
     resetConfirm: "確定要恢復預設設定嗎？所有設定（含 API 位址與金鑰）都會被清除。",
+    confirm: "確認",
+    cancel: "取消",
   },
 
   en: {
@@ -875,6 +883,8 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateServiceLabel: "AI translation",
     resetDefaultsDesc: "Clear all settings and restore factory defaults. This cannot be undone.",
     resetConfirm: "Reset all settings to defaults? All configuration (including API URLs and keys) will be cleared.",
+    confirm: "Confirm",
+    cancel: "Cancel",
   },
 };
 
