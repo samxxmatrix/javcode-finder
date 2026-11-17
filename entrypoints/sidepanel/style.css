@@ -1446,15 +1446,15 @@ button:focus-visible {
     margin-right: 10px;
 }
 
-/* 方形图标按钮：与 popup-header__icon-btn 同规格（28×28 / 圆角6 / 同 hover 态） */
+/* 方形图标按钮：与 popup-header__icon-btn 同 hover/active 态（金边金字，背景不变） */
 .trailer-preview__icon-btn {
-	width: 28px;
-	height: 28px;
+	width: 24px;
+	height: 24px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	padding: 0;
-	border-radius: 6px;
+	border-radius: 4px;
 	background-color: var(--bg-surface-hover);
 	border: 1px solid var(--border-subtle);
 	color: var(--text-secondary);
@@ -1478,9 +1478,9 @@ button:focus-visible {
 	border-color: var(--accent-gold);
 }
 
-/* 关闭按钮：字号适配 28×28 占位 */
+/* 关闭按钮：字号适配 24×24 占位 */
 .trailer-preview__close {
-	font-size: 16px;
+	font-size: 18px;
 	padding-bottom: 2px;
 }
 
