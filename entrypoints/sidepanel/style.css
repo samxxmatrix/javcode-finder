@@ -24,14 +24,14 @@
 	--bg-surface: #ffffff;
 	--bg-surface-hover: #f1f5f9;
 	--border-subtle: #e2e8f0;
-	--border-strong: #cbd5e1;
+	--border-strong: #94a3b8;
 	--text-primary: #0f172a;
 	--text-secondary: #334155;
 	--text-muted: #64748b;
-	/* 金色强调在浅底上加深以保证对比度 */
-	--accent-gold: #b45309;
-	--accent-gold-hover: #92400e;
-	--accent-gold-text: #b45309;
+	/* 金色强调在浅底上提亮一档：hover 加深、文字色再深一档保证可读 */
+	--accent-gold: #d97706;
+	--accent-gold-hover: #b45309;
+	--accent-gold-text: #92400e;
 	--accent-red: #dc2626;
 }
 
