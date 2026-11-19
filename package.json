@@ -1,7 +1,7 @@
 {
   "name": "javcode-finder-extension",
   "description": "JavCode Finder browser extension",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "private": true,
   "type": "module",
   "scripts": {
