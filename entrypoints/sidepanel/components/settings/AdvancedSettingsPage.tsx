@@ -25,7 +25,7 @@ export function AdvancedSettingsPage() {
 	const [webdavOpen, setWebdavOpen] = useState(false);
 	// 恢复默认确认弹窗
 	const [confirmReset, setConfirmReset] = useState(false);
-	// 模型下拉（自定义 combobox）：点击箭头无条件显示全部模型，不按输入值过滤
+	// 模型下拉（自定义 combobox）：输入 ≥3 字符时模糊过滤，否则列出全部
 	const [modelsOpen, setModelsOpen] = useState(false);
 	const modelSelectRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +60,13 @@ export function AdvancedSettingsPage() {
 	const configuredCount = [lookupConfigured, embyConfigured].filter(
 		Boolean,
 	).length;
+
+	// 输入 ≥3 字符才过滤，避免手填模型名的前两字符就把列表缩空
+	const modelQuery = d.translateModel.trim().toLowerCase();
+	const visibleModels =
+		modelQuery.length >= 3
+			? d.translateModels.filter((m) => m.toLowerCase().includes(modelQuery))
+			: d.translateModels;
 
 	return (
 		<div className="settings-page">
@@ -444,9 +451,8 @@ export function AdvancedSettingsPage() {
 										<p className="settings-model-select__empty">
 											{t.translateModelsLoading}
 										</p>
-									) : d.translateModels.length > 0 ? (
-										// 不过滤：输入框已有值时，点箭头依然列出全部模型
-										d.translateModels.map((m) => (
+									) : visibleModels.length > 0 ? (
+										visibleModels.map((m) => (
 											<button
 												key={m}
 												type="button"
@@ -465,7 +471,9 @@ export function AdvancedSettingsPage() {
 										))
 									) : (
 										<p className="settings-model-select__empty">
-											{t.translateModelsEmpty}
+											{modelQuery.length >= 3 && d.translateModels.length > 0
+												? t.translateModelsNoMatch
+												: t.translateModelsEmpty}
 										</p>
 									)}
 								</div>

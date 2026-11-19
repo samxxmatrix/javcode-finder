@@ -174,7 +174,12 @@ export function useSettingsDraft({
 	const fetchTranslateModels = async (
 		urlOverride?: string,
 		keyOverride?: string,
-		options: { force?: boolean; autoSelect?: boolean } = {},
+		options: {
+			force?: boolean;
+			autoSelect?: boolean;
+			/** health 已拿到的模型列表：复用它，跳过二次 /v1/models 请求 */
+			prefetchedModels?: string[];
+		} = {},
 	) => {
 		const url = (urlOverride ?? latest.current.translateApiUrl).trim();
 		const key = (keyOverride ?? latest.current.translateApiKey).trim();
@@ -190,11 +195,16 @@ export function useSettingsDraft({
 		setTranslateModelsLoading(true);
 		setTranslateModelsError(null); // 清掉上次失败，避免下拉面板一直显示旧错误
 		try {
-			const res = (await browser.runtime.sendMessage({
-				type: "jt:models",
-				translateApiKey: key,
-				translateUrl: url,
-			})) as { models?: string[]; error?: string } | undefined;
+			// prefetched：health 已拿到列表时直接用，不再打 /v1/models；
+			// 其余情况带 force 让手动「获取模型」穿透 worker 的缓存。
+			const res = options.prefetchedModels
+				? { models: options.prefetchedModels }
+				: ((await browser.runtime.sendMessage({
+						type: "jt:models",
+						translateApiKey: key,
+						translateUrl: url,
+						force: options.force,
+					})) as { models?: string[]; error?: string } | undefined);
 			if (modelsSig.current !== sig) return; // 丢弃过期响应
 			const models = Array.isArray(res?.models) ? res.models : [];
 			const error = res?.error
@@ -260,7 +270,7 @@ export function useSettingsDraft({
 				translateApiKey: key,
 				translateUrl: url,
 				locale,
-			})) as { ok?: boolean; error?: string } | undefined;
+			})) as { ok?: boolean; error?: string; models?: string[] } | undefined;
 			if (!health?.ok) {
 				setTranslateVerifyError(
 					`${t.verifyFailed}：${health?.error || t.unknownError}`,
@@ -269,8 +279,11 @@ export function useSettingsDraft({
 				return;
 			}
 			setTranslateEnabled(true);
-			// 健康已通过，顺带拉取模型列表（显式参数，跳过 latest 旧帧）
-			void fetchTranslateModels(url, key);
+			// health 打的就是 /v1/models，响应里已含模型列表——直接复用，
+			// 不再发第二次 jt:models，省一次上游请求（免费档 RPM 有限）。
+			void fetchTranslateModels(url, key, {
+				prefetchedModels: health.models,
+			});
 		} catch {
 			setTranslateVerifyError(`${t.verifyFailed}：${t.networkError}`);
 			setTranslateEnabled(false);

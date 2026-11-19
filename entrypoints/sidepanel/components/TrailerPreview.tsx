@@ -6,6 +6,7 @@ import React, {
 	useRef,
 	useState,
 } from "react";
+import type { HlsConfig } from "hls.js";
 import { parseTitleLines } from "../../../src/lib/inline-links";
 import type { DetailPageFallback } from "../../../src/lib/javtrailers";
 import {
@@ -34,11 +35,6 @@ import {
 	canUseTitleAsShortTitle,
 	sourceLabelKey,
 } from "../../../src/lib/preview-source";
-import {
-	buildGoogleVerifyUrl,
-	buildMergedTranslateText,
-	splitMergedTranslation,
-} from "../../../src/lib/translate";
 import { buildMetaRow } from "../../../src/lib/preview-meta";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import { toExternalSearchCode } from "../../../src/lib/normalize-code";
@@ -78,6 +74,34 @@ const TITLE_SCROLLBAR_ZONE_PX = 10;
  * 再叠一个就是同屏两个圈。所以这里的反馈只有文字，且出现得足够晚 —— 短暂停顿不报。
  */
 const BUFFERING_HINT_DELAY_MS = 8000;
+
+/**
+ * hls.js 重试策略：默认值（分片 6 次 / 层级 4 次，退避上限 64s）在弱网下会叠加成
+ * 一两分钟的持续请求，表现为"关了面板还在拉流"。这里收紧为快速失败 ——
+ * 让回退链尽早推进到下一档，而不是对着同一档原地退避重试。
+ * 注意：重试次数变少会让部分抖动更早判 fatal，进而更早走回退（预期行为）。
+ */
+const HLS_CONFIG: Partial<HlsConfig> = {
+	manifestLoadingMaxRetry: 1,
+	levelLoadingMaxRetry: 2,
+	fragLoadingMaxRetry: 2,
+	manifestLoadingTimeOut: 8000,
+	levelLoadingTimeOut: 8000,
+	fragLoadingTimeOut: 10000,
+	manifestLoadingRetryDelay: 500,
+	levelLoadingRetryDelay: 500,
+	fragLoadingRetryDelay: 500,
+	manifestLoadingMaxRetryTimeout: 8000,
+	levelLoadingMaxRetryTimeout: 8000,
+	fragLoadingMaxRetryTimeout: 8000,
+};
+
+/**
+ * 扩展上下文存活轮询间隔。扩展被禁用/重载后，页面里的 JS 与 <video> 仍会存活并
+ * 继续拉流（实测关闭开关后仍向 DMM CDN 请求约 5 分钟）；浏览器不派发卸载事件、
+ * React 的 cleanup 也轮不到，只能自己轮询发现"我已不是扩展的一部分"。
+ */
+const EXTENSION_CONTEXT_POLL_MS = 1000;
 
 interface TrailerPreviewProps {
 	code: string;
@@ -147,22 +171,24 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	// 手动重试翻译进行中
 	const [retrying, setRetrying] = useState(false);
 	// 谷歌限流需要人工验证（打开验证页完成 reCAPTCHA 后自动重试）
-	const [needsVerify, setNeedsVerify] = useState(false);
-	// 翻译错误信息区：每行一条（Worker 失败原因 + 备用服务失败原因）；google-verify 不占用错误行
 	const [translateErrors, setTranslateErrors] = useState<string[] | null>(null);
-	// 验证弹窗的窗口 id（关闭时触发自动重试）
-	const verifyWinIdRef = useRef<number | null>(null);
+	// 纯失败框（无上游错误文本）被手动关闭：translateFailed 是派生值，
+	// 关闭错误文本不影响它，需独立 state 让"未知错误"框可被用户真正关掉
+	const [pureFailDismissed, setPureFailDismissed] = useState(false);
 
-	// 请求翻译并返回译文与错误码（translated 空 = 失败）；Worker 配置从设置读取随消息携带。
-	// workerError：Worker 失败原因（错误码+文案），即使谷歌兜底成功也会带回供错误行提示。
-	// 全程静默：翻译链路不向控制台输出任何异常
-	const requestTranslate = async (
-		text: string,
-	): Promise<{ translated: string; error?: string; workerError?: string }> => {
+	// 请求翻译并返回逐段译文与错误码：texts=[短标题, 介绍]（javtrailers 源只有标题一项），
+	// AI 与兜底统一按数组提交、按数组返回，不再有 <code>/<span> 拼装单串。
+	// workerError：Worker/AI 失败原因，即使兜底成功也带回供错误行提示。全程静默。
+	const requestTranslate = async (texts: string[]): Promise<{
+		translatedParts?: string[];
+		error?: string;
+		workerError?: string;
+	}> => {
 		const s = getSettings();
 		const res = (await browser.runtime.sendMessage({
 			type: "jt:translate",
-			text,
+			text: texts[0] || "",
+			texts,
 			target: locale === "en" ? "en" : locale === "zh-hant" ? "zh-TW" : "zh-CN",
 			translateApiKey: s.translateApiKey,
 			translateModel: s.translateModel,
@@ -170,47 +196,42 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			translateEnabled: s.translateEnabled,
 			fallbackService: s.fallbackService,
 		})) as
-			| { translated?: string; error?: string; workerError?: string }
+			| {
+					translatedParts?: string[];
+					error?: string;
+					workerError?: string;
+			  }
 			| undefined;
 		return {
-			translated: res?.translated || "",
+			translatedParts: res?.translatedParts,
 			error: res?.error,
 			workerError: res?.workerError,
 		};
 	};
 
-	// 翻译结果应用到状态：拼装翻译时按 <code> 保护标记（翻译后还原为花括号）拆分标题/介绍译文；
-	// javtrailers 源无拼装（卡片标题即标题），译文放标题行
+	// 逐段译文直接取 parts[0]=标题、parts[1]=介绍；两段各自独立翻译，无需拆标记
 	const applyTranslation = (result: {
-		translated: string;
+		translatedParts?: string[];
 		error?: string;
 		workerError?: string;
 	}) => {
-		setNeedsVerify(false);
-		if (result.translated) {
+		const parts = result.translatedParts;
+		if (parts?.length && parts.some((p) => p)) {
 			if (media?.shortTitle) {
-				// dmm 源：拼装翻译，拆不出时整体作为介绍译文
-				const split = splitMergedTranslation(result.translated);
-				setTranslatedShort(split.short);
-				setTranslatedLong(split.long);
+				setTranslatedShort(parts[0] || null);
+				setTranslatedLong(parts[1] || null);
 			} else {
-				// javtrailers 源：译文即标题译文
-				setTranslatedShort(result.translated);
+				// javtrailers 源无短标题：只有一段
+				setTranslatedShort(parts[0] || null);
 				setTranslatedLong(null);
 			}
-			// 兜底成功时也显示 Worker 失败原因（提示主翻译服务异常）
 			setTranslateErrors(result.workerError ? [result.workerError] : null);
 			return true;
 		}
-		if (result.error === "google-verify") {
-			setNeedsVerify(true);
-			setTranslateErrors(result.workerError ? [result.workerError] : null);
-		} else {
-			const errors = [result.workerError, result.error].filter(
-				(x): x is string => Boolean(x),
-			);
-			setTranslateErrors(errors.length ? errors : null);
-		}
+		const errors = [result.workerError, result.error].filter(
+			(x): x is string => Boolean(x),
+		);
+		setTranslateErrors(errors.length ? errors : null);
 		return false;
 	};
 	// 通过 background 解析到的媒体信息（dmm 优先命中或 javtrailers 兜底）
@@ -258,6 +279,37 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 
 	// 卸载时收计时器，避免回调打到已卸载组件
 	useEffect(() => clearBuffering, [clearBuffering]);
+
+	/**
+	 * 扩展上下文失效自检：关闭/重载扩展时浏览器直接弃掉扩展页面，不派发 pagehide，
+	 * React 的 cleanup 也因此轮不到，hls 实例与 <video> 会继续拉流数分钟。
+	 * 这里轮询 runtime.id 自行发现失效并全量停机 —— 只做清理，不写 state：
+	 * 上下文失效后再触发渲染可能碰到已不可用的扩展 API。
+	 */
+	useEffect(() => {
+		if (typeof browser === "undefined") return;
+		const timer = window.setInterval(() => {
+			let alive = true;
+			try {
+				alive = Boolean(browser.runtime?.id);
+			} catch {
+				// Firefox 在上下文失效后访问 runtime 会抛，同样视为失效
+				alive = false;
+			}
+			if (alive) return;
+			window.clearInterval(timer);
+			// 作废在途回调，避免它们再对已失效的上下文做事
+			playbackRequestRef.current++;
+			destroyHlsInstance(hlsRef);
+			const video = videoRef.current;
+			if (video) {
+				video.pause();
+				video.removeAttribute("src");
+				video.load();
+			}
+		}, EXTENSION_CONTEXT_POLL_MS);
+		return () => window.clearInterval(timer);
+	}, []);
 
 	const media: PreviewMedia | null =
 		resolution.status === "resolved" ? resolution.media : null;
@@ -335,9 +387,9 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		setTranslatedShort(null);
 		setTranslatedLong(null);
 		setTitleReady(false);
-		setNeedsVerify(false);
 		setRetrying(false);
 		setTranslateErrors(null);
+		setPureFailDismissed(false);
 
 		try {
 			const settings = getSettings();
@@ -386,7 +438,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 	}, [initialCoverUrl]);
 
 	// 三种界面语言都翻译标题：简中→简体中文、繁中→繁体中文、英文→英文（源文为日文）。
-	// 失败保持 null（回退原文）。标题与介绍拼装一次发送（标题 <code> 标签保护标记），返回后还原拆分。
+	// 失败保持 null（回退原文）。标题与介绍作为数组的两段提交，各自独立翻译后按序回填。
 	useEffect(() => {
 		// 闭包内 property narrowing 不保留，取局部常量
 		const title = media?.title;
@@ -396,10 +448,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		let disposed = false;
 		void (async () => {
 			try {
-				const translateInput = shortTitle
-					? buildMergedTranslateText(shortTitle, title)
-					: title;
-				const result = await requestTranslate(translateInput);
+				const texts = shortTitle ? [shortTitle, title] : [title];
+				const result = await requestTranslate(texts);
 				if (!disposed) {
 					applyTranslation(result);
 					setTitleReady(true);
@@ -424,10 +474,8 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 		if (!title || retrying) return;
 		setRetrying(true);
 		try {
-			const translateInput = media?.shortTitle
-				? buildMergedTranslateText(media.shortTitle, title)
-				: title;
-			const result = await requestTranslate(translateInput);
+			const texts = media?.shortTitle ? [media.shortTitle, title] : [title];
+			const result = await requestTranslate(texts);
 			applyTranslation(result);
 		} catch {
 			// 保持失败状态，图标仍在可再次点击
@@ -435,39 +483,6 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			setRetrying(false);
 		}
 	};
-
-	// 打开谷歌验证小窗口：直接加载带标题文本的 gtx 完整 URL——
-	// 该 URL 在浏览器中会触发谷歌的验证页（translate.google.com 首页则不会）
-	const openVerifyWindow = async (text: string) => {
-		try {
-			const win = await browser.windows.create({
-				url: buildGoogleVerifyUrl(
-					text,
-					locale === "en" ? "en" : locale === "zh-hant" ? "zh-TW" : "zh-CN",
-				),
-				type: "popup",
-				width: 420,
-				height: 640,
-			});
-			verifyWinIdRef.current = win?.id ?? null;
-		} catch {
-		// 创建窗口失败：用户仍可点手动重试
-		}
-	};
-
-	// 验证窗口关闭视为验证完成，自动重试一次翻译
-	useEffect(() => {
-		if (typeof browser === "undefined" || !browser.windows?.onRemoved) return;
-		const handleRemoved = (windowId: number) => {
-			if (verifyWinIdRef.current !== windowId) return;
-			verifyWinIdRef.current = null;
-			void handleRetryTranslate();
-		};
-		browser.windows.onRemoved.addListener(handleRemoved);
-		return () => {
-			browser.windows.onRemoved.removeListener(handleRemoved);
-		};
-	}, []);
 
 	// 拉取详情页备用媒体；每个番号只拉一次（结果含 null 也缓存，不重复请求）
 	const requestFallback = async (
@@ -673,7 +688,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 				const { default: Hls } = await import("hls.js/light");
 				if (requestId !== playbackRequestRef.current) return;
 				if (Hls.isSupported()) {
-					const hls = new Hls();
+					const hls = new Hls(HLS_CONFIG);
 					hlsRef.current = hls;
 					hls.loadSource(choice.previewUrl);
 					hls.attachMedia(video);
@@ -1402,7 +1417,7 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 			{/* 错误 / 验证 / 重试刻意放在热区之外：
 				① 它们都是可点控件，留在区内会被「点一下切换」抢走点击；
 				② 收起态只有 73px，塞在里面会被裁掉，出错时反而看不见。 */}
-			{Boolean(translateErrors?.length || needsVerify || translateFailed) && (
+			{Boolean(translateErrors?.length || translateFailed) && (
 				<div className="trailer-preview__notices">
 					{translateErrors && translateErrors.length > 0 && (
 						<div className="trailer-preview__translate-error" role="alert">
@@ -1411,11 +1426,35 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 									<span
 										key={`${index}-${message}`}
 										className="trailer-preview__translate-error-text"
+										title={message}
 									>
 										{message}
 									</span>
 								))}
 							</div>
+							<button
+								type="button"
+								className="trailer-preview__translate-retry-icon"
+								onClick={handleRetryTranslate}
+								disabled={retrying}
+								title={t.retryTranslate}
+								aria-label={t.retryTranslate}
+							>
+								{retrying ? (
+									<span className="spinner spinner--small" aria-hidden="true" />
+								) : (
+									<svg
+										viewBox="0 0 1024 1024"
+										fill="currentColor"
+										width="12"
+										height="12"
+										aria-hidden="true"
+									>
+										<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
+										<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
+									</svg>
+								)}
+							</button>
 							<button
 								type="button"
 								className="trailer-preview__translate-error-close"
@@ -1435,43 +1474,59 @@ export const TrailerPreview: React.FC<TrailerPreviewProps> = ({
 							</button>
 						</div>
 					)}
-					{needsVerify && (
-						<div className="trailer-preview__verify">
-							<span>{t.googleVerifyHint}</span>
+					{/* 纯失败（translateFailed）但无任何上游错误文本：套红框、兜底显示"未知错误"；
+						关闭只隐藏本框（translateFailed 是派生值，关错误文本对它无效），换号/重译复位 */}
+					{!translateErrors?.length && translateFailed && !pureFailDismissed && (
+						<div className="trailer-preview__translate-error" role="alert">
+							<div className="trailer-preview__translate-error-list">
+								<span
+									className="trailer-preview__translate-error-text"
+									title={t.translateUnknownError}
+								>
+									{t.translateUnknownError}
+								</span>
+							</div>
 							<button
 								type="button"
-								className="trailer-preview__verify-btn"
-								onClick={() =>
-									openVerifyWindow(displayLongTitle || displayShortTitle || "")
-								}
+								className="trailer-preview__translate-retry-icon"
+								onClick={handleRetryTranslate}
+								disabled={retrying}
+								title={t.retryTranslate}
+								aria-label={t.retryTranslate}
 							>
-								{t.openVerifyPage}
+								{retrying ? (
+									<span className="spinner spinner--small" aria-hidden="true" />
+								) : (
+									<svg
+										viewBox="0 0 1024 1024"
+										fill="currentColor"
+										width="12"
+										height="12"
+										aria-hidden="true"
+									>
+										<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
+										<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
+									</svg>
+								)}
 							</button>
-						</div>
-					)}
-					{translateFailed && (
-						<button
-							type="button"
-							className="trailer-preview__translate-retry"
-							onClick={handleRetryTranslate}
-							disabled={retrying}
-						>
-							{retrying ? (
-								<span className="spinner spinner--small" aria-hidden="true" />
-							) : (
+							<button
+								type="button"
+								className="trailer-preview__translate-error-close"
+								onClick={() => setPureFailDismissed(true)}
+								title={t.closeError}
+								aria-label={t.closeError}
+							>
 								<svg
-									viewBox="0 0 1024 1024"
+									viewBox="0 0 20 20"
 									fill="currentColor"
-									width="12"
-									height="12"
+									width="11"
+									height="11"
 									aria-hidden="true"
 								>
-									<path d="M677.676657 294.6142c19.165116 57.5433 44.715939 102.2992 89.431879 147.0551 38.322239-38.3622 63.873063-89.5118 83.038178-147.0551h-172.470057z m-421.56861 319.685h166.076358l-83.038179-223.7795-83.038179 223.7795z" />
-									<path d="M894.854661 0.504H128.353929C58.095158 0.504 0.607803 58.0473 0.607803 128.378v767.244c0 70.3307 57.487355 127.874 127.746126 127.874h766.500733c70.258771 0 127.746126-57.5433 127.746126-127.874V128.378c0-70.3307-51.101647-127.874-127.746126-127.874zM581.867062 825.2913c-12.771416 12.7874-25.550824 12.7874-38.322239 12.7874-6.3937 0-19.165116 0-25.550824-6.3937-6.3937-6.3937-12.779408 0-12.779408-6.3937s-6.385708-12.7874-12.771415-25.5748c-6.3937-12.7874-6.3937-19.1811-12.779408-31.9685l-25.542832-70.3307H230.557224L205.0064 767.748c-12.771416 25.5748-19.165116 44.7559-25.550824 57.5433-6.3937 12.7874-19.165116 12.7874-38.322239 12.7874-12.779408 0-25.550824-6.3937-38.330231-12.7874-12.771416-12.7874-19.157124-19.1811-19.157124-31.9685 0-6.3937 0-12.7874 6.385708-25.5748 6.3937-12.7874 6.3937-19.1811 12.771416-31.9685l140.525533-358.0472c6.3937-12.7874 6.3937-25.5748 12.779408-38.3622 6.385708-12.7874 12.771416-25.5748 19.157124-31.9685 6.3937-6.3937 12.779408-19.1811 25.550823-25.5748 12.779408-6.3937 25.550824-6.3937 38.330232-6.3937 12.771416 0 25.542832 0 38.322239 6.3937 12.771416 6.3937 19.165116 12.7874 25.550824 25.5748 6.385708 6.3937 12.771416 19.1811 19.157124 31.9685 6.3937 12.7874 12.779408 25.5748 19.165115 44.7559l140.525534 351.6535c12.771416 25.5748 19.165116 44.7559 19.165116 57.5433-6.3937 6.3937-12.779408 19.1811-19.165116 31.9685zM933.176901 575.937c-70.258771-25.5748-121.360418-57.5433-166.076358-95.9055-44.707947 44.7559-102.195302 76.7244-172.462065 95.9055l-19.157124-31.9685c70.258771-19.1811 127.746126-44.7559 172.462066-89.5118C703.22748 409.7008 664.905241 352.1575 652.125833 288.2205h-63.873063v-25.5748h172.470058c-12.7874-19.1811-25.558816-44.7559-38.330232-63.937l19.157124-6.3937c12.779408 19.1811 31.944524 44.7559 44.715939 70.3307h159.682658v31.9685h-63.873063c-19.157124 63.937-51.093655 121.4803-89.423887 159.8425 44.715939 38.3622 95.809594 70.3307 166.076358 89.5118l-25.550824 31.9685z" />
+									<path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
 								</svg>
-							)}
-							<span>{t.retryTranslate}</span>
-						</button>
+							</button>
+						</div>
 					)}
 				</div>
 			)}

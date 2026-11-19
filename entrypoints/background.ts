@@ -113,8 +113,12 @@ import type { SupportedLocale } from "../src/lib/types";
 // 反代查询（CF 入口 → 东京 Vercel）超时策略：
 // 首次 8 s 覆盖冷启动（实测 4.4 s）；失败后的第二次只给 5 s —— 此时实例已被首次请求唤醒，
 // 正常耗时 0.7-1.8 s，不需要再等满 8 s。最坏 13 s 后降级到下一级数据源。
-/** 自建翻译 Worker 的请求超时：Worker 链路偏慢，5s 经常在译文正常返回前就误报超时 */
-const WORKER_TIMEOUT_MS = 10000;
+/**
+ * 自建翻译 Worker 的请求超时：Numes 上游 P90 超过 10s（实测 GLM 15.7s / Kimi 23-34s），
+ * 10s 会让约三分之一的请求在译文返回前就 abort，只能靠手动重试。
+ * 放宽到 30s，Worker 侧 28s 收口，留 2s 给边缘与网络；代价是失败时降级更慢。
+ */
+const WORKER_TIMEOUT_MS = 30000;
 
 const PROXY_LOOKUP_FIRST_TIMEOUT_MS = 8000;
 const PROXY_LOOKUP_RETRY_TIMEOUT_MS = 5000;
@@ -595,6 +599,8 @@ export default defineBackground(() => {
 					type?: string;
 					code?: string;
 					text?: string;
+					/** 兜底翻译的逐段原文 [短标题, 介绍]；worker 一级仍用 text 拼装文本 */
+					texts?: string[];
 					target?: TranslateTarget;
 					translateApiKey?: string;
 					translateModel?: string;
@@ -635,6 +641,11 @@ export default defineBackground(() => {
 					const key = (msg.translateApiKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					const model = (msg.translateModel || "").trim();
+					// 待译文本段：短标题 + 介绍各占一项（javtrailers 源只有标题一项）。
+					// AI 与兜底共用同一数组，统一按段独立翻译，不再拼 <code>/<span> 标记。
+					const parts: string[] = Array.isArray(msg.texts)
+						? msg.texts
+						: [msg.text!];
 					void (async () => {
 						// 一级：自建翻译服务（OpenAI 兼容 /v1/chat/completions）
 						// 仅开关开启且地址与 Key 齐全时尝试
@@ -647,17 +658,21 @@ export default defineBackground(() => {
 										Authorization: `Bearer ${key}`,
 										"Content-Type": "application/json",
 									},
-									body: buildOpenAIRequestBody(msg.text!, target, model),
+									body: buildOpenAIRequestBody(parts, target, model),
 									signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
 								});
 								if (res.ok) {
 									const data = await res.json();
-									const translated = parseOpenAITranslation(data);
-									if (translated) {
-										sendResponse({ translated });
+									const translatedParts = parseOpenAITranslation(data);
+									// 逐段译文数与原文段数对齐才算成功（模型漏项/多项都视为违约降级）
+									if (
+										translatedParts.length === parts.length &&
+										translatedParts.some((t) => t.trim())
+									) {
+										sendResponse({ translatedParts, workerError });
 										return;
 									}
-									// 空译文 → 记录原因并降级备用服务
+									// 译文缺失或段数不符 → 记录原因并降级备用服务
 									workerError = formatOpenAIError(res.status, data, target);
 								} else {
 									// 非 2xx → 记录原因并降级备用服务
@@ -674,68 +689,66 @@ export default defineBackground(() => {
 								workerError = formatOpenAIFetchError(error, target);
 							}
 						}
+						// 二级兜底：复用同一 parts 数组，短标题与介绍各自独立提交（数组批量），
+						// 两段独立翻译从根上避免相似文本被跨段合并（SKTH-010「阶级」事故）。
 						// 二级：微软 Edge 内置翻译接口（无认证；参数校验严格，语言码走 BCP-47 映射）
-						if (fallback === "bing") {
+							if (fallback === "bing") {
+								try {
+									const res = await fetch(buildBingUrl(target), {
+										method: "POST",
+										headers: { "Content-Type": "application/json" },
+										body: buildBingBody(parts),
+										signal: AbortSignal.timeout(5000),
+									});
+									if (!res.ok) {
+										sendResponse({
+											translated: "",
+											error: formatBingError(res.status, target),
+											workerError,
+										});
+										return;
+									}
+									const data = await res.json();
+									sendResponse({
+										translatedParts: parseBingResponse(data),
+										workerError,
+									});
+								} catch (error) {
+									sendResponse({
+										translated: "",
+										error: formatBingFetchError(error, target),
+										workerError,
+									});
+								}
+								return;
+							}
+							// 二级：谷歌 gtx t 端点（POST 表单；single 端点已被风控封禁，不再使用）
 							try {
-								const res = await fetch(buildBingUrl(target), {
+								const res = await fetch(buildGooglePostUrl(target), {
 									method: "POST",
-									headers: { "Content-Type": "application/json" },
-									body: buildBingBody(msg.text!),
+									body: buildGoogleBody(parts),
 									signal: AbortSignal.timeout(5000),
 								});
 								if (!res.ok) {
 									sendResponse({
 										translated: "",
-										error: formatBingError(res.status, target),
+										error: formatGoogleError(res.status, target),
 										workerError,
 									});
 									return;
 								}
 								const data = await res.json();
 								sendResponse({
-									translated: parseBingResponse(data),
+									translatedParts: parseGoogleResponse(data),
 									workerError,
 								});
 							} catch (error) {
 								sendResponse({
 									translated: "",
-									error: formatBingFetchError(error, target),
+									error: formatGoogleFetchError(error, target),
 									workerError,
 								});
 							}
-							return;
-						}
-						// 二级：谷歌 gtx t 端点（POST 表单；single 端点已被风控封禁，不再使用）
-						try {
-							const res = await fetch(buildGooglePostUrl(target), {
-								method: "POST",
-								body: buildGoogleBody(msg.text!),
-								signal: AbortSignal.timeout(5000),
-							});
-							if (!res.ok) {
-								sendResponse({
-									translated: "",
-									// 403/429 = 谷歌限流：界面提示人工验证（打开验证页后重试）
-									error:
-										res.status === 403 || res.status === 429
-											? "google-verify"
-											: formatGoogleError(res.status, target),
-									workerError,
-								});
-								return;
-							}
-							const data = await res.json();
-							sendResponse({
-								translated: parseGoogleResponse(data),
-								workerError,
-							});
-						} catch (error) {
-							sendResponse({
-								translated: "",
-								error: formatGoogleFetchError(error, target),
-								workerError,
-							});
-						}
 					})();
 					return true;
 				}
@@ -768,19 +781,28 @@ export default defineBackground(() => {
 										: res.status >= 500
 											? "server"
 											: "http";
-								sendResponse({
-									ok: false,
-									reason,
-									error: `HTTP ${res.status}`,
-								});
+								// 优先透传 worker 的可读文案（如「超出 RPM 限制,请求过多」）
+								let message = res.status === 429 ? "超出 RPM 限制,请求过多" : `HTTP ${res.status}`;
+								try {
+									const errBody = (await res.json()) as { error?: { message?: string } };
+									if (typeof errBody?.error?.message === "string" && errBody.error.message) {
+										message = errBody.error.message;
+									}
+								} catch {
+									// 响应体非 JSON：保留按状态码生成的文案
+								}
+								sendResponse({ ok: false, reason, error: message });
 								return;
 							}
 							const data = await res.json();
 							const healthy = parseOpenAIHealth(data);
+							// 顺带回传模型列表：health 与 models 打的是同一个 /v1/models 端点，
+							// 复用这份响应可省掉打开开关时紧随其后的第二次请求（省上游 RPM）。
 							sendResponse({
 								ok: healthy,
 								reason: healthy ? "ok" : "abnormal",
 								error: healthy ? undefined : m.abnormalResponse,
+								models: healthy ? parseOpenAIModels(data) : undefined,
 							});
 						} catch {
 							// 网络层失败不展示浏览器英文消息（如 Failed to fetch）
@@ -800,15 +822,29 @@ export default defineBackground(() => {
 							return;
 						}
 						try {
-							const res = await fetch(buildOpenAIUrl(baseUrl, "models"), {
+							// 手动「获取模型」带 force → ?force=1 穿透 worker 的模型缓存；
+							// 自动拉取不带 → 走缓存，省上游 RPM。
+							const modelsUrl = buildOpenAIUrl(baseUrl, "models");
+							const url = msg.force
+								? `${modelsUrl}${modelsUrl.includes("?") ? "&" : "?"}force=1`
+								: modelsUrl;
+							const res = await fetch(url, {
 								headers: { Authorization: `Bearer ${key}` },
 								signal: AbortSignal.timeout(WORKER_TIMEOUT_MS),
 							});
 							if (!res.ok) {
-								sendResponse({
-									models: [],
-									error: `HTTP ${res.status}`,
-								});
+								// 优先透传 worker 的 error.message（如「超出 RPM 限制,请求过多」）；
+								// 非 OpenAI 错误体回退状态码，直连第三方端点遇 429 时用本地兜底文案。
+								let message = res.status === 429 ? "超出 RPM 限制,请求过多" : `HTTP ${res.status}`;
+								try {
+									const errBody = (await res.json()) as { error?: { message?: string } };
+									if (typeof errBody?.error?.message === "string" && errBody.error.message) {
+										message = errBody.error.message;
+									}
+								} catch {
+									// 响应体非 JSON：保留按状态码生成的文案
+								}
+								sendResponse({ models: [], error: message });
 								return;
 							}
 							const data = await res.json();

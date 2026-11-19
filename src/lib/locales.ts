@@ -111,14 +111,15 @@ export interface LocaleMessages {
 	bufferingSlow: string;
 	closePreview: string;
 	retryTranslate: string;
-	googleVerifyHint: string;
-	openVerifyPage: string;
+	/** 翻译失败但无任何上游错误文本时的兜底提示（纯失败/消息通道异常/空译文） */
+	translateUnknownError: string;
 	translateApiKeyLabel: string;
 	translateModelLabel: string;
 	translateModelPlaceholder: string;
 	translateModelsRefresh: string;
 	translateModelsLoading: string;
 	translateModelsEmpty: string;
+	translateModelsNoMatch: string;
 	fallbackServiceLabel: string;
 	fallbackGoogle: string;
 	fallbackBing: string;
@@ -321,14 +322,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     bufferingSlow: "网络较慢，可切换预览源",
     closePreview: "关闭预览",
     retryTranslate: "重新翻译",
-    googleVerifyHint: "谷歌翻译需要人工验证",
-    openVerifyPage: "打开验证页面",
+    translateUnknownError: "未知错误",
     translateApiKeyLabel: "翻译 API Key",
     translateModelLabel: "模型",
     translateModelPlaceholder: "留空用后端默认模型",
     translateModelsRefresh: "获取模型",
     translateModelsLoading: "加载模型中…",
     translateModelsEmpty: "未获取到模型列表，可手动输入",
+    translateModelsNoMatch: "无匹配模型",
     fallbackServiceLabel: "备用翻译服务",
     fallbackGoogle: "谷歌翻译",
     fallbackBing: "微软翻译",
@@ -540,14 +541,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     bufferingSlow: "網路較慢，可切換預覽來源",
     closePreview: "關閉預覽",
     retryTranslate: "重新翻譯",
-    googleVerifyHint: "谷歌翻譯需要人工驗證",
-    openVerifyPage: "開啟驗證頁面",
+    translateUnknownError: "未知錯誤",
     translateApiKeyLabel: "翻譯 API Key",
     translateModelLabel: "模型",
     translateModelPlaceholder: "留空用後端預設模型",
     translateModelsRefresh: "取得模型",
     translateModelsLoading: "載入模型中…",
     translateModelsEmpty: "未獲取到模型清單，可手動輸入",
+    translateModelsNoMatch: "無符合模型",
     fallbackServiceLabel: "備用翻譯服務",
     fallbackGoogle: "谷歌翻譯",
     fallbackBing: "微軟翻譯",
@@ -763,14 +764,14 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     bufferingSlow: "Slow network — try switching the preview source",
     closePreview: "Close preview",
     retryTranslate: "Retry translation",
-    googleVerifyHint: "Google Translate needs human verification",
-    openVerifyPage: "Open verification page",
+    translateUnknownError: "Unknown error",
     translateApiKeyLabel: "Translation API Key",
     translateModelLabel: "Model",
     translateModelPlaceholder: "Leave empty for backend default",
     translateModelsRefresh: "Get models",
     translateModelsLoading: "Loading models…",
     translateModelsEmpty: "No models fetched; type manually",
+    translateModelsNoMatch: "No matching models",
     fallbackServiceLabel: "Fallback translation service",
     fallbackGoogle: "Google Translate",
     fallbackBing: "Microsoft Translate",

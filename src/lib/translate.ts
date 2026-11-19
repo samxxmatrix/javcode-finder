@@ -79,92 +79,92 @@ export function buildOpenAIUrl(
 
 /**
  * 按目标语言生成翻译指令（system 提示词）。
- * 与 splitMergedTranslation 的 <code> 拆分契约强绑定：模型若移动/删改标签，或把标签内
- * 当作代码原样保留，标题就会串进介绍，故用显式规则 + 示例锁定输出结构。
- * 借鉴通用翻译提示词的「禁止前缀」「保持段落」规则，但不引入 %% 等其它分隔符协议。
+ * 与 parseOpenAITranslation 的 JSON 数组契约强绑定：输入是 [短标题, 介绍] 的 JSON 数组，
+ * 输出必须是等长、同序的 JSON 数组。两段各自独立成项，从根上杜绝"标题尾巴被并进介绍"。
+ * 模型偶发会包 markdown 代码块或加前后缀，解析侧做兜底提取（见 parseJsonStringArray）。
  */
 function buildTranslateSystemPrompt(target: TranslateTarget): string {
 	switch (target) {
 		case "en":
-			return `You are a professional Japanese-to-English translator. Translate the user's Japanese input into English.
+			return `You are a professional Japanese-to-English translator.
 
-## Tag rules (strict)
-The first line is a short title wrapped in <code>…</code>, followed by a newline and the description text.
-- The text inside <code> is a Japanese title to be translated. It is NOT code or a proper noun; never leave it untranslated.
-- Keep <code> and </code> exactly as they are, in the same position. Do not move, remove, rewrite, escape, or translate the tags themselves.
-- Keep the newline after the tag. Never merge the translated title and description into one paragraph.
-
-## Content rules
-- Preserve the original paragraph count and line breaks; do not add or merge paragraphs.
-- Keep alphanumeric product codes (e.g. IPX-118), studio names, and performer/actress names in their original form. Never translate a person's name.
-- Do not add any extra markers or separators.
+## Input
+The user message is a JSON array of 1 or 2 Japanese text segments:
+- 2 items: item 1 is a short title, item 2 is a longer description.
+- 1 item: it is the full work title — translate it as a single segment (there is no separate title/description split).
 
 ## Output
-Output only the translation. No prefixes such as "Translation:" or "Here's the translation:", no explanations, notes, or any extra text.
+Output ONLY a JSON array, one translated string per input item, in the same order and with exactly the same number of items.
+- Never merge items or add new ones; translate each item independently.
+- With a single input item, output an array with a single item.
+- No text outside the JSON array: no "Translation:" prefix, no markdown code fence, no explanations.
+
+## Content rules
+- Keep line breaks inside each item (escape them as \\n in JSON); do not add or merge paragraphs.
+- Keep alphanumeric product codes (e.g. IPX-118), studio names, and performer/actress names as-is. Never translate a person's name.
+- Titles (short or full) are Japanese text to be translated, not code or proper nouns — never leave them untranslated.
 
 Example input:
-<code>夏の思い出</code>
-これは作品の紹介文です。
+["夏の思い出", "これは作品の紹介文です。"]
 Example output:
-<code>Memories of Summer</code>
-This is the description of the work.`;
+["Memories of Summer", "This is the description of the work."]`;
 		case "zh-TW":
-			return `你是一個專業的日譯繁體中文翻譯，將使用者輸入的日文翻譯為繁體中文。
+			return `你是一個專業的日譯繁體中文翻譯。
 
-## 標記規則（必須嚴格遵守）
-輸入首行是 <code>短標題</code>，換行後是介紹文字。
-- <code> 內是待翻譯的日文標題，必須翻譯；它不是程式碼，也不是專有名詞，不得原樣保留。
-- <code> 與 </code> 必須原樣保留且位置不變，不得移動、刪除、改寫、跳脫或翻譯標籤本身。
-- 保留標籤後的換行，標題譯文與介紹譯文不得合併成一段。
-
-## 內容規則
-- 保持原文的段落數與換行結構，不新增、不合併段落。
-- 番號（如 IPX-118）、片商名、出演者／女優姓名等專有名詞保留原文寫法，人名一律不翻譯。
-- 不加入任何額外標記或分隔符號。
+## 輸入
+使用者訊息是一個 JSON 陣列，含 1 或 2 段日文文字：
+- 2 項：第 1 項是短標題，第 2 項是介紹正文。
+- 1 項：該項是作品完整標題，作為單段翻譯即可（沒有獨立的標題／介紹拆分）。
 
 ## 輸出
-只輸出譯文。不要輸出「譯文：」「Here's the translation:」等前綴，也不要解釋、註解或任何額外文字。
+只輸出一個 JSON 陣列，每一項是對應輸入項的譯文，順序與數量必須與輸入完全一致。
+- 不得合併項目或新增項目；每段獨立翻譯。
+- 只有一項輸入時，輸出也只包含一項。
+- JSON 陣列外不得有任何文字：不要「譯文：」前綴、不要 markdown 程式碼區塊、不要解釋。
+
+## 內容規則
+- 保留每段內部的換行（在 JSON 中以 \\n 轉義），不新增、不合併段落。
+- 番號（如 IPX-118）、片商名、出演者／女優姓名保留原文，人名一律不翻譯。
+- 標題（短標題或完整標題）是待翻譯的日文，不是程式碼或專有名詞，不得原樣保留。
 
 範例輸入：
-<code>夏の思い出</code>
-これは作品の紹介文です。
+["夏の思い出", "これは作品の紹介文です。"]
 範例輸出：
-<code>夏日的回憶</code>
-這是作品的介紹文。`;
+["夏日的回憶", "這是作品的介紹文。"]`;
 		case "zh-CN":
 		default:
-			return `你是一个专业的日译简体中文翻译，将用户输入的日文翻译为简体中文。
+			return `你是一个专业的日译简体中文翻译。
 
-## 标记规则（必须严格遵守）
-输入首行是 <code>短标题</code>，换行后是介绍文本。
-- <code> 内是待翻译的日文标题，必须翻译；它不是代码，也不是专有名词，不得原样保留。
-- <code> 与 </code> 必须原样保留且位置不变，不得移动、删除、改写、转义或翻译标签本身。
-- 保留标签后的换行，标题译文与介绍译文不得合并成一段。
-
-## 内容规则
-- 保持原文的段落数与换行结构，不新增、不合并段落。
-- 番号（如 IPX-118）、片商名、出演者姓名等专有名词保留原文写法，人名一律不翻译。
-- 不添加任何额外标记或分隔符。
+## 输入
+用户消息是一个 JSON 数组，含 1 或 2 段日文文本：
+- 2 项：第 1 项是短标题，第 2 项是介绍正文。
+- 1 项：该项是作品完整标题，作为单段翻译即可（没有独立的标题／介绍拆分）。
 
 ## 输出
-只输出译文。不要输出「译文：」「Here's the translation:」等前缀，也不要解释、注释或任何额外文字。
+只输出一个 JSON 数组，每一项是对应输入项的译文，顺序与数量必须与输入严格一致。
+- 不得合并项目或新增项目；每段独立翻译。
+- 只有一项输入时，输出也只包含一项。
+- JSON 数组外不得有任何文字：不要「译文：」前缀、不要 markdown 代码块、不要解释。
+
+## 内容规则
+- 保留每段内部的换行（在 JSON 中以 \\n 转义），不新增、不合并段落。
+- 番号（如 IPX-118）、片商名、出演者姓名保留原文，人名一律不翻译。
+- 标题（短标题或完整标题）是待翻译的日文，不是代码也不是专有名词，不得原样保留。
 
 示例输入：
-<code>夏の思い出</code>
-これは作品の紹介文です。
+["夏の思い出", "これは作品の紹介文です。"]
 示例输出：
-<code>夏日的回忆</code>
-这是作品的介绍文。`;
+["夏日的回忆", "这是作品的介绍文。"]`;
 	}
 }
 
 /**
  * 构造 OpenAI 兼容翻译请求体（JSON 字符串）。
- * 一级提示词（system）按目标语言给出翻译指令；用户文本含 <code> 保护标记。
- * model 留空时整字段省略，交由后端使用默认模型。
+ * user content 是 [短标题, 介绍] 的 JSON 数组（单段时为一项），与兜底服务的数组协议统一；
+ * system 提示词按目标语言要求模型回等长 JSON 数组。model 留空时省略，交由后端默认。
  */
 export function buildOpenAIRequestBody(
-	text: string,
+	texts: string[],
 	target: TranslateTarget,
 	model: string,
 ): string {
@@ -176,7 +176,7 @@ export function buildOpenAIRequestBody(
 		temperature: 0,
 		messages: [
 			{ role: "system", content: buildTranslateSystemPrompt(target) },
-			{ role: "user", content: text },
+			{ role: "user", content: JSON.stringify(texts) },
 		],
 	};
 	const trimmedModel = (model || "").trim();
@@ -185,19 +185,43 @@ export function buildOpenAIRequestBody(
 }
 
 /**
- * 解析 OpenAI 兼容翻译响应：choices[0].message.content。
- * 失败或结构不符返回空字符串（调用方回退原文/降级）。
- * <code> 保护标记保留原样，由 splitMergedTranslation 直接拆分。
+ * 从模型输出里提取 JSON 字符串数组。
+ * 模型偶发会包 ```json 代码块或在数组前后加说明文字，按「整体直解 → 代码块 → 首个 [..] 片段」
+ * 逐级兜底；只有全部元素都是字符串时才接受（混入 null/对象说明协议没遵守，宁可降级）。
  */
-export function parseOpenAITranslation(data: unknown): string {
+function parseJsonStringArray(content: string): string[] {
+	const candidates = [content.trim()];
+	const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
+	if (fence?.[1]) candidates.push(fence[1].trim());
+	const bracket = content.match(/\[[\s\S]*\]/);
+	if (bracket?.[0]) candidates.push(bracket[0]);
+
+	for (const candidate of candidates) {
+		try {
+			const parsed: unknown = JSON.parse(candidate);
+			if (!Array.isArray(parsed)) continue;
+			if (!parsed.every((item) => typeof item === "string")) continue;
+			return parsed as string[];
+		} catch {
+			// 该候选不是合法 JSON，试下一个
+		}
+	}
+	return [];
+}
+
+/**
+ * 解析 OpenAI 兼容翻译响应：choices[0].message.content 里的 JSON 数组，按序返回逐段译文。
+ * 失败或元素非字符串返回空数组（调用方按长度对齐后回退原文/降级）。
+ */
+export function parseOpenAITranslation(data: unknown): string[] {
 	try {
 		const parsed = data as {
 			choices?: { message?: { content?: string } }[];
 		};
 		const content = parsed?.choices?.[0]?.message?.content;
-		return typeof content === "string" ? content : "";
+		return typeof content === "string" ? parseJsonStringArray(content) : [];
 	} catch {
-		return "";
+		return [];
 	}
 }
 
@@ -252,46 +276,6 @@ export function formatOpenAIError(
 }
 
 /**
- * 拼装"标题+介绍"一次翻译：标题用 <code> 标签包裹置于首行。
- * 不用花括号的原因：微软翻译对标题与介绍会吃掉结尾 "}"（MCSR-642 实测），
- * <code> 标签在三家服务（DeepL Worker/谷歌/微软）均实测原样保留，
- * 拆分直接按标签定位（splitMergedTranslation），不做还原转换。
- */
-export function buildMergedTranslateText(
-	shortTitle: string,
-	longTitle: string,
-): string {
-	return `<code>${shortTitle}</code>\n${longTitle}`;
-}
-
-export interface SplitTranslation {
-	// 标题译文；标记被翻译器改写导致拆不出时为 null
-	short: string | null;
-	// 介绍译文（拆不出时即整段译文）
-	long: string;
-}
-
-/**
- * 拆分拼装翻译结果：<code>标题</code>\n介绍 → 标题译文 + 介绍译文。
- * 标记不一定在行首：翻译器可能把修饰词移到标签外（微软实测把量词提到
- * <code> 前，谷歌实测在 <code> 后插空格），前导文本并入标题、译文 trim。
- * 兼容实体化标签与花括号（翻译器改写标记时的兜底）；
- * 拆不出（标记被吃掉/只有标题无后续）时整体视为介绍。
- */
-export function splitMergedTranslation(text: string): SplitTranslation {
-	const m = text.match(
-		/^([\s\S]*?)(?:<code>|&lt;code&gt;|[{｛])([\s\S]*?)(?:<\/code>|&lt;\/code&gt;|[}｝])\s*\n?([\s\S]*)$/,
-	);
-	if (!m) return { short: null, long: text };
-	const short = ((m[1] ?? "") + (m[2] ?? "")).trim();
-	const long = m[3] || text;
-	if (!short || long === text) {
-		return { short: null, long: text };
-	}
-	return { short, long };
-}
-
-/**
  * 格式化 Worker 网络层错误（fetch 抛异常）：超时与一般网络失败区分文案，
  * 按目标语言生成；浏览器原始英文消息不直接展示。
  */
@@ -316,39 +300,29 @@ export function buildGooglePostUrl(target: TranslateTarget): string {
 }
 
 /**
- * 构造谷歌翻译 POST 表单体：文本放在 q 字段。
+ * 构造谷歌翻译 POST 表单体：每段文本各占一个 q 字段（q=短标题&q=介绍）。
+ * 多 q 是 translate_a/t 的原生批量能力：两段独立翻译、返回顺序与 q 一致，
+ * 从根上避免"标题尾巴被并进介绍"（单段拼接时谷歌/微软会跨段合并相似文本）。
  */
-export function buildGoogleBody(text: string): URLSearchParams {
-	return new URLSearchParams({ q: text });
+export function buildGoogleBody(texts: string[]): URLSearchParams {
+	const body = new URLSearchParams();
+	for (const text of texts) body.append("q", text);
+	return body;
 }
 
 /**
- * 构造验证窗口用的 GET URL（带 q）：被谷歌风控（403/429）时在浏览器打开该
- * URL 会触发验证页，用户验证后关闭窗口自动重试翻译。
+ * 解析谷歌翻译响应：translate_a/t 对每个 q 返回一项 [译文, 检测语言]。
+ * 逐项按序返回译文数组（与提交的多段一一对应），失败返回空数组。
  */
-export function buildGoogleVerifyUrl(
-	text: string,
-	target: TranslateTarget,
-): string {
-	return `${buildGooglePostUrl(target)}&q=${encodeURIComponent(text)}`;
-}
-
-/**
- * 解析谷歌翻译响应：translate_a/t 返回扁平 [译文, 检测语言] 对数组。
- * 拼接所有译文；失败返回空字符串（调用方回退原文）。
- * <code> 保护标记保留原样，由 splitMergedTranslation 直接拆分。
- */
-export function parseGoogleResponse(data: unknown): string {
+export function parseGoogleResponse(data: unknown): string[] {
 	try {
 		const root = data as unknown[];
-		if (!Array.isArray(root)) return "";
-		return root
-			.map((seg) =>
-				Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : "",
-			)
-			.join("");
+		if (!Array.isArray(root)) return [];
+		return root.map((seg) =>
+			Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : "",
+		);
 	} catch {
-		return "";
+		return [];
 	}
 }
 
@@ -370,27 +344,28 @@ export function buildBingUrl(target: TranslateTarget): string {
 }
 
 /**
- * 构造微软翻译请求体：纯字符串数组（JSON.stringify 保证合法转义）。
- * 标记保护统一由 buildMergedTranslateText 用 <code> 标签完成，此函数无需再处理。
+ * 构造微软翻译请求体：字符串数组即批量翻译，每段独立、返回顺序一一对应。
+ * 两段分开发（短标题 + 介绍）避免跨段合并；无需 <code>/<span> 标记。
  */
-export function buildBingBody(text: string): string {
-	return JSON.stringify([text]);
+export function buildBingBody(texts: string[]): string {
+	return JSON.stringify(texts);
 }
 
 /**
- * 解析微软翻译响应：[{translations:[{text}]}] 取第一条译文，
- * <code> 保护标记保留原样，由 splitMergedTranslation 直接拆分。
+ * 解析微软翻译响应：[{translations:[{text}]}, ...] 按段取译文。
+ * 逐项按序返回译文数组（与提交的多段一一对应），失败返回空数组。
  */
-export function parseBingResponse(data: unknown): string {
+export function parseBingResponse(data: unknown): string[] {
 	try {
 		const root = data as unknown[];
-		const first = root?.[0] as
-			| { translations?: { text?: unknown }[] }
-			| undefined;
-		const text = first?.translations?.[0]?.text;
-		return typeof text === "string" ? text : "";
+		if (!Array.isArray(root)) return [];
+		return root.map((item) => {
+			const entry = item as { translations?: { text?: unknown }[] } | undefined;
+			const text = entry?.translations?.[0]?.text;
+			return typeof text === "string" ? text : "";
+		});
 	} catch {
-		return "";
+		return [];
 	}
 }
 

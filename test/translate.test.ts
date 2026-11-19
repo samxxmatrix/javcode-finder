@@ -4,8 +4,6 @@ import {
 	buildBingUrl,
 	buildGoogleBody,
 	buildGooglePostUrl,
-	buildGoogleVerifyUrl,
-	buildMergedTranslateText,
 	buildOpenAIRequestBody,
 	buildOpenAIUrl,
 	formatBingError,
@@ -20,7 +18,6 @@ import {
 	parseOpenAIHealth,
 	parseOpenAIModels,
 	parseOpenAITranslation,
-	splitMergedTranslation,
 	targetToBingLang,
 } from "../src/lib/translate";
 
@@ -60,68 +57,75 @@ describe("buildOpenAIUrl", () => {
 });
 
 describe("buildOpenAIRequestBody", () => {
-	it("includes the model when provided, with temperature 0 and system+user messages", () => {
+	it("puts the text segments in a JSON array as user content, with model and temperature 0", () => {
 		const body = JSON.parse(
-			buildOpenAIRequestBody("<code>短标题</code>\n长标题", "zh-CN", "gpt-4o-mini"),
+			buildOpenAIRequestBody(["短标题", "长标题"], "zh-CN", "gpt-4o-mini"),
 		);
 		expect(body.model).toBe("gpt-4o-mini");
 		expect(body.temperature).toBe(0);
 		expect(body.messages).toHaveLength(2);
 		expect(body.messages[0].role).toBe("system");
 		expect(body.messages[1].role).toBe("user");
-		expect(body.messages[1].content).toBe("<code>短标题</code>\n长标题");
+		expect(JSON.parse(body.messages[1].content)).toEqual(["短标题", "长标题"]);
+		expect(body.messages[1].content).not.toContain("<code>");
+		expect(body.messages[1].content).not.toContain("<span>");
+	});
+
+	it("supports a single segment for javtrailers source", () => {
+		const body = JSON.parse(buildOpenAIRequestBody(["仅标题"], "zh-CN", "m"));
+		expect(JSON.parse(body.messages[1].content)).toEqual(["仅标题"]);
 	});
 
 	it("omits the model field when empty (backend default)", () => {
-		const body = JSON.parse(buildOpenAIRequestBody("text", "zh-CN", ""));
+		const body = JSON.parse(buildOpenAIRequestBody(["text"], "zh-CN", ""));
 		expect(body.model).toBeUndefined();
 		expect(body.temperature).toBe(0);
 	});
 
 	it("uses a Simplified-Chinese system prompt for zh-CN", () => {
-		const body = JSON.parse(buildOpenAIRequestBody("x", "zh-CN", "m"));
+		const body = JSON.parse(buildOpenAIRequestBody(["x"], "zh-CN", "m"));
 		expect(body.messages[0].content).toContain("简体");
 	});
 
 	it("uses a Traditional-Chinese system prompt for zh-TW", () => {
-		const body = JSON.parse(buildOpenAIRequestBody("x", "zh-TW", "m"));
+		const body = JSON.parse(buildOpenAIRequestBody(["x"], "zh-TW", "m"));
 		expect(body.messages[0].content).toContain("繁體");
 	});
 
 	it("uses an English system prompt for en", () => {
-		const body = JSON.parse(buildOpenAIRequestBody("x", "en", "m"));
+		const body = JSON.parse(buildOpenAIRequestBody(["x"], "en", "m"));
 		expect(body.messages[0].content).toContain("English");
 	});
 });
 
 describe("translation system prompt (OpenAI mode)", () => {
-	// 三语提示词必须锁定同一套 <code> 拆分契约，任一语言漏规则都会导致标题串进介绍
+	// 三语提示词必须锁定同一套 JSON 数组契约，任一语言漏规则都会导致段数/顺序错位
 	const prompts = (["zh-CN", "zh-TW", "en"] as const).map(
 		(target) =>
-			JSON.parse(buildOpenAIRequestBody("x", target, "m")).messages[0]
+			JSON.parse(buildOpenAIRequestBody(["x"], target, "m")).messages[0]
 				.content as string,
 	);
 
-	it("locks the <code> contract in every locale", () => {
+	it("locks the JSON array contract in every locale", () => {
 		for (const p of prompts) {
-			expect(p).toContain("<code>");
-			expect(p).toContain("</code>");
-			expect(p).toMatch(/必须翻译|必須翻譯|NOT code/);
-			expect(p).toMatch(/不得移动|不得移動|Do not move/);
+			expect(p).toContain("JSON");
+			expect(p).toMatch(/same order|順序與數量|顺序与数量/);
+			expect(p).not.toContain("<code>");
+			expect(p).not.toContain("<span>");
 		}
 	});
 
-	it("forbids translation prefixes and extra commentary in every locale", () => {
+	it("forbids markdown code fence and extra commentary in every locale", () => {
 		for (const p of prompts) {
-			expect(p).toContain("Here's the translation:");
-			expect(p).toMatch(/只输出译文|只輸出譯文|Output only the translation/);
+			expect(p).toMatch(/code fence|程式碼區塊|代码块/);
+			expect(p).toMatch(/不得有任何文字|No text outside/);
 		}
 	});
 
 	it("keeps the newline contract without introducing %% separators", () => {
 		for (const p of prompts) {
 			expect(p).not.toContain("%%");
-			expect(p).toMatch(/换行|換行|newline/);
+			expect(p).toMatch(/换行|換行|line breaks/);
 		}
 	});
 
@@ -132,34 +136,88 @@ describe("translation system prompt (OpenAI mode)", () => {
 			);
 		}
 	});
+
+	it("describes the single-item case as a full work title in every locale", () => {
+		for (const p of prompts) {
+			// 单项场景（javtrailers 源）那一项是完整标题，不是短标题/介绍
+			expect(p).toMatch(/1 项|1 項|1 item/);
+			expect(p).toMatch(/完整标题|完整標題|full work title/);
+		}
+	});
 });
 
 describe("parseOpenAITranslation", () => {
-	it("extracts content from the first choice message", () => {
-		expect(
-			parseOpenAITranslation({
-				choices: [{ message: { role: "assistant", content: "你好世界" } }],
-			}),
-		).toBe("你好世界");
-	});
-
-	it("keeps the code tag marker unchanged", () => {
+	it("parses the JSON array in choices[0].message.content, preserving order", () => {
 		expect(
 			parseOpenAITranslation({
 				choices: [
-					{ message: { role: "assistant", content: "<code>短标题译文</code>\n长标题译文" } },
+					{
+						message: {
+							role: "assistant",
+							content: '["短标题译文","这是作品的介绍文。"]',
+						},
+					},
 				],
 			}),
-		).toBe("<code>短标题译文</code>\n长标题译文");
+		).toEqual(["短标题译文", "这是作品的介绍文。"]);
 	});
 
-	it("returns empty string for malformed or missing content", () => {
-		expect(parseOpenAITranslation(null)).toBe("");
-		expect(parseOpenAITranslation({})).toBe("");
-		expect(parseOpenAITranslation({ choices: [] })).toBe("");
+	it("keeps a single-segment array as one item", () => {
+		expect(
+			parseOpenAITranslation({
+				choices: [{ message: { role: "assistant", content: '["标题译文"]' } }],
+			}),
+		).toEqual(["标题译文"]);
+	});
+
+	it("extracts array from a markdown ```json code fence", () => {
+		expect(
+			parseOpenAITranslation({
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: '```json\n["短标题译文", "介绍译文"]\n```',
+						},
+					},
+				],
+			}),
+		).toEqual(["短标题译文", "介绍译文"]);
+	});
+
+	it("extracts the first [..] block when the model adds surrounding text", () => {
+		expect(
+			parseOpenAITranslation({
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: 'Sure! Here is the translation:\n["短标题译文","介绍译文"]\nHope this helps.',
+						},
+					},
+				],
+			}),
+		).toEqual(["短标题译文", "介绍译文"]);
+	});
+
+	it("rejects arrays with non-string elements", () => {
+		expect(
+			parseOpenAITranslation({
+				choices: [{ message: { content: '["标题译文", null]' } }],
+			}),
+		).toEqual([]);
+	});
+
+	it("returns empty array for malformed or missing content", () => {
+		expect(parseOpenAITranslation(null)).toEqual([]);
+		expect(parseOpenAITranslation({})).toEqual([]);
+		expect(parseOpenAITranslation({ choices: [] })).toEqual([]);
 		expect(
 			parseOpenAITranslation({ choices: [{ message: { role: "assistant" } }] }),
-		).toBe("");
+		).toEqual([]);
+		expect(
+			parseOpenAITranslation({ choices: [{ message: { content: "没有数组的纯文本" } }] }),
+		).toEqual([]);
 	});
 });
 
@@ -218,78 +276,6 @@ describe("formatOpenAIError", () => {
 	});
 });
 
-describe("buildMergedTranslateText", () => {
-	it("wraps short title in code tags and separates long title with newline", () => {
-		expect(
-			buildMergedTranslateText("緊縛哀犬夫人 宮西ひかる", "背徳の変態願望を胸に秘め…"),
-		).toBe("<code>緊縛哀犬夫人 宮西ひかる</code>\n背徳の変態願望を胸に秘め…");
-	});
-});
-
-describe("splitMergedTranslation", () => {
-	it("splits code-tagged short title and long title", () => {
-		const result = splitMergedTranslation(
-			"<code>Tied Dog Wife Hikaru Miyanishi</code>\nHidden in her heart was a perverted desire...",
-		);
-		expect(result.short).toBe("Tied Dog Wife Hikaru Miyanishi");
-		expect(result.long).toBe("Hidden in her heart was a perverted desire...");
-	});
-
-	it("handles tags without newline separator", () => {
-		const result = splitMergedTranslation("<code>短标题</code>长标题内容");
-		expect(result.short).toBe("短标题");
-		expect(result.long).toBe("长标题内容");
-	});
-
-	it("trims the space inserted after the tag by translators", () => {
-		// 谷歌实测会在 <code> 后插空格
-		const result = splitMergedTranslation(
-			"<code> 搭讪旅店工作的熟女</code>\n长标题译文",
-		);
-		expect(result.short).toBe("搭讪旅店工作的熟女");
-		expect(result.long).toBe("长标题译文");
-	});
-
-	it("handles escaped code tags", () => {
-		const result = splitMergedTranslation(
-			"&lt;code&gt;标题&lt;/code&gt;\n描述",
-		);
-		expect(result.short).toBe("标题");
-		expect(result.long).toBe("描述");
-	});
-
-	it("keeps brace compatibility as fallback when the marker is rewritten", () => {
-		// 翻译器改写标记为花括号时的兜底
-		const result = splitMergedTranslation("{短标题}\n长标题内容");
-		expect(result.short).toBe("短标题");
-		expect(result.long).toBe("长标题内容");
-		expect(
-			splitMergedTranslation("｛緊縛哀犬夫人｝\n背徳の変態願望…").short,
-		).toBe("緊縛哀犬夫人");
-	});
-
-	it("falls back to whole text as long title when the marker is lost", () => {
-		const result = splitMergedTranslation("翻译器吃掉了标记的整段译文内容");
-		expect(result.short).toBeNull();
-		expect(result.long).toBe("翻译器吃掉了标记的整段译文内容");
-	});
-
-	it("falls back when the marker exists but no long title follows", () => {
-		const result = splitMergedTranslation("<code>只有短标题</code>");
-		expect(result.short).toBeNull();
-		expect(result.long).toBe("<code>只有短标题</code>");
-	});
-
-	it("merges leading text moved outside the marker into the short title", () => {
-		// 微软翻译会把量词提到 <code> 标记外（MCSR-642 实测）
-		const result = splitMergedTranslation(
-			"一位<code>在旅馆工作的成熟美人</code>\n一位我一年一次的奖励旅行中遇到的女仆",
-		);
-		expect(result.short).toBe("一位在旅馆工作的成熟美人");
-		expect(result.long).toBe("一位我一年一次的奖励旅行中遇到的女仆");
-	});
-});
-
 describe("buildGooglePostUrl", () => {
 	it("builds the gtx POST URL without the q parameter", () => {
 		const url = buildGooglePostUrl("zh-CN");
@@ -311,46 +297,37 @@ describe("buildGooglePostUrl", () => {
 });
 
 describe("buildGoogleBody", () => {
-	it("carries the text in the q form field", () => {
-		expect(buildGoogleBody("Hello world").get("q")).toBe("Hello world");
-	});
-});
-
-describe("buildGoogleVerifyUrl", () => {
-	it("builds a GET URL with the text for the verify window", () => {
-		const url = buildGoogleVerifyUrl("Hello world", "zh-CN");
-		expect(url).toContain("translate_a/t");
-		expect(url).toContain("client=gtx");
-		expect(url).toContain("tl=zh-CN");
-		expect(url).toContain("q=Hello%20world");
+	it("puts each text in its own q form field (batch)", () => {
+		const body = buildGoogleBody(["短标题", "介绍正文"]);
+		expect(body.getAll("q")).toEqual(["短标题", "介绍正文"]);
 	});
 
-	it("uses zh-TW for traditional Chinese", () => {
-		expect(buildGoogleVerifyUrl("Hello", "zh-TW")).toContain("tl=zh-TW");
+	it("supports a single text", () => {
+		expect(buildGoogleBody(["Hello world"]).getAll("q")).toEqual([
+			"Hello world",
+		]);
 	});
 });
 
 describe("parseGoogleResponse", () => {
-	it("joins translated entries from the flat response", () => {
-		// translate_a/t 的真实响应：扁平 [译文, 检测语言] 对数组
+	it("returns one translation per q, in order", () => {
+		// translate_a/t 批量响应：每个 q 一项 [译文, 检测语言]
 		expect(
 			parseGoogleResponse([
-				["你好世界", "en"],
-				["早上好", "en"],
+				["短标题译文", "ja"],
+				["介绍译文", "ja"],
 			]),
-		).toBe("你好世界早上好");
+		).toEqual(["短标题译文", "介绍译文"]);
 	});
 
-	it("keeps the code tag marker unchanged", () => {
-		expect(
-			parseGoogleResponse([["<code>短标题译文</code>\n长标题译文", "ja"]]),
-		).toBe("<code>短标题译文</code>\n长标题译文");
+	it("keeps a single-text response as a one-element array", () => {
+		expect(parseGoogleResponse([["标题译文", "ja"]])).toEqual(["标题译文"]);
 	});
 
-	it("returns empty string for malformed responses", () => {
-		expect(parseGoogleResponse(null)).toBe("");
-		expect(parseGoogleResponse({})).toBe("");
-		expect(parseGoogleResponse(["nope"])).toBe("");
+	it("returns empty array for malformed responses", () => {
+		expect(parseGoogleResponse(null)).toEqual([]);
+		expect(parseGoogleResponse({})).toEqual([]);
+		expect(parseGoogleResponse(["nope"])).toEqual([""]);
 	});
 });
 
@@ -387,47 +364,48 @@ describe("buildBingUrl", () => {
 });
 
 describe("buildBingBody", () => {
-	it("wraps the text in a single-element JSON array", () => {
-		expect(JSON.parse(buildBingBody("Hello world"))).toEqual(["Hello world"]);
+	it("serializes texts as a JSON array (batch)", () => {
+		expect(JSON.parse(buildBingBody(["短标题", "介绍正文"]))).toEqual([
+			"短标题",
+			"介绍正文",
+		]);
 	});
 
-	it("wraps marked text unchanged (marker handled by buildMergedTranslateText)", () => {
-		expect(JSON.parse(buildBingBody("<code>短标题</code>\n长标题"))).toEqual([
-			"<code>短标题</code>\n长标题",
+	it("supports a single text", () => {
+		expect(JSON.parse(buildBingBody(["Hello world"]))).toEqual([
+			"Hello world",
 		]);
 	});
 });
 
 describe("parseBingResponse", () => {
-	it("extracts the first translation", () => {
+	it("returns one translation per batch item, in order", () => {
 		expect(
 			parseBingResponse([
 				{
-					detectedLanguage: { language: "en", score: 1 },
-					translations: [{ text: "你好世界", to: "zh-Hans" }],
+					detectedLanguage: { language: "ja", score: 1 },
+					translations: [{ text: "短标题译文", to: "zh-Hans" }],
 				},
-			]),
-		).toBe("你好世界");
-	});
-
-	it("keeps the code tag marker unchanged", () => {
-		expect(
-			parseBingResponse([
 				{
-					translations: [
-						{ text: "<code>在旅馆工作的成熟美人</code>\n一段长文描述" },
-					],
+					detectedLanguage: { language: "ja", score: 1 },
+					translations: [{ text: "介绍译文", to: "zh-Hans" }],
 				},
 			]),
-		).toBe("<code>在旅馆工作的成熟美人</code>\n一段长文描述");
+		).toEqual(["短标题译文", "介绍译文"]);
 	});
 
-	it("returns empty string for malformed responses", () => {
-		expect(parseBingResponse(null)).toBe("");
-		expect(parseBingResponse({})).toBe("");
-		expect(parseBingResponse([])).toBe("");
-		expect(parseBingResponse([{}])).toBe("");
-		expect(parseBingResponse([{ translations: [] }])).toBe("");
+	it("keeps a single-text response as a one-element array", () => {
+		expect(
+			parseBingResponse([{ translations: [{ text: "标题译文" }] }]),
+		).toEqual(["标题译文"]);
+	});
+
+	it("returns empty array for malformed responses", () => {
+		expect(parseBingResponse(null)).toEqual([]);
+		expect(parseBingResponse({})).toEqual([]);
+		expect(parseBingResponse([])).toEqual([]);
+		expect(parseBingResponse([{}])).toEqual([""]);
+		expect(parseBingResponse([{ translations: [] }])).toEqual([""]);
 	});
 });
 
