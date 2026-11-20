@@ -12,7 +12,8 @@ export const App: React.FC = () => {
 			<header className="popup-header">
 				<div className="popup-header__brand">
 					<h1 className="popup-header__title popup-header__title--text">
-						{t.title}
+						<span className="popup-header__title-initial">{t.title.charAt(0)}</span>
+						{t.title.slice(1)}
 					</h1>
 				</div>
 			</header>

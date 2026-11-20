@@ -121,6 +121,12 @@ button:focus-visible {
 	color: var(--text-primary);
 }
 
+/* 品牌首字母点金：比正文大一号，颜色取强调金（浅色主题自动换深金） */
+.popup-header__title-initial {
+	color: var(--accent-gold);
+	font-size: 16px;
+}
+
 /* 顶部番号查询：占据标题与图标按钮组之间的剩余宽度 */
 .popup-header__search {
 	display: flex;

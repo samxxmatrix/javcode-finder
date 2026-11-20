@@ -1,6 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React, {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { isFavorite } from "../../../src/lib/favorites";
 import { locateCodeInActiveTab } from "../../../src/lib/locate-code";
+import {
+	computeCenterScrollTop,
+	findCodePage,
+} from "../../../src/lib/reveal-code";
 import type { LocaleMessages } from "../../../src/lib/locales";
 import {
 	dedupeDisplayCodes,
@@ -31,6 +41,11 @@ interface CodeListProps {
 	favoritesMode?: boolean;
 	/** 切换收藏夹模式（标题右侧「收藏夹」按钮） */
 	onToggleFavoritesMode?: () => void;
+	/**
+	 * 页面黄点点击的揭示请求：只有此来源会翻页并把番号滚到列表中间。
+	 * id 单调递增，保证同一番号重复点击也视作新请求。
+	 */
+	revealRequest?: { code: string; id: number } | null;
 }
 
 export const CodeList: React.FC<CodeListProps> = ({
@@ -44,6 +59,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 	inLibrary,
 	favoritesMode = false,
 	onToggleFavoritesMode,
+	revealRequest,
 }) => {
 	const settings = getSettings();
 	// 平台清单走共享 helper（与预告片头部同一份显示规则）：名称与链接规则都配置了才出现
@@ -57,6 +73,9 @@ export const CodeList: React.FC<CodeListProps> = ({
 	>({});
 	// 索引式分页：页号状态（Hook 必须无条件调用，故置于早返回之前）
 	const [currentPage, setCurrentPage] = useState(0);
+	const listRef = useRef<HTMLUListElement | null>(null);
+	// 已处理过的揭示请求 id：翻页那轮不登记，翻完后再滚；手动翻页不重放旧请求
+	const processedRevealRef = useRef<number | null>(null);
 
 	// 去重：保序、按归一化形式。`-` 与 `_` 是两个号（不同片商），都必须留在列表里
 	const uniqueCodes = dedupeDisplayCodes(candidates);
@@ -67,6 +86,89 @@ export const CodeList: React.FC<CodeListProps> = ({
 		safePage * PAGE_SIZE,
 		(safePage + 1) * PAGE_SIZE,
 	);
+
+	// 把目标号滚到列表中间，返回是否真的命中并滚动了目标项。
+	// force=false（首次揭示）：只在目标不在可视区时滚，遵循「不在显示区域才滚」；
+	// force=true（异步补偿）：预览简介到达后列表已下推，无条件重新拉回中间。
+	// 手动设置内层 list.scrollTop，避免 scrollIntoView 连带滚外层 popup-main。
+	const scrollCodeToCenter = useCallback((code: string, force: boolean): boolean => {
+		const list = listRef.current;
+		if (!list) return false;
+		// 番号含 `-` 等字符，用 dataset 比较避开属性选择器转义问题
+		const item = Array.from(
+			list.querySelectorAll<HTMLElement>("[data-code]"),
+		).find((el) => el.dataset.code === code);
+		if (!item) return false;
+		const listRect = list.getBoundingClientRect();
+		const itemRect = item.getBoundingClientRect();
+		const nextScrollTop = computeCenterScrollTop(
+			{
+				itemTop: itemRect.top,
+				itemHeight: itemRect.height,
+				viewTop: listRect.top,
+				viewHeight: listRect.height,
+				scrollTop: list.scrollTop,
+			},
+			force,
+		);
+		if (nextScrollTop !== null) list.scrollTop = nextScrollTop;
+		return true;
+	}, []);
+
+	// 页面黄点点击：先把目标号翻到当前页，翻完后再滚到列表中间。
+	// 用 useLayoutEffect 让「翻页 → 滚动」在绘制前完成，看不到跳页中间态。
+	useLayoutEffect(() => {
+		if (favoritesMode || !revealRequest) return;
+		if (processedRevealRef.current === revealRequest.id) return;
+
+		const targetPage = findCodePage(uniqueCodes, revealRequest.code, PAGE_SIZE);
+		if (targetPage < 0) {
+			// 目标号不在列表里（如搜索框手输的码）：登记后跳过，避免反复计算
+			processedRevealRef.current = revealRequest.id;
+			return;
+		}
+		if (targetPage !== safePage) {
+			setCurrentPage(targetPage);
+			return;
+		}
+
+		scrollCodeToCenter(revealRequest.code, false);
+		processedRevealRef.current = revealRequest.id;
+	}, [revealRequest, favoritesMode, safePage, uniqueCodes, scrollCodeToCenter]);
+
+	// 预览简介是异步数据：到达后标题槽从无到有撑高预览卡片，把下方列表整体下推，
+	// 首次居中因此在简介到达前失效（番号又下移一段）。短窗口内观察预览高度，
+	// 一旦变化就把目标号重新居中一次、随即停止；超时兜底防止观察悬挂。
+	// 只认高度变化，用户手动滚动列表不会改变预览高度，故不会把用户拽回中间。
+	useEffect(() => {
+		if (favoritesMode || !revealRequest) return;
+		const preview = listRef.current
+			?.closest(".popup-main")
+			?.querySelector<HTMLElement>(".trailer-preview");
+		if (!preview) return;
+
+		let lastHeight = preview.getBoundingClientRect().height;
+		let stopped = false;
+		const stop = () => {
+			if (stopped) return;
+			stopped = true;
+			observer.disconnect();
+			window.clearTimeout(timer);
+		};
+		const observer = new ResizeObserver(() => {
+			const height = preview.getBoundingClientRect().height;
+			if (Math.abs(height - lastHeight) < 1) return;
+			lastHeight = height;
+			// 目标项尚未渲染（如翻页未完成）时不登记这次变化，等下一次
+			if (scrollCodeToCenter(revealRequest.code, true)) stop();
+		});
+		observer.observe(preview);
+		const timer = window.setTimeout(stop, 30000);
+		return () => {
+			observer.disconnect();
+			window.clearTimeout(timer);
+		};
+	}, [revealRequest, favoritesMode, scrollCodeToCenter]);
 
 	// 仅切换收藏夹模式时回到首页（看最新收藏）；同模式内增删收藏不重置页号
 	useEffect(() => {
@@ -251,7 +353,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 		<section className="unmatched-section">
 			{header}
 
-			<ul className="unmatched-section__list">
+			<ul className="unmatched-section__list" ref={listRef}>
 				{pageCodes.map((code) => {
 					// 跳转码与显示码分离：FC2 番号外部平台只认 FC2-PPV-<数字> 写法
 					const javdbUrl = javdb
@@ -261,7 +363,7 @@ export const CodeList: React.FC<CodeListProps> = ({
 
 					const isSelected = code === selectedCode;
 					return (
-						<li key={code} className="unmatched-item">
+						<li key={code} data-code={code} className="unmatched-item">
 							<span
 								className={`unmatched-item__code ${
 									isSelected ? "unmatched-item__code--selected" : ""

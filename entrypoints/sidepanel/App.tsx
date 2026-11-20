@@ -22,6 +22,7 @@ import {
 } from "../../src/lib/favorites";
 import { messages } from "../../src/lib/locales";
 import { markCodesForTab } from "../../src/lib/mark-codes";
+import { isNonInjectablePageError } from "../../src/lib/non-injectable";
 import { normalizeCode } from "../../src/lib/normalize-code";
 import { pickSearchCode } from "../../src/lib/pick-search-code";
 import {
@@ -86,6 +87,13 @@ export const App: React.FC = () => {
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	// 点击番号后在列表上方展开的预告片预览
 	const [previewCode, setPreviewCode] = useState<string | null>(null);
+	// 页面黄点点击的独立揭示信号：与 previewCode 解耦，搜索框手输/点列表项不触发列表滚动。
+	// id 单调递增保证同一番号重复点击也能生成新对象引用，驱动 CodeList 重新执行揭示。
+	const [revealRequest, setRevealRequest] = useState<{
+		code: string;
+		id: number;
+	} | null>(null);
+	const revealIdRef = useRef(0);
 	// 顶部查询输入框内容
 	const [searchInput, setSearchInput] = useState("");
 	// 收藏的番号列表（本地 storage 为准，云端为镜像）
@@ -236,7 +244,11 @@ export const App: React.FC = () => {
 				tabId: activeTab.id,
 			};
 		} catch (err) {
-			console.warn("ExecuteScript failed on tab:", activeTab.id, err);
+			// 错误页/内置页禁止注入是预期结果，与 markCodesForTab 同口径静默；
+			// 权限缺失、参数不可序列化等真实故障继续告警。
+			if (!isNonInjectablePageError(err)) {
+				console.warn("ExecuteScript failed on tab:", activeTab.id, err);
+			}
 			return {
 				candidates: [],
 				truncated: false,
@@ -750,6 +762,8 @@ export const App: React.FC = () => {
 				: s?.tab?.active === true;
 			if (!tabMatches) return;
 			setPreviewCode(msg.code);
+			revealIdRef.current += 1;
+			setRevealRequest({ code: msg.code, id: revealIdRef.current });
 		};
 
 		if (typeof browser !== "undefined" && browser.runtime?.onMessage) {
@@ -945,7 +959,8 @@ export const App: React.FC = () => {
 			<header className="popup-header">
 				<div className="popup-header__brand">
 					<h1 className="popup-header__title popup-header__title--text">
-						{t.title}
+						<span className="popup-header__title-initial">{t.title.charAt(0)}</span>
+						{t.title.slice(1)}
 					</h1>
 				</div>
 				{!showSettings && (
@@ -1267,6 +1282,7 @@ export const App: React.FC = () => {
 									inLibrary={inLibrary}
 									favoritesMode={false}
 									onToggleFavoritesMode={handleToggleFavoritesMode}
+									revealRequest={revealRequest}
 								/>
 							</div>
 						)}
