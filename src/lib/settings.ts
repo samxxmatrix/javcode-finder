@@ -27,6 +27,9 @@ export interface ExtensionSettings {
 	translateApiUrl: string;
 	// 翻译模型名（OpenAI 兼容 model 字段；空 = 由后端使用默认模型）
 	translateModel: string;
+	// 最近一次测试通过的模型名：仅用于界面金色高亮（当前模型等于它 = 已验证）。
+	// 与 translateModel 分开存，才能区分「测过」和「手填未测」；改填别的模型后自然失配变白
+	verifiedTranslateModel: string;
 	// 启用开关：关闭时跳过 Worker，直接走备用翻译服务
 	translateEnabled: boolean;
 	// 备用翻译服务：Worker 失败/未配置时兜底（谷歌或微软 Edge 内置接口）
@@ -90,8 +93,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	translateApiKey: "",
 	translateApiUrl: "",
 	translateModel: "",
+	verifiedTranslateModel: "",
 	translateEnabled: false,
-	fallbackService: "google",
+	fallbackService: "none",
 	webdavUrl: "",
 	webdavUser: "",
 	webdavPass: "",
@@ -268,6 +272,10 @@ export function normalizeSettings(parsed: unknown): ExtensionSettings {
 			typeof data.translateModel === "string"
 				? data.translateModel.trim()
 				: "",
+		verifiedTranslateModel:
+			typeof data.verifiedTranslateModel === "string"
+				? data.verifiedTranslateModel.trim()
+				: "",
 		translateApiUrl:
 			typeof data.translateApiUrl === "string"
 				? data.translateApiUrl.trim()
@@ -277,7 +285,9 @@ export function normalizeSettings(parsed: unknown): ExtensionSettings {
 				? data.translateEnabled
 				: DEFAULT_SETTINGS.translateEnabled,
 		fallbackService:
-			data.fallbackService === "bing" ? "bing" : "google",
+			data.fallbackService === "bing" || data.fallbackService === "google"
+				? data.fallbackService
+				: "none",
 		webdavUrl:
 			typeof data.webdavUrl === "string" ? data.webdavUrl.trim() : "",
 		webdavUser:
@@ -399,6 +409,10 @@ export function saveSettings(
 				settings.translateModel !== undefined
 					? settings.translateModel.trim()
 					: current.translateModel,
+			verifiedTranslateModel:
+				settings.verifiedTranslateModel !== undefined
+					? settings.verifiedTranslateModel.trim()
+					: current.verifiedTranslateModel,
 			translateApiUrl:
 				settings.translateApiUrl !== undefined
 					? settings.translateApiUrl.trim()
@@ -409,9 +423,10 @@ export function saveSettings(
 					: current.translateEnabled,
 			fallbackService:
 				settings.fallbackService !== undefined
-					? settings.fallbackService === "bing"
-						? "bing"
-						: "google"
+					? settings.fallbackService === "bing" ||
+						settings.fallbackService === "google"
+						? settings.fallbackService
+						: "none"
 					: current.fallbackService,
 			// 云端三项传入空字符串表示"关闭云端同步"，与未传字段区分处理
 			webdavUrl:
@@ -627,6 +642,7 @@ export function configSignature(settings: ExtensionSettings): string {
 		settings.previewVolume,
 		trim(settings.translateApiKey),
 		trim(settings.translateModel),
+		trim(settings.verifiedTranslateModel),
 		trim(settings.translateApiUrl),
 		settings.translateEnabled,
 		settings.fallbackService,

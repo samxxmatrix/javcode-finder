@@ -71,6 +71,8 @@ import {
 	formatGoogleFetchError,
 	formatOpenAIError,
 	formatOpenAIFetchError,
+	formatRefusalError,
+	isRefusalContent,
 	parseBingResponse,
 	parseGoogleResponse,
 	parseOpenAIHealth,
@@ -637,7 +639,10 @@ export default defineBackground(() => {
 								? "en"
 								: "zh-CN";
 					const fallback: FallbackService =
-						msg.fallbackService === "bing" ? "bing" : "google";
+						msg.fallbackService === "bing" ||
+						msg.fallbackService === "google"
+							? msg.fallbackService
+							: "none";
 					const key = (msg.translateApiKey || "").trim();
 					const baseUrl = (msg.translateUrl || "").trim();
 					const model = (msg.translateModel || "").trim();
@@ -672,8 +677,16 @@ export default defineBackground(() => {
 										sendResponse({ translatedParts, workerError });
 										return;
 									}
-									// 译文缺失或段数不符 → 记录原因并降级备用服务
-									workerError = formatOpenAIError(res.status, data, target);
+								// 译文缺失或段数不符：先识别内容安全拒答（HTTP 200 但 content
+								// 是拒答文案，JSON.parse 失败），给出准确提示而非误导的「HTTP 200」；
+								// 其余情况维持原逻辑。之后照常降级备用服务。
+								const content = (data as {
+									choices?: { message?: { content?: string } }[];
+								})?.choices?.[0]?.message?.content;
+								workerError =
+									typeof content === "string" && isRefusalContent(content)
+										? formatRefusalError(data, target)
+										: formatOpenAIError(res.status, data, target);
 								} else {
 									// 非 2xx → 记录原因并降级备用服务
 									let data: unknown = null;
@@ -688,6 +701,17 @@ export default defineBackground(() => {
 								// 网络异常/超时 → 记录原因并降级备用服务
 								workerError = formatOpenAIFetchError(error, target);
 							}
+						}
+						// 「不使用」兜底：不调用谷歌/微软，直接收尾。
+						// AI 尝试过但失败（workerError 有值）→ 回传错误，前端提示「翻译失败」；
+						// AI 未启用/配置不全（从未尝试）→ 静默回原文，不报错。
+						if (fallback === "none") {
+							if (workerError) {
+								sendResponse({ translated: "", workerError });
+							} else {
+								sendResponse({ translatedParts: parts });
+							}
+							return;
 						}
 						// 二级兜底：复用同一 parts 数组，短标题与介绍各自独立提交（数组批量），
 						// 两段独立翻译从根上避免相似文本被跨段合并（SKTH-010「阶级」事故）。
@@ -851,6 +875,68 @@ export default defineBackground(() => {
 							sendResponse({ models: parseOpenAIModels(data) });
 						} catch {
 							sendResponse({ models: [], error: "network" });
+						}
+					})();
+					return true;
+				}
+
+				// 测试手填模型名是否可用：向 /v1/chat/completions 发极简请求，
+				// 能收到有效响应即视为模型可调用。
+				if (msg?.type === "jt:test-translate-model") {
+					const key = (msg.translateApiKey || "").trim();
+					const baseUrl = (msg.translateUrl || "").trim();
+					const model = (msg.translateModel || "").trim();
+					const m = messages[msg.locale ?? "zh-hans"];
+					void (async () => {
+						if (!baseUrl || !key || !model) {
+							sendResponse({ ok: false, error: m.translateApiIncomplete });
+							return;
+						}
+						try {
+							const res = await fetch(buildOpenAIUrl(baseUrl, "chat"), {
+								method: "POST",
+								headers: {
+									Authorization: `Bearer ${key}`,
+									"Content-Type": "application/json",
+								},
+								body: buildOpenAIRequestBody(["test"], "zh-CN", model),
+								signal: AbortSignal.timeout(15000),
+							});
+							if (!res.ok) {
+								let message = `HTTP ${res.status}`;
+								try {
+									const errBody = (await res.json()) as {
+										error?: { message?: string };
+									};
+									if (
+										typeof errBody?.error?.message === "string" &&
+										errBody.error.message
+									) {
+										message = errBody.error.message;
+									}
+								} catch {
+									// 响应体非 JSON：保留按状态码生成的文案
+								}
+								sendResponse({ ok: false, error: message });
+								return;
+							}
+							const data = await res.json();
+							const ok =
+								typeof data?.choices?.[0]?.message?.content === "string";
+							sendResponse({
+								ok,
+								error: ok ? undefined : m.translateUnknownError,
+							});
+						} catch (err) {
+							// TimeoutError 单独归类：上游慢是服务端问题，不是本地网络故障
+							const isTimeout =
+								err instanceof Error && err.name === "TimeoutError";
+							sendResponse({
+								ok: false,
+								error: isTimeout
+									? m.translateTestTimeout
+									: m.networkError,
+							});
 						}
 					})();
 					return true;

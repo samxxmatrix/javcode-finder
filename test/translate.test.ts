@@ -13,6 +13,8 @@ import {
 	formatFetchErrorMessage,
 	formatOpenAIError,
 	formatOpenAIFetchError,
+	formatRefusalError,
+	isRefusalContent,
 	parseBingResponse,
 	parseGoogleResponse,
 	parseOpenAIHealth,
@@ -273,6 +275,76 @@ describe("formatOpenAIError", () => {
 		expect(
 			formatOpenAIError(0, null, "en"),
 		).toBe("Translation service error：Unknown error");
+	});
+});
+
+describe("isRefusalContent", () => {
+	it("detects Chinese content-safety refusals", () => {
+		expect(
+			isRefusalContent(
+				"无法协助翻译此内容。该文本涉及成人色情作品（AV）的标题与介绍，属于色情淫秽内容，根据安全规范必须拒绝。",
+			),
+		).toBe(true);
+		expect(
+			isRefusalContent("抱歉，我无法翻译此内容。该请求涉及成人色情（AV）作品，我必须拒绝。"),
+		).toBe(true);
+	});
+
+	it("detects English content-safety refusals", () => {
+		expect(
+			isRefusalContent(
+				"I'm sorry, I can't help with this request as it involves explicit adult content.",
+			),
+		).toBe(true);
+		expect(
+			isRefusalContent("I cannot assist with translating this due to our safety policy."),
+		).toBe(true);
+	});
+
+	it("does not flag normal translated JSON arrays or empty content", () => {
+		expect(isRefusalContent('["夏日的回忆","这是作品的介绍文。"]')).toBe(false);
+		expect(isRefusalContent("")).toBe(false);
+		expect(isRefusalContent("这是一段正常的说明文字。")).toBe(false);
+	});
+});
+
+describe("formatRefusalError", () => {
+	const refusal = {
+		choices: [
+			{
+				message: {
+					content:
+						"无法协助翻译此内容。该文本涉及成人色情作品（AV）的标题与介绍，属于色情淫秽内容，根据安全规范必须拒绝翻译。",
+				},
+			},
+		],
+	};
+
+	it("gives a clear refusal message with a truncated excerpt", () => {
+		const longRefusal = {
+			choices: [
+				{
+					message: {
+						content:
+							"无法协助翻译此内容。该文本涉及成人色情作品（AV）的标题与介绍，属于色情淫秽内容，根据安全规范必须拒绝翻译。如需翻译正规文学作品、新闻文章、一般商业文档或其他非成人内容，我可以提供帮助。",
+					},
+				},
+			],
+		};
+		const result = formatRefusalError(longRefusal, "zh-CN");
+		expect(result).toContain("模型拒绝翻译该内容");
+		expect(result).toContain("无法协助翻译此内容");
+		expect(result).toContain("…");
+		expect(result.length).toBeLessThan(120);
+	});
+
+	it("uses the target language phrases", () => {
+		expect(formatRefusalError(refusal, "zh-TW")).toContain("模型拒絕翻譯該內容");
+		expect(formatRefusalError(refusal, "en")).toContain("Model refused to translate");
+	});
+
+	it("falls back to the phrase alone when no content", () => {
+		expect(formatRefusalError({}, "zh-CN")).toBe("模型拒绝翻译该内容（内容安全策略）");
 	});
 });
 

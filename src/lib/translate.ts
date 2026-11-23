@@ -7,8 +7,8 @@
 
 export type TranslateTarget = "zh-CN" | "zh-TW" | "en";
 
-/** 备用翻译服务：谷歌（默认）或微软 Edge 内置接口 */
-export type FallbackService = "google" | "bing";
+/** 备用翻译服务：不使用（默认）、谷歌或微软 Edge 内置接口 */
+export type FallbackService = "none" | "google" | "bing";
 
 /** 错误文案短语表：按目标语言（界面为英文时翻译目标也为英文，故需英文文案） */
 const ERROR_PHRASES = {
@@ -19,6 +19,7 @@ const ERROR_PHRASES = {
 		timeout: "请求超时",
 		network: "网络连接失败",
 		unknown: "未知错误",
+		refusal: "模型拒绝翻译该内容（内容安全策略）",
 	},
 	"zh-TW": {
 		serviceError: "翻譯服務錯誤",
@@ -27,6 +28,7 @@ const ERROR_PHRASES = {
 		timeout: "請求超時",
 		network: "網路連線失敗",
 		unknown: "未知錯誤",
+		refusal: "模型拒絕翻譯該內容（內容安全策略）",
 	},
 	en: {
 		serviceError: "Translation service error",
@@ -35,6 +37,7 @@ const ERROR_PHRASES = {
 		timeout: "Request timed out",
 		network: "Network connection failed",
 		unknown: "Unknown error",
+		refusal: "Model refused to translate this content (safety policy)",
 	},
 } as const;
 
@@ -273,6 +276,63 @@ export function formatOpenAIError(
 		message = phrases.unknown;
 	}
 	return `${phrases.serviceError}：${message}`;
+}
+
+/**
+ * 检测模型回复是否为「内容安全拒答」而非译文。
+ * 拒答时 message.content 是一段自然语言说明（如「无法协助翻译此内容…色情淫秽…必须拒绝」
+ * 或英文 "I'm sorry, I can't help with..."），不是 JSON 数组，parseOpenAITranslation
+ * 会得到空数组；若不加识别会被误报成「翻译服务错误：HTTP 200」。
+ * 只在译文解析失败后才调用，命中任一特征即判为拒答。
+ */
+export function isRefusalContent(content: string): boolean {
+	const text = content.trim();
+	if (!text) return false;
+	const refusalPatterns = [
+		// 中文：无法协助/无法翻译/抱歉/必须拒绝/安全规范
+		/无法(协助|帮助|翻译|提供|处理)/,
+		/不能(协助|帮助|翻译|提供|处理)/,
+		/抱歉.{0,12}(无法|不能|拒绝)/,
+		/必须拒绝/,
+		/根据(安全|内容)规范/,
+		/涉及.{0,16}(色情|淫秽|成人|违规|敏感|不当)/,
+		/属于.{0,10}(色情|淫秽|成人|违规)/,
+		// 英文：I can't help / cannot assist / safety policy
+		/\b(?:I(?:'m| am)?\s*(?:sorry|afraid)|sorry)[^.!?]{0,80}\b(?:can't|cannot|can not|unable to|won't|will not)\b/i,
+		/\b(?:I\s+)?(?:can't|cannot|can not|unable to|won't|will not)\s+(?:assist|help|translate|provide|fulfill|comply)/i,
+		/\b(?:safety|content)\s+(?:policy|policies|guidelines|restrictions)/i,
+		/\bagainst\s+(?:my|the)\s+(?:guidelines|policy|values)/i,
+		/\badult(?:\s+content|\s+material| content)/i,
+		/\bexplicit\s+(?:content|material|sexual)/i,
+	];
+	return refusalPatterns.some((re) => re.test(text));
+}
+
+/**
+ * 从 OpenAI 兼容响应里取出 choices[0].message.content（非字符串返回空串）。
+ */
+function extractOpenAIContent(data: unknown): string {
+	const parsed = data as {
+		choices?: { message?: { content?: string } }[];
+	};
+	const content = parsed?.choices?.[0]?.message?.content;
+	return typeof content === "string" ? content : "";
+}
+
+/**
+ * 格式化「模型内容安全拒答」错误：给明确文案 + 截断的拒答原文，让用户知道
+ * 是内容被拦，而不是接口或网络故障。原文限长避免刷屏。
+ */
+export function formatRefusalError(
+	data: unknown,
+	target: TranslateTarget,
+): string {
+	const phrases = ERROR_PHRASES[target];
+	const raw = extractOpenAIContent(data).trim();
+	const excerpt = raw.length > 60 ? `${raw.slice(0, 60)}…` : raw;
+	return excerpt
+		? `${phrases.refusal}：${excerpt}`
+		: phrases.refusal;
 }
 
 /**

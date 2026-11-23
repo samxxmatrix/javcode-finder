@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_CODE_REGEX } from "../../../../src/lib/settings";
 import { ClearButton } from "../ClearButton";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { SecretField } from "./SecretField";
 import {
 	FieldError,
@@ -28,6 +29,10 @@ export function AdvancedSettingsPage() {
 	// 模型下拉（自定义 combobox）：输入 ≥3 字符时模糊过滤，否则列出全部
 	const [modelsOpen, setModelsOpen] = useState(false);
 	const modelSelectRef = useRef<HTMLDivElement>(null);
+	// 下拉搜索关键词：独立于 translateModel，避免搜索词被当成模型名落盘
+	const [searchQuery, setSearchQuery] = useState("");
+	// 手填模型名不在候选中时的待确认模型名
+	const [confirmModel, setConfirmModel] = useState<string | null>(null);
 
 	// 面板外点击或 Esc 收起；箭头按钮在 ref 内，不会被自己的 pointerdown 关掉
 	useEffect(() => {
@@ -40,6 +45,18 @@ export function AdvancedSettingsPage() {
 		document.addEventListener("pointerdown", onPointerDown);
 		return () => document.removeEventListener("pointerdown", onPointerDown);
 	}, [modelsOpen]);
+
+	// 模型可用性测试通过后：把 pending 模型名写入 translateModel（触发自动保存落盘），
+	// 清空待确认态与搜索词，关闭确认弹窗；出错时保留 confirmModel 供重试。
+	useEffect(() => {
+		if (d.translateTestStatus !== "success" || !d.pendingTranslateModel)
+			return;
+		d.setTranslateModel(d.pendingTranslateModel);
+		d.setPendingTranslateModel(null);
+		setConfirmModel(null);
+		setSearchQuery("");
+		setModelsOpen(false);
+	}, [d.translateTestStatus, d.pendingTranslateModel, d]);
 
 	const lookupConfigured = Boolean(d.apiUrl.trim() && d.apiKey.trim());
 	const embyConfigured = Boolean(d.embyUrl.trim() && d.embyApiKey.trim());
@@ -61,12 +78,16 @@ export function AdvancedSettingsPage() {
 		Boolean,
 	).length;
 
-	// 输入 ≥3 字符才过滤，避免手填模型名的前两字符就把列表缩空
-	const modelQuery = d.translateModel.trim().toLowerCase();
-	const visibleModels =
+	// 搜索关键词 ≥3 字符时启动模糊匹配；匹配项置顶显示，其余保留在下方
+	const modelQuery = searchQuery.trim().toLowerCase();
+	const matchedModels =
 		modelQuery.length >= 3
 			? d.translateModels.filter((m) => m.toLowerCase().includes(modelQuery))
-			: d.translateModels;
+			: [];
+	const otherModels = d.translateModels.filter(
+		(m) => !matchedModels.includes(m),
+	);
+	const hasSearch = modelQuery.length >= 3;
 
 	return (
 		<div className="settings-page">
@@ -411,10 +432,24 @@ export function AdvancedSettingsPage() {
 								<input
 									id="translate-model"
 									type="text"
-									className="settings-field__input settings-field__input--code"
-									value={d.translateModel}
-									onChange={(e) => d.setTranslateModel(e.target.value)}
-									placeholder={t.translateModelPlaceholder}
+									className={`settings-field__input settings-field__input--code${
+										!searchQuery.trim() &&
+										d.translateModel &&
+										d.translateModel === d.verifiedTranslateModel
+											? " is-verified"
+											: ""
+									}`}
+									value={searchQuery}
+									onChange={(e) => {
+										setSearchQuery(e.target.value);
+										// 输入时自动展开下拉，便于边搜边选
+										if (e.target.value.trim()) setModelsOpen(true);
+									}}
+									placeholder={
+										d.translateModel ||
+										d.pendingTranslateModel ||
+										t.translateModelPlaceholder
+									}
 									spellCheck={false}
 									autoComplete="off"
 									role="combobox"
@@ -422,8 +457,11 @@ export function AdvancedSettingsPage() {
 									aria-controls="translate-model-menu"
 								/>
 								<ClearButton
-									show={Boolean(d.translateModel)}
-									onClick={() => d.setTranslateModel("")}
+									show={Boolean(searchQuery.trim())}
+									onClick={() => {
+										setSearchQuery("");
+										setConfirmModel(null);
+									}}
 									title={t.clearInput}
 								/>
 								<button
@@ -437,6 +475,45 @@ export function AdvancedSettingsPage() {
 									<span aria-hidden="true">▾</span>
 								</button>
 							</div>
+							{d.translateTestStatus === "testing" ? (
+								<span className="settings-model-select__test-status">
+									测试中…
+								</span>
+							) : d.translateTestStatus === "success" ? (
+								<span className="settings-model-select__test-status settings-model-select__test-status--success">
+									测试成功
+								</span>
+							) : (
+								<button
+									type="button"
+									className="settings-model-select__test"
+									disabled={
+										!translateConfigured ||
+										!(
+											searchQuery.trim() ||
+											d.translateModel ||
+											d.pendingTranslateModel
+										)
+									}
+									onClick={() => {
+										const input =
+											(searchQuery.trim() ||
+												d.translateModel ||
+												d.pendingTranslateModel) ?? "";
+										if (!input) return;
+										if (d.translateModels.includes(input)) {
+											// 已在候选列表中：直接测试，无需确认
+											void d.testTranslateModel(input);
+										} else {
+											// 不在候选列表中：先弹确认框
+											setConfirmModel(input);
+										}
+									}}
+									title="测试模型是否可用"
+								>
+									测试
+								</button>
+							)}
 							{modelsOpen && (
 								<div
 									id="translate-model-menu"
@@ -451,34 +528,113 @@ export function AdvancedSettingsPage() {
 										<p className="settings-model-select__empty">
 											{t.translateModelsLoading}
 										</p>
-									) : visibleModels.length > 0 ? (
-										visibleModels.map((m) => (
-											<button
-												key={m}
-												type="button"
-												role="option"
-												aria-selected={d.translateModel === m}
-												className={`settings-model-select__option${
-													d.translateModel === m ? " is-selected" : ""
-												}`}
-												onClick={() => {
-													d.setTranslateModel(m);
-													setModelsOpen(false);
-												}}
-											>
-												{m}
-											</button>
-										))
-									) : (
+									) : hasSearch && matchedModels.length === 0 &&
+										d.translateModels.length > 0 ? (
 										<p className="settings-model-select__empty">
-											{modelQuery.length >= 3 && d.translateModels.length > 0
-												? t.translateModelsNoMatch
-												: t.translateModelsEmpty}
+											{t.translateModelsNoMatch}
 										</p>
+									) : (
+										<>
+											{matchedModels.map((m) => (
+												<button
+													key={m}
+													type="button"
+													role="option"
+													aria-selected={
+														d.translateModel === m ||
+														d.pendingTranslateModel === m
+													}
+													className={`settings-model-select__option${
+														d.translateModel === m ||
+														d.pendingTranslateModel === m
+															? " is-selected"
+															: ""
+													} ${
+														matchedModels.length > 0 &&
+														otherModels.length > 0
+															? " is-match"
+															: ""
+													}`}
+													onClick={() => {
+														d.setTranslateModel(m);
+														d.setPendingTranslateModel(null);
+														setSearchQuery("");
+														setConfirmModel(null);
+														setModelsOpen(false);
+													}}
+												>
+													{m}
+												</button>
+											))}
+											{matchedModels.length > 0 &&
+												otherModels.length > 0 && (
+													<div
+														role="separator"
+														aria-hidden="true"
+														className="settings-model-select__separator"
+														style={{
+															pointerEvents: "none",
+															userSelect: "none",
+														}}
+													/>
+												)}
+											{otherModels.map((m) => (
+												<button
+													key={m}
+													type="button"
+													role="option"
+													aria-selected={
+														d.translateModel === m ||
+														d.pendingTranslateModel === m
+													}
+													className={`settings-model-select__option${
+														d.translateModel === m ||
+														d.pendingTranslateModel === m
+															? " is-selected"
+															: ""
+													}`}
+													onClick={() => {
+														d.setTranslateModel(m);
+														d.setPendingTranslateModel(null);
+														setSearchQuery("");
+														setConfirmModel(null);
+														setModelsOpen(false);
+													}}
+												>
+													{m}
+												</button>
+											))}
+										</>
 									)}
 								</div>
 							)}
 						</div>
+						{d.translateTestStatus === "error" && d.translateTestMessage && (
+							<FieldError
+								text={`连接失败：${d.translateTestMessage}`}
+								onDismiss={() => {
+									d.setTranslateTestStatus("idle");
+									d.setTranslateTestMessage(null);
+								}}
+								closeLabel={t.closeError}
+							/>
+						)}
+						{confirmModel && (
+							<ConfirmDialog
+								open
+								title={
+									`"${confirmModel}" 不在候选模型中，请确认是否使用该模型？`
+								}
+								confirmLabel="测试"
+								cancelLabel="取消"
+								confirmVariant="primary"
+								onConfirm={() => {
+									setConfirmModel(null);
+									void d.testTranslateModel(confirmModel);
+								}}
+								onCancel={() => setConfirmModel(null)}
+							/>
+						)}
 					</div>
 				</ServiceRow>
 			</SettingsSection>

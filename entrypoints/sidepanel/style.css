@@ -1019,15 +1019,84 @@ button:focus-visible {
    面板 left/right 都贴容器，宽度恒等于输入框；点箭头始终渲染全部选项。 */
 .settings-model-select {
 	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.settings-field__input-wrap {
+	flex: 1;
+	min-width: 0;
+	position: relative;
 }
 
 .settings-model-select .settings-field__input {
-	padding-right: 52px;
+	width: 100%;
+	padding-right: 30px;
 }
 
-/* 清除按钮让位给最右侧的展开箭头 */
+/* 清除按钮与展开箭头分开：箭头贴最右，清除按钮在其左侧 */
 .settings-model-select .settings-field__clear {
 	right: 28px;
+}
+
+/* 模型名以占位字显示：未验证=白字，测试通过=金色字（占位字与边框同色提示） */
+.settings-model-select .settings-field__input::placeholder {
+	color: var(--text-primary);
+	opacity: 0.85;
+}
+
+.settings-model-select .settings-field__input.is-verified::placeholder {
+	color: var(--accent-gold);
+}
+
+.settings-model-select .settings-field__input.is-verified {
+	border-color: var(--accent-gold);
+}
+
+.settings-model-select__test {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 26px;
+	border: 1px solid var(--border-strong);
+	border-radius: 4px;
+	background: var(--bg-surface-hover);
+	color: var(--text-primary);
+	font-size: 11px;
+	line-height: 1;
+	cursor: pointer;
+	transition: all 0.15s ease;
+	flex-shrink: 0;
+}
+
+.settings-model-select__test:hover:not(:disabled) {
+	border-color: var(--accent-gold);
+	color: var(--accent-gold);
+	background: var(--bg-surface);
+}
+
+.settings-model-select__test:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* 测试按钮位置的状态文本（测试中/测试成功时替代按钮显示） */
+.settings-model-select__test-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 26px;
+	font-size: 11px;
+	color: var(--text-muted);
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+.settings-model-select__test-status--success {
+	color: var(--accent-gold);
 }
 
 .settings-model-select__toggle {
@@ -1059,8 +1128,9 @@ button:focus-visible {
 	position: absolute;
 	top: calc(100% + 4px);
 	left: 0;
-	right: 0;
-	width: 100%;
+	/* 与输入框等宽：容器宽度 - 测试按钮(40px) - 间隙(8px) */
+	width: calc(100% - 48px);
+	right: auto;
 	box-sizing: border-box;
 	max-height: 220px;
 	overflow-y: auto;
@@ -1105,6 +1175,17 @@ button:focus-visible {
 
 .settings-model-select__error {
 	color: var(--status-error, #ef4444);
+}
+
+.settings-model-select__separator {
+	height: 1px;
+	background-color: var(--border-subtle);
+	margin: 6px 0;
+}
+
+.settings-model-select__option.is-match {
+	font-weight: 600;
+	color: var(--accent-gold);
 }
 
 .settings-field__reset-link:disabled {

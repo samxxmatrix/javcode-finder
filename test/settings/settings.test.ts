@@ -274,7 +274,7 @@ describe("settings", () => {
 	});
 
 	it("translate worker settings default off with empty URL and can be saved", () => {
-		// 默认：开关关闭、地址为空（关闭时直接用谷歌翻译）
+		// 默认：开关关闭、地址为空、兜底服务为「不使用」（即不翻译）
 		expect(DEFAULT_SETTINGS.translateEnabled).toBe(false);
 		expect(DEFAULT_SETTINGS.translateApiUrl).toBe("");
 		expect(getSettings().translateEnabled).toBe(false);
@@ -404,16 +404,21 @@ describe("settings", () => {
 			expect(getSettings().fallbackService).toBe("bing");
 		});
 
-		it("saves bing and google, sanitising unknown values to google", () => {
-			saveSettings({ fallbackService: "bing" });
-			expect(getSettings().fallbackService).toBe("bing");
+	it("saves none/bing/google, sanitising unknown values to none", () => {
+		expect(DEFAULT_SETTINGS.fallbackService).toBe("none");
 
-			saveSettings({ fallbackService: "google" });
-			expect(getSettings().fallbackService).toBe("google");
+		saveSettings({ fallbackService: "none" });
+		expect(getSettings().fallbackService).toBe("none");
 
-			saveSettings({ fallbackService: "bogus" as unknown as FallbackService });
-			expect(getSettings().fallbackService).toBe("google");
-		});
+		saveSettings({ fallbackService: "bing" });
+		expect(getSettings().fallbackService).toBe("bing");
+
+		saveSettings({ fallbackService: "google" });
+		expect(getSettings().fallbackService).toBe("google");
+
+		saveSettings({ fallbackService: "bogus" as unknown as FallbackService });
+		expect(getSettings().fallbackService).toBe("none");
+	});
 
 		it("round-trips the Emby fields without touching the fallback service", () => {
 			saveSettings({ fallbackService: "bing" });
@@ -512,6 +517,7 @@ describe("settings", () => {
 			{ previewVolume: 50 },
 			{ translateApiKey: "key" },
 			{ translateModel: "gpt-4o-mini" },
+			{ verifiedTranslateModel: "gpt-4o-mini" },
 			{ translateApiUrl: "https://translate.example/" },
 				{ translateEnabled: true },
 				{ fallbackService: "bing" },

@@ -126,6 +126,14 @@ export function BasicSettingsPage({
 						<button
 							type="button"
 							className="settings-field__segment-btn"
+							aria-pressed={d.fallbackService === "none"}
+							onClick={() => d.setFallbackService("none")}
+						>
+							{t.fallbackNone}
+						</button>
+						<button
+							type="button"
+							className="settings-field__segment-btn"
 							aria-pressed={d.fallbackService === "google"}
 							onClick={() => d.setFallbackService("google")}
 						>

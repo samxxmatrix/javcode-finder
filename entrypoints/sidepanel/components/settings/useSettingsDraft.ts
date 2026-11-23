@@ -84,10 +84,21 @@ export function useSettingsDraft({
 	// 自建翻译服务（OpenAI 兼容）：地址、模型与开关（默认关闭 = 纯备用服务模式）
 	const [translateUrl, setTranslateUrl] = useState("");
 	const [translateModel, setTranslateModel] = useState("");
+	// 最近一次测试通过的模型名：仅驱动输入框金色高亮，与 translateModel 分开存以便重启后保留
+	const [verifiedTranslateModel, setVerifiedTranslateModel] = useState("");
+	// 手填但尚未确认/测试通过的模型名：不写入 translateModel，避免自动保存把未经验证的名落盘
+	const [pendingTranslateModel, setPendingTranslateModel] = useState<string | null>(null);
+	// 模型可用性测试状态：idle / testing / success / error
+	const [translateTestStatus, setTranslateTestStatus] = useState<
+		"idle" | "testing" | "success" | "error"
+	>("idle");
+	const [translateTestMessage, setTranslateTestMessage] = useState<string | null>(
+		null,
+	);
 	const [translateEnabled, setTranslateEnabled] = useState(false);
-	// 备用翻译服务：自建服务未配置或调用失败时的兜底（默认谷歌）
+	// 备用翻译服务：自建服务未配置或调用失败时的兜底（默认不使用）
 	const [fallbackService, setFallbackService] =
-		useState<FallbackService>("google");
+		useState<FallbackService>("none");
 	// /v1/models 拉到的模型列表（下拉框用）；空 = 拉取失败，退回手填
 	const [translateModels, setTranslateModels] = useState<string[]>([]);
 	const [translateModelsLoading, setTranslateModelsLoading] = useState(false);
@@ -243,6 +254,49 @@ export function useSettingsDraft({
 			force: true,
 			autoSelect: true,
 		});
+
+	/**
+	 * 测试手填模型名是否可用：向 /v1/chat/completions 发极简请求，
+	 * 能收到响应即视为模型可调用；成功后由调用方决定是否写入 translateModel 并落盘。
+	 */
+	const testTranslateModel = async (model: string) => {
+		const url = translateUrl.trim();
+		const key = translateApiKey.trim();
+		const trimmed = model.trim();
+		if (!url || !key || !trimmed) {
+			setTranslateTestStatus("error");
+			setTranslateTestMessage(t.translateApiIncomplete);
+			return;
+		}
+		setPendingTranslateModel(trimmed);
+		setTranslateTestStatus("testing");
+		setTranslateTestMessage(null);
+		try {
+			const res = (await browser.runtime.sendMessage({
+				type: "jt:test-translate-model",
+				translateApiKey: key,
+				translateUrl: url,
+				translateModel: model.trim(),
+				locale,
+			})) as { ok?: boolean; error?: string } | undefined;
+			if (res?.ok) {
+				// 测试通过：记录已验证模型名，随自动保存落盘（重启后金色仍在）
+				setVerifiedTranslateModel(trimmed);
+				setTranslateTestStatus("success");
+				setTranslateTestMessage(t.translateTestSuccess);
+				// 成功提示展示 1 秒后自动回到 idle，让测试按钮恢复可点击
+				setTimeout(() => setTranslateTestStatus("idle"), 1000);
+			} else {
+				setTranslateTestStatus("error");
+				setTranslateTestMessage(
+					res?.error || t.translateTestFailed,
+				);
+			}
+		} catch {
+			setTranslateTestStatus("error");
+			setTranslateTestMessage(t.networkError);
+		}
+	};
 
 	// 启用开关：打开时先验证接口 /v1/models，成功再拉模型列表；
 	// 验证失败回弹关闭并显示可关闭的错误信息行
@@ -645,6 +699,7 @@ export function useSettingsDraft({
 		setCustomTemplate(current.customTemplate);
 		setTranslateApiKey(current.translateApiKey);
 		setTranslateModel(current.translateModel);
+		setVerifiedTranslateModel(current.verifiedTranslateModel);
 		setTranslateUrl(current.translateApiUrl);
 		setTranslateEnabled(current.translateEnabled);
 		setFallbackService(current.fallbackService);
@@ -684,6 +739,7 @@ export function useSettingsDraft({
 		previewVolume,
 		translateApiKey,
 		translateModel,
+		verifiedTranslateModel,
 		translateApiUrl: translateUrl,
 		translateEnabled,
 		fallbackService,
@@ -957,6 +1013,7 @@ export function useSettingsDraft({
 		setCustomTemplate("");
 		setTranslateApiKey("");
 		setTranslateModel("");
+		setVerifiedTranslateModel("");
 		setTranslateUrl("");
 		setTranslateEnabled(false);
 		modelsSig.current = null;
@@ -1164,6 +1221,7 @@ export function useSettingsDraft({
 		customTemplate,
 		translateApiKey,
 		translateModel,
+		verifiedTranslateModel,
 		translateUrl,
 		translateEnabled,
 		fallbackService,
@@ -1206,6 +1264,9 @@ export function useSettingsDraft({
 		codeExcludeRegex,
 		codeExcludeRegexError,
 		previewVolume,
+		pendingTranslateModel,
+		translateTestStatus,
+		translateTestMessage,
 		saveState,
 		// setter
 		setSupjav,
@@ -1216,6 +1277,10 @@ export function useSettingsDraft({
 		setCustomTemplate,
 		setTranslateApiKey,
 		setTranslateModel,
+		setVerifiedTranslateModel,
+		setPendingTranslateModel,
+		setTranslateTestStatus,
+		setTranslateTestMessage,
 		setTranslateUrl,
 		setFallbackService,
 		setTranslateVerifyError,
@@ -1237,6 +1302,7 @@ export function useSettingsDraft({
 		handleToggleTranslate,
 		fetchTranslateModels,
 		refreshTranslateModels,
+		testTranslateModel,
 		handleToggleLookup,
 		handleToggleEmby,
 		handleToggleEmbyDropFavorites,

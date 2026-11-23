@@ -120,7 +120,12 @@ export interface LocaleMessages {
 	translateModelsLoading: string;
 	translateModelsEmpty: string;
 	translateModelsNoMatch: string;
+	translateTestSuccess: string;
+	translateTestFailed: string;
+	/** 模型测试超时：上游响应过慢，区别于本地网络故障 */
+	translateTestTimeout: string;
 	fallbackServiceLabel: string;
+	fallbackNone: string;
 	fallbackGoogle: string;
 	fallbackBing: string;
 	translateApiIncomplete: string;
@@ -330,7 +335,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateModelsLoading: "加载模型中…",
     translateModelsEmpty: "未获取到模型列表，可手动输入",
     translateModelsNoMatch: "无匹配模型",
+    translateTestSuccess: "连接成功",
+    translateTestFailed: "连接失败",
+    translateTestTimeout: "连接超时，服务端响应过慢",
     fallbackServiceLabel: "备用翻译服务",
+    fallbackNone: "不使用",
     fallbackGoogle: "谷歌翻译",
     fallbackBing: "微软翻译",
     translateApiIncomplete: "翻译 API 地址和 Key 均需填写",
@@ -549,7 +558,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateModelsLoading: "載入模型中…",
     translateModelsEmpty: "未獲取到模型清單，可手動輸入",
     translateModelsNoMatch: "無符合模型",
+    translateTestSuccess: "連接成功",
+    translateTestFailed: "連接失敗",
+    translateTestTimeout: "連線逾時，伺服器回應過慢",
     fallbackServiceLabel: "備用翻譯服務",
+    fallbackNone: "不使用",
     fallbackGoogle: "谷歌翻譯",
     fallbackBing: "微軟翻譯",
     translateApiIncomplete: "翻譯 API 地址和 Key 均需填寫",
@@ -772,7 +785,11 @@ export const messages: Record<SupportedLocale, LocaleMessages> = {
     translateModelsLoading: "Loading models…",
     translateModelsEmpty: "No models fetched; type manually",
     translateModelsNoMatch: "No matching models",
+    translateTestSuccess: "Connected",
+    translateTestFailed: "Connection failed",
+    translateTestTimeout: "Connection timed out — server responded too slowly",
     fallbackServiceLabel: "Fallback translation service",
+    fallbackNone: "None",
     fallbackGoogle: "Google Translate",
     fallbackBing: "Microsoft Translate",
     translateApiIncomplete: "Translation API URL and Key are both required",
